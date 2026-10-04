@@ -1,0 +1,94 @@
+// Frosted structural material; controls belong to their surrounding surface.
+:root {
+  --glass-edge: rgba(45, 45, 48, .09);
+  --glass-highlight: rgba(255, 255, 255, .58);
+  --glass-ambient: rgba(255, 255, 255, .34);
+  --glass-warm: rgba(145, 145, 150, .10);
+  --surface-card: rgba(255, 255, 255, .22);
+  --surface-subtle: rgba(110, 110, 115, .035);
+  --surface-hover: rgba(65, 65, 70, .065);
+  --surface-selected: rgba(255, 255, 255, .60);
+  --song-selected-background: rgba(130, 130, 140, .07);
+  --song-selected-highlight: rgba(255, 255, 255, .18);
+  --song-selected-edge: rgba(45, 45, 48, .035);
+  --song-selected-sheen: rgba(255, 255, 255, .055);
+  --surface-popup: rgba(247, 247, 249, .94);
+  --surface-shadow: 0 8px 24px rgba(35, 35, 40, .09);
+  --glass-reflection: rgba(255, 255, 255, .32);
+  --frost-grain: .38;
+  --control-rest: rgba(255, 255, 255, .12);
+  --control-well: rgba(50, 50, 55, .055);
+  --control-active: rgba(255, 255, 255, .55);
+  --control-ink: #555558;
+  --control-outline: rgba(65, 65, 70, .27);
+  --control-hover: rgba(255, 255, 255, .48);
+}
+:root.dark {
+  --glass-edge: rgba(0, 0, 0, .22);
+  --glass-highlight: rgba(255, 255, 255, .085);
+  --glass-ambient: rgba(122, 122, 128, .13);
+  --glass-warm: rgba(0, 0, 0, .15);
+  --surface-card: rgba(240, 240, 245, .025);
+  --surface-subtle: rgba(240, 240, 245, .025);
+  --surface-hover: rgba(240, 240, 245, .065);
+  --surface-selected: rgba(240, 240, 245, .11);
+  --song-selected-background: rgba(225, 225, 235, .055);
+  --song-selected-highlight: rgba(255, 255, 255, .045);
+  --song-selected-edge: rgba(255, 255, 255, .025);
+  --song-selected-sheen: rgba(255, 255, 255, .012);
+  --surface-popup: rgba(47, 47, 50, .96);
+  --surface-shadow: 0 8px 24px rgba(0, 0, 0, .13);
+  --glass-reflection: rgba(255, 255, 255, .07);
+  --frost-grain: .3;
+  --control-rest: rgba(245, 245, 250, .025);
+  --control-well: rgba(0, 0, 0, .13);
+  --control-active: rgba(245, 245, 250, .10);
+  --control-ink: #ceced2;
+  --control-outline: rgba(220, 220, 225, .28);
+  --control-hover: rgba(240, 240, 245, .10);
+}
+[data-glass] {
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: -1;
+    background: url('../images/frost-grain.svg') repeat;
+    opacity: var(--frost-grain);
+    mix-blend-mode: soft-light;
+  }
+}
+.page-toolbar {
+  padding: 10px 22px;
+  min-height: 52px;
+  gap: 12px;
+  align-items: center;
+  box-sizing: border-box;
+  border-bottom: 0;
+  background: transparent;
+}
+// Keep virtual list row dimensions unchanged.
+.list-header { background: var(--surface-subtle); }
+.list .list-item:hover { background-color: var(--surface-hover); }
+.list .list-item {
+  border-radius: 12px;
+  transition: background-color .16s ease, box-shadow .18s ease;
+}
+.list .list-item.selected, .list .list-item.active, .list .list-item[data-current-song] {
+  background-color: var(--song-selected-background);
+  background-image: linear-gradient(180deg, var(--song-selected-sheen), transparent);
+  box-shadow: inset 0 1px 0 var(--song-selected-highlight), inset 0 0 0 1px var(--song-selected-edge);
+}
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  background-color: var(--color-primary-alpha-800);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-glass]::after { transition: none; }
+}

@@ -1,0 +1,33 @@
+// One interaction language for toolbar, list, settings and playback controls.
+:root {
+  --control-ease: cubic-bezier(.2, .8, .2, 1);
+  --control-raised-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 var(--glass-edge), 0 1px 3px var(--glass-edge);
+  --control-face: linear-gradient(180deg, var(--control-rest), transparent);
+  --control-radius: 12px;
+  --control-item-radius: 10px;
+  --control-pressed-shadow: inset 0 1px 3px var(--glass-edge);
+}
+#root :is(button, [role='button'], [role='tab'], [data-ui-control]):not([data-player-cover]):not([data-native-window-control]) {
+  transform-origin: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .14s ease, color .14s ease, box-shadow .16s ease, scale .18s var(--control-ease);
+  &:hover:not(:disabled):not([disabled]):not([aria-disabled='true']) { background-color: var(--control-hover); }
+  &:active:not(:disabled):not([disabled]):not([aria-disabled='true']) {
+    scale: .97;
+    background-color: var(--control-well);
+    box-shadow: var(--control-pressed-shadow);
+    transition-duration: .07s;
+  }
+  &:focus-visible { outline: 2px solid var(--control-ink); outline-offset: 2px; }
+  &:disabled, &[aria-disabled='true'] { cursor: default; scale: none; }
+}
+#root [data-ui-control] { border-radius: var(--control-item-radius); }
+#root button:not([data-player-cover]):not([data-native-window-control]):not([data-round-control]) { border-radius: var(--control-item-radius); }
+#root button[data-round-control] { border-radius: var(--control-radius); }
+#root:has(#container.reduce-control-motion) {
+  :is(button, [role='button'], [role='tab'], [data-ui-control]) { transition: none !important; scale: none !important; }
+  [data-volume-panel], [data-footer-volume] input::-webkit-slider-thumb { transition: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #root :is(button, [role='button'], [role='tab'], [data-ui-control]) { transition: none !important; scale: none !important; }
+}

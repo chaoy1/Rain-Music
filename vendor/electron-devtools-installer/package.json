@@ -1,0 +1,43 @@
+{
+  "name": "electron-devtools-installer",
+  "version": "0.0.0-development",
+  "description": "An easy way to install Dev Tools extensions into Electron applications",
+  "main": "dist/index.js",
+  "scripts": {
+    "prettier:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "prettier:write": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "compile": "tsc",
+    "pretest-unit": "npm run compile",
+    "test": "npm run prettier:check && npm run test-unit",
+    "test-unit": "electron-mocha ./test/**/*_spec.ts --recursive --require ts-node/register --timeout 60000 -R spec-xunit-file -r test/setup.ts"
+  },
+  "keywords": [
+    "electron",
+    "dev",
+    "tools"
+  ],
+  "author": {
+    "name": "Samuel Attard",
+    "email": "samuel.r.attard@gmail.com",
+    "url": "https://www.samuelattard.com"
+  },
+  "bugs": {
+    "url": "https://github.com/MarshallOfSound/electron-devtools-installer/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MarshallOfSound/electron-devtools-installer.git"
+  },
+  "dependencies": {
+    "rimraf": "^3.0.2",
+    "semver": "^7.6.2",
+    "tslib": "^2.6.3",
+    "unzip-crx-3": "^0.2.0"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist"
+  ]
+}

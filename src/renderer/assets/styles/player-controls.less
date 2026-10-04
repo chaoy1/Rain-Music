@@ -1,0 +1,32 @@
+.playBtnContent {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 3px 4px;
+  gap: 2px;
+  border-radius: 13px;
+  background: var(--control-well);
+}
+.playBtn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-font);
+  cursor: pointer;
+  transition: background-color .16s ease, transform .16s ease;
+  svg { width: 18px; height: 18px; fill: currentColor; opacity: .8; }
+  &:nth-child(2) {
+    width: 36px;
+    svg { width: 20px; height: 20px; opacity: 1; }
+  }
+  &:hover { background: var(--control-hover); }
+  &:active { background: var(--surface-hover); transform: scale(.94); }
+  &:focus-visible { outline: 2px solid var(--control-ink); outline-offset: 2px; }
+}
