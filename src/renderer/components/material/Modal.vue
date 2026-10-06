@@ -26,6 +26,7 @@ import { getRandom } from '@common/utils/common'
 import { nextTick } from '@common/utils/vueTools'
 
 let modalCount = 0
+const modalRoots = new Map()
 export default {
   props: {
     show: {
@@ -144,6 +145,8 @@ export default {
       showContent: false,
       modalCount: false,
       isAddedClass: false,
+      modalRoot: null,
+      isUnmounted: false,
       // ai: 0,
     }
   },
@@ -171,7 +174,8 @@ export default {
     this.setRandomAnimation()
   },
   beforeUnmount() {
-    this.removeClass()
+    this.isUnmounted = true
+    this.handleShowChange(false)
   },
   methods: {
     handleShowChange(val) {
@@ -181,25 +185,38 @@ export default {
         //   // dom.t
         // }
         this.setRandomAnimation()
-        this.modalCount = ++modalCount
+        if (!this.modalCount) this.modalCount = ++modalCount
         this.showModal = true
         void nextTick(() => {
-          const node = this.$refs.dom_container.parentNode
-          if (!node.classList.contains('show-modal')) {
-            node.classList.add('show-modal')
-            this.isAddedClass = true
-          }
+          if (this.isUnmounted || !this.show || !this.modalCount) return
+          const node = this.$refs.dom_container?.parentNode
+          if (!node) return
+          const owners = modalRoots.get(node) ?? new Set()
+          owners.add(this)
+          modalRoots.set(node, owners)
+          this.modalRoot = node
+          node.classList.add('show-modal')
+          this.isAddedClass = true
           this.showContent = true
         })
       } else {
-        if (modalCount > 0) this.modalCount = --modalCount
+        if (this.modalCount && modalCount > 0) --modalCount
+        this.modalCount = false
         this.removeClass()
         this.showContent = false
       }
     },
     removeClass() {
-      if (!this.isAddedClass) return
-      this.$refs.dom_container?.parentNode.classList.remove('show-modal')
+      const node = this.modalRoot
+      if (!node) return
+      const owners = modalRoots.get(node)
+      owners?.delete(this)
+      if (!owners?.size) {
+        node.classList.remove('show-modal')
+        modalRoots.delete(node)
+      }
+      this.modalRoot = null
+      this.isAddedClass = false
     },
     setRandomAnimation() {
       // common.randomAnimate 设置项已移除，行为固定为「使用随机弹出动画」。
@@ -217,7 +234,7 @@ export default {
     },
     handleAfterLeave(event) {
       this.$emit('after-leave', event)
-      this.showModal = false
+      if (!this.showContent) this.showModal = false
     },
   },
 }
