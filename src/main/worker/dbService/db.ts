@@ -35,7 +35,7 @@ export const init = (rainDataPath: string): boolean | null => {
       })
     } catch (error) {
       console.log(error)
-      dbFileExists = false
+      return null
     }
   }
 
@@ -45,14 +45,19 @@ export const init = (rainDataPath: string): boolean | null => {
     })
     initTables(db)
   }
-  db.pragma('journal_mode = WAL')
-
-  if (dbFileExists) migrateData(db)
-
-  // https://www.sqlite.org/pragma.html#pragma_optimize
-  if (dbFileExists) db.exec('PRAGMA optimize;')
-  if (!verifyDB(db)) {
+  try {
+    db.pragma('journal_mode = WAL')
+    if (dbFileExists) migrateData(db)
+    // https://www.sqlite.org/pragma.html#pragma_optimize
+    if (dbFileExists) db.exec('PRAGMA optimize;')
+    if (!verifyDB(db)) {
+      db.close()
+      return null
+    }
+  } catch (error) {
+    console.log(error)
     db.close()
+    if (!dbFileExists) throw error
     return null
   }
 

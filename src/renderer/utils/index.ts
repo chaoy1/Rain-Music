@@ -43,15 +43,6 @@ export const setTitle = (title: string | null) => {
 }
 
 
-// export const getProxyInfo = () => {
-//   return proxy.enable && proxy.host
-//     ? `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`
-//     : proxy.envProxy
-//       ? `http://${proxy.envProxy.host}:${proxy.envProxy.port}`
-//       : undefined
-// }
-
-
 export const getFontSizeWithScreen = (screenWidth: number = window.innerWidth): number => {
   return screenWidth <= 1440
     ? 16

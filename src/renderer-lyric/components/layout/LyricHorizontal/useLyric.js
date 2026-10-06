@@ -3,7 +3,7 @@ import { scrollTo } from '@common/utils/renderer'
 import { lyric } from '@lyric/store/lyric'
 import { isPlay, setting } from '@lyric/store/state'
 import { setWindowBounds, setWindowResizeable } from '@lyric/utils/ipc'
-import { isWin } from '@common/utils'
+import { isWin } from '@lyric/utils/platform'
 
 const getOffsetTop = (contentHeight, lineHeight) => {
   switch (setting['desktopLyric.scrollAlign']) {
@@ -87,7 +87,6 @@ export default (isComputeHeight) => {
       winEvent.msDownY = y
       winEvent.windowW = window.innerWidth
       winEvent.windowH = window.innerHeight
-      // 上游 issue #2244
       if (isWin) setWindowResizeable(false)
     }
   }
@@ -116,7 +115,6 @@ export default (isComputeHeight) => {
       dom_lyric.value.scrollTop = msDownScrollY + msDownY - y
       startLyricScrollTimeout()
     } else if (winEvent.isMsDown) {
-      // 上游 issue #2244
       if (isWin) {
         setWindowBounds({
           x: x - winEvent.msDownX,
@@ -187,7 +185,7 @@ export default (isComputeHeight) => {
 
   let delayScrollTimeout
   const scrollLine = (line, oldLine) => {
-    setImmediate(() => {
+    window.setTimeout(() => {
       prevActiveLine = line
     })
     if (line < 0 || !lyric.lines.length) return

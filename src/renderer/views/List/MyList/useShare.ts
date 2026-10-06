@@ -3,9 +3,10 @@ import { openSaveDir, showSelectDialog } from '@renderer/utils/ipc'
 import { useI18n } from '@renderer/plugins/i18n'
 import { filterFileName, toNewMusicInfo, fixNewMusicInfoQuality, filterMusicList } from '@renderer/utils'
 import { getListMusics, updateUserList, addListMusics, overwriteListMusics, createUserList } from '@renderer/store/list/action'
-import { defaultList, loveList, userLists } from '@renderer/store/list/state'
+import { defaultList, userLists } from '@renderer/store/list/state'
 import useImportTip from '@renderer/utils/compositions/useImportTip'
 import { dialog } from '@renderer/plugins/Dialog'
+import { LEGACY_LOVE_LIST_ID } from '@common/constants'
 
 
 export default () => {
@@ -58,7 +59,10 @@ export default () => {
           return
       }
 
-      const targetList = [defaultList, loveList, ...userLists].find(l => l.id == listData.id)
+      // 内置「我的收藏」列表已删除：旧列表文件里的收藏条目直接忽略，不还原成自建歌单
+      if (listData.id === LEGACY_LOVE_LIST_ID) return
+
+      const targetList = [defaultList, ...userLists].find(l => l.id == listData.id)
       if (targetList) {
         const confirm = await dialog.confirm({
           message: t('lists__import_part_confirm', { importName: listData.name, localName: targetList.name }),
@@ -69,7 +73,6 @@ export default () => {
           listData.name = targetList.name
           switch (listData.id) {
             case defaultList.id:
-            case loveList.id:
               break
             default:
               void updateUserList([

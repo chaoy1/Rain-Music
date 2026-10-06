@@ -1,6 +1,5 @@
 import { compareVer } from './index'
 import {
-  TRAY_AUTO_ID,
   DEFAULT_THEME_ID,
   THEME_LIGHT_ID,
   THEME_DARK_ID,
@@ -30,18 +29,12 @@ export default (setting: any): Partial<Rain.AppSetting> => {
 
   // 迁移 v2.0.0 之前的配置
   if (compareVer(setting.version, '2.0.0') < 0) {
-    // 迁移列表滚动位置设置 ~0.18.3
-    if (setting.list?.scroll) {
-      let scroll = setting.list.scroll
-      setting.list.isSaveScrollLocation &&= scroll.enable
-      delete setting.list.scroll
-    }
+    // 列表设置项已全部移除（行为固定），不再迁移 list.* 下的旧键
+    // （旧配置里的 list 对象即使保留也不会再被读取）
 
-    // 修正拼写问题 v1.8.2 及以前
-    if (setting.player?.isShowLyricTransition != null) {
-      setting.player.isShowLyricTranslation = setting.player.isShowLyricTransition
-      delete setting.player.isShowLyricTransition
-    }
+    // 拼写修正 v1.8.2 及以前：
+    // 原本把旧的 player.isShowLyricTransition 并入 player.isShowLyricTranslation，
+    // 但该设置项已移除（行为固定为显示歌词翻译），因此不再做这项迁移。
 
     // 迁移v1.19.0之前的主题设置
     if (setting.themeId != null) {
@@ -54,41 +47,22 @@ export default (setting: any): Partial<Rain.AppSetting> => {
     if (setting.tray?.isShow != null) setting.tray.enable = setting.tray?.isShow
 
     setting['common.windowSizeId'] = setting.windowSizeId
-    setting['common.startInFullscreen'] = setting.startInFullscreen
     setting['common.langId'] = setting.langId
     setting['common.apiSource'] = setting.apiSource
-    setting['common.sourceNameType'] = setting.sourceNameType
-    setting['common.font'] = setting.font
-    setting['common.isShowAnimation'] = setting.isShowAnimation
-    setting['common.randomAnimate'] = setting.randomAnimate
     setting['common.isAgreePact'] = setting.isAgreePact
-    setting['common.controlBtnPosition'] = setting.controlBtnPosition
 
     setting['player.togglePlayMethod'] = setting.player?.togglePlayMethod
-    setting['player.isShowTaskProgess'] = setting.player?.isShowTaskProgess
     setting['player.volume'] = setting.player?.volume
     setting['player.isMute'] = setting.player?.isMute
     setting['player.mediaDeviceId'] = setting.player?.mediaDeviceId
-    setting['player.isMediaDeviceRemovedStopPlay'] = setting.player?.isMediaDeviceRemovedStopPlay
-    setting['player.isShowLyricTranslation'] = setting.player?.isShowLyricTranslation
-    setting['player.isShowLyricRoma'] = setting.player?.isShowLyricRoma
-    setting['player.isS2t'] = setting.player?.isS2t
-    // 注意：右侧是旧版配置里实际存储的键名，属于历史数据格式，不能随品牌重命名
-    setting['player.isPlayRainlrc'] = setting.player?.isPlayLxlrc
-    setting['player.isSavePlayTime'] = setting.player?.isSavePlayTime
     setting['player.audioVisualization'] = setting.player?.audioVisualization
     setting['player.waitPlayEndStop'] = setting.player?.waitPlayEndStop
     setting['player.waitPlayEndStopTime'] = setting.player?.waitPlayEndStopTime
-    setting['player.autoSkipOnError'] = setting.player?.autoSkipOnError
 
-    setting['playDetail.isZoomActiveLrc'] = setting.playDetail?.isZoomActiveLrc
-    setting['playDetail.isShowLyricProgressSetting'] = setting.playDetail?.isShowLyricProgressSetting
     setting['playDetail.style.fontSize'] = setting.playDetail?.style?.fontSize
-    setting['playDetail.style.align'] = setting.playDetail?.style?.align
 
     setting['desktopLyric.enable'] = setting.desktopLyric?.enable
     setting['desktopLyric.isLock'] = setting.desktopLyric?.isLock
-    setting['desktopLyric.isAlwaysOnTop'] = setting.desktopLyric?.isAlwaysOnTop
     setting['desktopLyric.isAlwaysOnTopLoop'] = setting.desktopLyric?.isAlwaysOnTopLoop
     setting['desktopLyric.width'] = setting.desktopLyric?.width
     setting['desktopLyric.height'] = setting.desktopLyric?.height
@@ -102,62 +76,22 @@ export default (setting: any): Partial<Rain.AppSetting> => {
     setting['desktopLyric.style.opacity'] = setting.desktopLyric?.style?.opacity
     setting['desktopLyric.style.isZoomActiveLrc'] = setting.desktopLyric?.style?.isZoomActiveLrc
 
-    setting['list.isClickPlayList'] = setting.list?.isClickPlayList
-    setting['list.isShowAlbumName'] = setting.list?.isShowAlbumName
-    setting['list.isShowSource'] = setting.list?.isShowSource
-    setting['list.isSaveScrollLocation'] = setting.list?.isSaveScrollLocation
-    setting['list.addMusicLocationType'] = setting.list?.addMusicLocationType
-
     setting['download.enable'] = setting.download?.enable
     setting['download.savePath'] = setting.download?.savePath
-    setting['download.fileName'] = setting.download?.fileName
-    setting['download.maxDownloadNum'] = setting.download?.maxDownloadNum
-    setting['download.isDownloadLrc'] = setting.download?.isDownloadLrc
-    setting['download.lrcFormat'] = setting.download?.lrcFormat
-    setting['download.isEmbedPic'] = setting.download?.isEmbedPic
-    setting['download.isEmbedLyric'] = setting.download?.isEmbedLyric
-    setting['download.isUseOtherSource'] = setting.download?.isUseOtherSource
-
-    setting['search.isShowHotSearch'] = setting.search?.isShowHotSearch
-    setting['search.isShowHistorySearch'] = setting.search?.isShowHistorySearch
-    setting['search.isFocusSearchBox'] = setting.search?.isFocusSearchBox
-
-    setting['network.proxy.enable'] = setting.network?.proxy?.enable
-    setting['network.proxy.host'] = setting.network?.proxy?.host
-    setting['network.proxy.port'] = setting.network?.proxy?.port
-
-    setting['tray.enable'] = setting.tray?.enable
-    setting['tray.themeId'] = setting.tray?.themeId
-
-
-    setting['sync.enable'] = setting.sync?.enable
-    setting['sync.port'] = setting.sync?.port
 
     setting['theme.id'] = oldThemeMap[setting.theme?.id as keyof typeof oldThemeMap]
     setting['theme.lightId'] = oldThemeMap[setting.theme?.lightId as keyof typeof oldThemeMap]
     setting['theme.darkId'] = oldThemeMap[setting.theme?.darkId as keyof typeof oldThemeMap]
 
-    setting['odc.isAutoClearSearchInput'] = setting.odc?.isAutoClearSearchInput
-    setting['odc.isAutoClearSearchList'] = setting.odc?.isAutoClearSearchList
-
     setting.version = '2.0.0'
   }
 
-  // 迁移 v2.2.0 之前的设置数据
-  if (compareVer(setting.version, '2.1.0') < 0) {
-    setting['sync.erver.port'] = setting['sync.port']
-    setting.version = '2.1.0'
-  }
-
   // 迁移本次预览定制：
-  // 1) 托盘默认主题由 0（native，白字形）改为「跟随系统」。
-  //    白字形画在浅色任务栏上会看不见，跟随系统后按任务栏明暗自动切黑白。
-  //    只改「仍停留在旧默认值 0」的用户，不动主动选过其它主题的人。
-  // 2) 默认主题改为跟随系统的黑白主题（浅色 mono / 深色 mono_dark）。
-  //    只改「仍停留在旧默认 green」的用户，不动主动选过其它主题的人。
+  // 默认主题改为跟随系统的黑白主题（浅色 mono / 深色 mono_dark）。
+  // 只改「仍停留在旧默认 green」的用户，不动主动选过其它主题的人。
+  // 注：托盘样式已固定为黑色字形（TRAY_THEME_ID），用户配置里不再有该键，
+  // 因此原来针对 tray.themeId 的迁移分支一并删除。
   if (compareVer(setting.version, '2.12.8') < 0) {
-    if (setting['tray.themeId'] === 0) setting['tray.themeId'] = TRAY_AUTO_ID
-
     if (setting['theme.id'] === LEGACY_DEFAULT_THEME_ID) {
       setting['theme.id'] = DEFAULT_THEME_ID
       if (setting['theme.lightId'] === LEGACY_DEFAULT_THEME_ID) setting['theme.lightId'] = THEME_LIGHT_ID
@@ -166,6 +100,10 @@ export default (setting: any): Partial<Rain.AppSetting> => {
 
     setting.version = '2.12.8'
   }
+
+  // 收藏时始终由用户选择歌单；旧配置与备份里的固定目标不再参与读写。
+  delete setting['common.favoriteListId']
+  if (compareVer(setting.version, '2.12.10') < 0) setting.version = '2.12.10'
 
   return setting
 }

@@ -1,52 +1,31 @@
-import kw from './kw/index'
-import kg from './kg/index'
 import tx from './tx/index'
+import kg from './kg/index'
 import wy from './wy/index'
-import mg from './mg/index'
-import bd from './bd/index'
-import xm from './xm'
 import { supportQuality } from './api-source'
 import { versionChars } from './versionChars'
 
 
+// 内置音源列表。这里是全应用音源顺序的唯一来源：
+// 搜索页 / 歌单页 / 排行榜的音源标签、切换音源下拉框都按这个顺序渲染。
+// 顺序：QQ音乐(tx) → 酷狗音乐(kg) → 网易云音乐(wy)
 const sources = {
   sources: [
     {
-      name: '酷我音乐',
-      id: 'kw',
+      name: 'QQ音乐',
+      id: 'tx',
     },
     {
       name: '酷狗音乐',
       id: 'kg',
     },
     {
-      name: 'QQ音乐',
-      id: 'tx',
-    },
-    {
-      name: '网易音乐',
+      name: '网易云音乐',
       id: 'wy',
     },
-    {
-      name: '咪咕音乐',
-      id: 'mg',
-    },
-    {
-      name: '虾米音乐',
-      id: 'xm',
-    },
-    // {
-    //   name: '百度音乐',
-    //   id: 'bd',
-    // },
   ],
-  kw,
-  kg,
   tx,
+  kg,
   wy,
-  mg,
-  bd,
-  xm,
 }
 export default {
   ...sources,
@@ -60,13 +39,18 @@ export default {
   },
   supportQuality,
 
+  /**
+   * 查找同名歌曲。
+   * 不传 source 时（例如「换源」对话框）返回所有内置音源的搜索结果；
+   * 传了 source 时返回「除该音源之外」的其他音源结果，用于当前音源播放失败时换源。
+   * 搜索结果与内置音源顺序一致。
+   */
   async searchMusic({ name, singer, source: s, limit = 25 }) {
     const trimStr = str => typeof str == 'string' ? str.trim() : str
     const musicName = trimStr(name)
     const tasks = []
-    const excludeSource = ['xm']
     for (const source of sources.sources) {
-      if (!sources[source.id].musicSearch || source.id == s || excludeSource.includes(source.id)) continue
+      if (!sources[source.id].musicSearch || source.id == s) continue
       tasks.push(sources[source.id].musicSearch.search(`${musicName} ${singer || ''}`.trim(), 1, limit).catch(_ => null))
     }
     return (await Promise.all(tasks)).filter(s => s)

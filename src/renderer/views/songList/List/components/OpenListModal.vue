@@ -22,8 +22,8 @@
               {{ $t('songlist__import_input_tip_4') }}
               <span
                 class="hover underline"
-                aria-label="https://github.com/chaoy1/Rain-Music"
-                @click="openUrl('https://github.com/chaoy1/Rain-Music')"
+                aria-label="https://github.com/chaoy1/Rain-Music/blob/master/FAQ.md"
+                @click="openUrl('https://github.com/chaoy1/Rain-Music/blob/master/FAQ.md')"
               >FAQ</span>
             </li>
           </ul>

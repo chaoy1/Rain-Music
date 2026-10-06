@@ -2,8 +2,8 @@ import qs from 'node:querystring'
 import {
   FormData,
   getGlobalDispatcher,
+  interceptors,
   request as nodeRrequest,
-  ProxyAgent,
   setGlobalDispatcher,
   type Dispatcher,
 } from 'undici'
@@ -16,22 +16,13 @@ const defaultOptions: Options = {
   },
   maxRedirect: 5,
 } as const
-let proxyAgent: ProxyAgent | null = null
 let globalDispatcher = getGlobalDispatcher()
 const buildDispatcher = () => {
-  return proxyAgent ?? globalDispatcher
+  return globalDispatcher
 }
 
 setGlobalDispatcher(buildDispatcher())
 
-export const setProxy = (url?: string) => {
-  proxyAgent = url ? new ProxyAgent(url) : null
-  setGlobalDispatcher(buildDispatcher())
-}
-export const setProxyByHost = (host?: string, port?: string) => {
-  console.log(host)
-  setProxy(host ? `http://${host}:${port}` : undefined)
-}
 const CONTENT_TYPE = {
   json: 'application/json',
   form: 'application/x-www-form-urlencoded',
@@ -179,8 +170,14 @@ const buildRequestBody = (options: Options) => {
   return [finalHeaders, body] as const
 }
 
+// undici 7 已从 request() 的选项里移除 maxRedirections（该选项会被静默忽略），
+// 重定向改由 dispatcher 上的 redirect 拦截器处理，
+// 因此这里把重定向上限组合进 dispatcher，恢复「最多跟随 N 次重定向」的原意。
+// maxRedirect 为 0 时拦截器直接透传，即不跟随重定向（与原意一致）。
 const buildRequestDispatcher = (options: Options) => {
-  return buildDispatcher()
+  return buildDispatcher().compose(
+    interceptors.redirect({ maxRedirections: options.maxRedirect ?? defaultOptions.maxRedirect }),
+  )
 }
 
 export const request = async <T = unknown>(url: string, options: Options = {}): Promise<Response<T>> => {
@@ -206,7 +203,6 @@ export const request = async <T = unknown>(url: string, options: Options = {}): 
     body,
     signal: options.signal,
     dispatcher: buildRequestDispatcher(options),
-    maxRedirections: options.maxRedirect ?? defaultOptions.maxRedirect,
   }).then(async(response) => {
     if (options.needBody) {
       return {

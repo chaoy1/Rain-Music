@@ -20,7 +20,7 @@ material-modal(:show="modelValue" bg-close teleport="#view" @close="handleClose"
     div(:class="$style.note")
       p(:class="[$style.ruleLink]")
         | {{ $t('user_api__readme') }}
-        span.hover.underline(aria-label="https://github.com/chaoy1/Rain-Music" @click="handleOpenUrl('https://github.com/chaoy1/Rain-Music')") FAQ
+        span.hover.underline(aria-label="https://github.com/chaoy1/Rain-Music" @click="handleOpenUrl('https://github.com/chaoy1/Rain-Music/blob/master/FAQ.md')") FAQ
       p {{ $t('user_api__note') }}
     div(:class="$style.footer")
       base-btn(:class="$style.footerBtn" @click="isShowOnlineImportModal = true") {{ $t('user_api__btn_import_online') }}
@@ -101,7 +101,7 @@ export default {
       if (!api) return
       if (appSetting['common.apiSource'] == api.id) {
         let backApi = apiSourceInfo.find(api => !api.disabled)
-        if (!backApi) backApi = userApi.list[0]
+        if (!backApi) backApi = userApi.list.find(item => item.id !== api.id)
         updateSetting({ 'common.apiSource': backApi?.id ?? '' })
       }
       userApi.list = await removeUserApi([api.id])

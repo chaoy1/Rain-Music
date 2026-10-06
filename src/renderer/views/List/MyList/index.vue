@@ -15,7 +15,7 @@
         </button>
       </div>
     </div>
-    <ul ref="dom_lists_list" class="scroll" :class="[$style.listsContent, { [$style.sortable]: isModDown }]">
+    <ul ref="dom_lists_list" class="scroll" :class="[$style.listsContent, $style.draggable, { [$style.sortable]: isDraging }]" :aria-label="$t('lists__drag_tip')">
       <li
         class="default-list" :class="[$style.listsItem, {[$style.active]: defaultList.id == listId}, {[$style.clicked]: rightClickItemIndex == -2}, {[$style.fetching]: fetchingListStatus[defaultList.id]}]"
         :aria-label="$t(defaultList.name)" :aria-selected="defaultList.id == listId"
@@ -31,18 +31,6 @@
             <svg-icon v-if="defaultList.id == listId" name="angle-right-solid" :class="$style.activeIcon" />
           </transition>
           {{ $t(defaultList.name) }}
-        </span>
-      </li>
-      <li
-        class="default-list" :class="[$style.listsItem, {[$style.active]: loveList.id == listId}, {[$style.clicked]: rightClickItemIndex == -1}, {[$style.fetching]: fetchingListStatus[loveList.id]}]"
-        :aria-label="$t(loveList.name)" :aria-selected="loveList.id == listId"
-        @contextmenu="handleListsItemRigthClick($event, -1)" @click="handleListToggle(loveList.id)"
-      >
-        <span :class="$style.listsLabel">
-          <transition name="list-active">
-            <svg-icon v-if="loveList.id == listId" name="angle-right-solid" :class="$style.activeIcon" />
-          </transition>
-          {{ $t(loveList.name) }}
         </span>
       </li>
       <li
@@ -86,7 +74,7 @@ import DuplicateMusicModal from './components/DuplicateMusicModal.vue'
 import ListSortModal from './components/ListSortModal.vue'
 import ListUpdateModal from './components/ListUpdateModal.vue'
 
-import { defaultList, loveList, userLists, fetchingListStatus } from '@renderer/store/list/state'
+import { defaultList, userLists, fetchingListStatus } from '@renderer/store/list/state'
 import { removeUserList } from '@renderer/store/list/action'
 
 import { ref, watch } from '@common/utils/vueTools'
@@ -203,7 +191,7 @@ export default {
       menuClick(action, index)
     }
 
-    const { isModDown } = useDarg({ dom_lists_list, handleMenuClick, handleSaveListName })
+    const { isDraging } = useDarg({ dom_lists_list })
 
 
     watch(() => props.listId, (listId) => {
@@ -223,7 +211,6 @@ export default {
     return {
       rightClickItemIndex,
       defaultList,
-      loveList,
       userLists,
       fetchingListStatus,
       dom_lists_list,
@@ -242,7 +229,7 @@ export default {
       menus,
       menuLocation,
       handleListToggle,
-      isModDown,
+      isDraging,
       hideMenu: handleMenuClick,
     }
   },
@@ -316,17 +303,9 @@ export default {
   // border-right: 1px solid rgba(0, 0, 0, 0.12);
 
   &.sortable {
-    * {
-      -webkit-user-drag: element;
-    }
-
     .listsItem {
       &:hover, &.active, &.selected, &.clicked {
         background-color: transparent !important;
-      }
-
-      &.dragingItem {
-        background-color: var(--surface-hover) !important;
       }
     }
   }
@@ -368,6 +347,30 @@ export default {
       display: block;
     }
   }
+}
+// 长按拖动：给出「可以拖」的光标提示（拖动开始后由 .sortable 接管）
+.draggable {
+  .listsItem {
+    &:hover:not(.active) {
+      cursor: grab;
+    }
+    &:active {
+      cursor: grabbing;
+    }
+  }
+}
+// Sortable 的 ghostClass：拖动过程中留在原位的占位元素
+.dragingItem {
+  opacity: .45;
+  background-color: var(--surface-hover) !important;
+  outline: 1px dashed var(--control-outline);
+  outline-offset: -2px;
+}
+// 跟随光标的拖动副本（useDrag 使用 forceFallback，sortablejs 给它加的是普通类名，故用 :global）
+:global(.sortable-fallback) {
+  border-radius: 8px;
+  background-color: var(--surface-popup) !important;
+  box-shadow: 0 10px 24px var(--glass-edge), inset 0 0 0 1px var(--glass-highlight);
 }
 .activeIcon {
   height: .9em;

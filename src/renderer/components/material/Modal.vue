@@ -24,7 +24,6 @@
 <script>
 import { getRandom } from '@common/utils/common'
 import { nextTick } from '@common/utils/vueTools'
-import { appSetting } from '@renderer/store/setting'
 
 let modalCount = 0
 export default {
@@ -203,16 +202,15 @@ export default {
       this.$refs.dom_container?.parentNode.classList.remove('show-modal')
     },
     setRandomAnimation() {
-      if (appSetting['common.randomAnimate']) {
-        const [animIn, animOut] = this.animates[getRandom(0, this.animates.length)]
-        // const [animIn, animOut] = this.animates[this.ai]
-        // if (++this.ai >= this.animates.length) this.ai = 0
-        // console.log(animIn, animOut)
-        // this.inClass = 'animated ' + animIn
-        // this.outClass = 'animated ' + animOut
-        this.inClass = 'animated ' + animIn[getRandom(0, animIn.length)]
-        this.outClass = 'animated ' + animOut[getRandom(0, animOut.length)]
-      }
+      // common.randomAnimate 设置项已移除，行为固定为「使用随机弹出动画」。
+      const [animIn, animOut] = this.animates[getRandom(0, this.animates.length)]
+      // const [animIn, animOut] = this.animates[this.ai]
+      // if (++this.ai >= this.animates.length) this.ai = 0
+      // console.log(animIn, animOut)
+      // this.inClass = 'animated ' + animIn
+      // this.outClass = 'animated ' + animOut
+      this.inClass = 'animated ' + animIn[getRandom(0, animIn.length)]
+      this.outClass = 'animated ' + animOut[getRandom(0, animOut.length)]
     },
     close() {
       this.$emit('close')

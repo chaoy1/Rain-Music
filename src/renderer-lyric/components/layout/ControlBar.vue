@@ -43,14 +43,7 @@
             <use xlink:href="#icon-vibrate" />
           </svg>
         </button>
-        <button :class="$style.btn" :title="$t('desktop_lyric__' + (setting['desktopLyric.isAlwaysOnTop'] ? 'win_top_off' : 'win_top_on'))" @click="handleAlwaysOnTop">
-          <svg v-if="setting['desktopLyric.isAlwaysOnTop']" version="1.1" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink" height="20px" viewBox="0 0 24 24" space="preserve">
-            <use xlink:href="#icon-top-off" />
-          </svg>
-          <svg v-else version="1.1" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink" height="20px" viewBox="0 0 24 24" space="preserve">
-            <use xlink:href="#icon-top-on" />
-          </svg>
-        </button>
+        <!-- 「置顶/取消置顶」按钮已删除：desktopLyric.isAlwaysOnTop 固定为 true -->
       </div>
     </transition>
   </div>
@@ -72,9 +65,6 @@ export default {
     }
     const handleLock = () => {
       updateSetting({ 'desktopLyric.isLock': true })
-    }
-    const handleAlwaysOnTop = () => {
-      updateSetting({ 'desktopLyric.isAlwaysOnTop': !setting['desktopLyric.isAlwaysOnTop'] })
     }
     const handleZoomLrc = () => {
       updateSetting({ 'desktopLyric.style.isZoomActiveLrc': !setting['desktopLyric.style.isZoomActiveLrc'] })
@@ -111,7 +101,6 @@ export default {
 
       handleClose,
       handleLock,
-      handleAlwaysOnTop,
       handleZoomLrc,
       handleFontChange,
       handleOpactiyChange,

@@ -19,11 +19,6 @@ declare global {
       'common.fontSize': number
 
       /**
-       * 是否以全屏启动
-       */
-      'common.startInFullscreen': boolean
-
-      /**
        * 语言id
        */
       'common.langId': I18n['locale'] | null
@@ -34,34 +29,9 @@ declare global {
       'common.apiSource': string
 
       /**
-       * 音源名称类型，原名、别名
-       */
-      'common.sourceNameType': 'alias' | 'real'
-
-      /**
-       * 显示的字体
-       */
-      'common.font': string
-
-      /**
-       * 是否启用动画
-       */
-      'common.isShowAnimation': boolean
-
-      /**
-       * 是否启用随机弹窗动画
-       */
-      'common.randomAnimate': boolean
-
-      /**
        * 是否同意软件协议
        */
       'common.isAgreePact': boolean
-
-      /**
-       * 控制按钮位置，左边、右边
-       */
-      'common.controlBtnPosition': 'left' | 'right'
 
       /**
        * 播放栏进度条样式
@@ -69,14 +39,12 @@ declare global {
       'common.playBarProgressStyle': 'mini' | 'full' | 'middle'
 
       /**
-       * 启用透明窗口
+       * 资源缓存自动清理阈值（单位：MB）
+       *
+       * 0 表示关闭自动清理；启动时会检查软件资源缓存大小，
+       * 超过该阈值就执行一次与「清理资源缓存」相同的清理。
        */
-      'common.transparentWindow': boolean
-
-      /**
-       * 启动时自动播放歌曲
-       */
-      'player.startupAutoPlay': boolean
+      'common.resourceCacheAutoCleanSize': number
 
       /**
        * 切歌模式
@@ -89,12 +57,6 @@ declare global {
       'player.playQuality': Rain.Quality
 
       /**
-       * 是否显示任务栏进度条
-       */
-      'player.isShowTaskProgess': boolean
-
-
-      /**
        * 是否将歌词显示在状态栏
        */
       'player.isShowStatusBarLyric': boolean
@@ -103,11 +65,6 @@ declare global {
        * 音量大小
        */
       'player.volume': number
-
-      /**
-       * 播放歌曲时是否阻止电脑休眠
-       */
-      'player.powerSaveBlocker': boolean
 
       /**
        * 是否静音
@@ -125,49 +82,9 @@ declare global {
       'player.preservesPitch': boolean
 
       /**
-       * 使用设备能处理的最大声道数输出音频
-       */
-      'player.isMaxOutputChannelCount': boolean
-
-      /**
        * 音频输出设备id
        */
       'player.mediaDeviceId': string
-
-      /**
-       * 是否在音频输出设备更改时暂停播放
-       */
-      'player.isMediaDeviceRemovedStopPlay': boolean
-
-      /**
-       * 是否显示歌词翻译
-       */
-      'player.isShowLyricTranslation': boolean
-
-      /**
-       * 是否显示歌词罗马音
-       */
-      'player.isShowLyricRoma': boolean
-
-      /**
-       * 是否调换翻译歌词与罗马音歌词位置
-       */
-      'player.isSwapLyricTranslationAndRoma': boolean
-
-      /**
-       * 是否将歌词从简体转换为繁体
-       */
-      'player.isS2t': boolean
-
-      /**
-       * 是否播放卡拉OK歌词
-       */
-      'player.isPlayRainlrc': boolean
-
-      /**
-       * 启动软件时是否恢复上次播放进度
-       */
-      'player.isSavePlayTime': boolean
 
       /**
        * 是否启用音频可视化
@@ -270,39 +187,9 @@ declare global {
       'player.soundEffect.pitchShifter.playbackRate': number
 
       /**
-       * 是否启用音频加载失败时自动切歌
-       */
-      'player.autoSkipOnError': boolean
-
-      /**
-       * 点击相同列表内的歌曲切歌时是否清空已播放列表（随机模式下列表内所有歌曲会重新参与随机）
-       */
-      'player.isAutoCleanPlayedList': boolean
-
-      /**
-       * 播放详情页-是否缩放当前播放的歌词行
-       */
-      'playDetail.isZoomActiveLrc': boolean
-
-      /**
-       * 播放详情页-是否允许通过歌词调整播放进度
-       */
-      'playDetail.isShowLyricProgressSetting': boolean
-
-      /**
        * 播放详情页-歌词字体大小
        */
       'playDetail.style.fontSize': number
-
-      /**
-       * 播放详情页-歌词对齐方式
-       */
-      'playDetail.style.align': 'center' | 'left' | 'right'
-
-      /**
-       * 播放详情页-是否延迟桌面歌词滚动
-       */
-      'playDetail.isDelayScroll': boolean
 
 
       /**
@@ -314,11 +201,6 @@ declare global {
        * 是否锁定桌面歌词
        */
       'desktopLyric.isLock': boolean
-
-      /**
-       * 是在置顶桌面
-       */
-      'desktopLyric.isAlwaysOnTop': boolean
 
       /**
        * 是否自动刷新歌词置顶
@@ -339,11 +221,6 @@ declare global {
        * 是否在全屏时隐藏歌词
        */
       'desktopLyric.fullscreenHide': boolean
-
-      /**
-       * 是否在暂停时隐藏歌词
-       */
-      'desktopLyric.pauseHide': boolean
 
       /**
        * 桌面歌词窗口宽度
@@ -461,114 +338,14 @@ declare global {
       'desktopLyric.style.isFontWeightExtended': boolean
 
       /**
-       * 是否启用双击列表里的歌曲时自动切换到当前列表播放（仅对歌单、排行榜有效）
-       */
-      'list.isClickPlayList': boolean
-
-      /**
-       * 是否显示歌曲来源（仅对我的列表有效）
-       */
-      'list.isShowSource': boolean
-
-      /**
-       * 是否自动恢复列表滚动位置（仅对我的列表有效）
-       */
-      'list.isSaveScrollLocation': boolean
-
-      /**
-       * 添加歌曲到我的列表时的方式
-       */
-      'list.addMusicLocationType': Rain.AddMusicLocationType
-
-      /**
-       * 是否显示列表操作按钮列
-       */
-      'list.actionButtonsVisible': boolean
-
-      /**
        * 是否启用下载功能
        */
       'download.enable': boolean
 
       /**
-       * 按列表名分组保存
-       */
-      'download.isSavePathGroupByListName': boolean
-
-      /**
        * 下载路径
        */
       'download.savePath': string
-
-      /**
-       * 文件命名方式
-       */
-      'download.fileName': '歌名 - 歌手' | '歌手 - 歌名' | '歌名'
-
-      /**
-       * 最大并发下载数
-       */
-      'download.maxDownloadNum': number
-
-      /**
-       * 存在同名文件时跳过下载
-       */
-      'download.skipExistFile': boolean
-
-      /**
-       * 是否下载lrc文件
-       */
-      'download.isDownloadLrc': boolean
-
-      /**
-       * 是否在下载 rain 歌词
-       */
-      'download.isDownloadRainLrc': boolean
-
-      /**
-       * 是否下载翻译歌词文件
-       */
-      'download.isDownloadTLrc': boolean
-
-      /**
-       * 是否下载罗马音歌词文件
-       */
-      'download.isDownloadRLrc': boolean
-
-      /**
-       * 保存lrc时的文本编码格式
-       */
-      'download.lrcFormat': 'utf8' | 'gbk'
-
-      /**
-       * 是否在音频文件中嵌入歌曲封面
-       */
-      'download.isEmbedPic': boolean
-
-      /**
-       * 是否在音频文件中嵌入 rain 歌词
-       */
-      'download.isEmbedLyricRain': boolean
-
-      /**
-       * 是否在音频文件中嵌入歌词
-       */
-      'download.isEmbedLyric': boolean
-
-      /**
-       * 是否在音频文件中嵌入翻译歌词
-       */
-      'download.isEmbedLyricT': boolean
-
-      /**
-       * 是否在音频文件中嵌入罗马音歌词
-       */
-      'download.isEmbedLyricR': boolean
-
-      /**
-       * 歌曲源不可用时，是否启用换源下载
-       */
-      'download.isUseOtherSource': boolean
 
       /**
        * 主题id
@@ -584,103 +361,8 @@ declare global {
        * 暗色主题id
        */
       'theme.darkId': string
-
-      /**
-       * 是否显示热门搜索
-       */
-      'search.isShowHotSearch': boolean
-
-      /**
-       * 是否显示搜索历史
-       */
-      'search.isShowHistorySearch': boolean
-
-      /**
-       * 软件启动时是否自动聚焦搜索框
-       */
-      'search.isFocusSearchBox': boolean
-
-      /**
-       * 是否启用代理
-       */
-      'network.proxy.enable': boolean
-
-      /**
-       * 代理服务器地址
-       */
-      'network.proxy.host': string
-
-      /**
-       * 代理服务器端口号
-       */
-      'network.proxy.port': string
-
-      /**
-       * 是否启用托盘
-       */
-      'tray.enable': boolean
-
-      /**
-       * 是否关闭时是否最小化到托盘
-       */
-      // 'tray.isToTray': boolean
-
-      /**
-       * 托盘主题id
-       */
-      'tray.themeId': number
-
-      /**
-       * 同步服务模式
-       */
-      'sync.mode': 'server' | 'client'
-
-      /**
-       * 是否启用同步服务
-       */
-      'sync.enable': boolean
-
-      /**
-       * 同步服务端口号
-       */
-      'sync.server.port': '23332' | string
-
-      /**
-       * 最大备份快照数
-       */
-      'sync.server.maxSsnapshotNum': number
-
-      /**
-       * 同步服务地址
-       */
-      'sync.client.host': string
-
-
-      /**
-       * 是否启用开放API服务
-       */
-      'openAPI.enable': boolean
-
-      /**
-       * API服务端口号
-       */
-      'openAPI.port': '23330' | string
-
-      /**
-       * 是否绑定到局域网
-       */
-      'openAPI.bindLan': boolean
-
-      /**
-       * 是否在离开搜索界面时自动清空搜索框
-       */
-      'odc.isAutoClearSearchInput': boolean
-
-      /**
-       * 是否在离开搜索界面时自动清空搜索结果列表
-       */
-      'odc.isAutoClearSearchList': boolean
     }
+
   }
 
 }

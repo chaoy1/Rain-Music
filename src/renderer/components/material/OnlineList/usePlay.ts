@@ -2,7 +2,6 @@
 import { defaultList } from '@renderer/store/list/state'
 import { getListMusics, addListMusics } from '@renderer/store/list/action'
 import { addTempPlayList } from '@renderer/store/player/action'
-import { appSetting } from '@renderer/store/setting'
 import { type Ref } from '@common/utils/vueTools'
 import { playList } from '@renderer/core/player'
 import { LIST_IDS } from '@common/constants'
@@ -51,11 +50,9 @@ export default ({ selectedList, props, removeAllSelect, emit }: {
       clickIndex = index
       return
     }
-    if (appSetting['list.isClickPlayList']) {
-      emit('play-list', index)
-    } else {
-      void handlePlayMusic(index, true)
-    }
+    // 双击歌曲时自动切换到当前列表播放已固定为「启用」
+    // （原 list.isClickPlayList 设置项已移除 -> true）
+    emit('play-list', index)
     clickTime = 0
     clickIndex = -1
   }

@@ -5,10 +5,8 @@ import { getListMusics, getUserLists, registerAction } from '@renderer/store/lis
 
 
 import useInitUserApi from './useInitUserApi'
-import { play, playList } from '@renderer/core/player'
+import { playList } from '@renderer/core/player'
 import { onBeforeUnmount } from '@common/utils/vueTools'
-import { appSetting } from '@renderer/store/setting'
-import { playMusicInfo } from '@renderer/store/player/state'
 import { initDislikeInfo, registerRemoteDislikeAction } from '@renderer/core/dislikeList'
 
 const initPrevPlayInfo = async() => {
@@ -19,14 +17,8 @@ const initPrevPlayInfo = async() => {
   if (!list[info.index]) return
   window.rain.restorePlayInfo = info
   playList(info.listId, info.index)
-
-  if (appSetting['player.startupAutoPlay']) {
-    const musicInfo = playMusicInfo.musicInfo
-    if (!musicInfo) return
-    setTimeout(() => {
-      if (musicInfo.id == playMusicInfo.musicInfo?.id) play()
-    })
-  }
+  // player.startupAutoPlay 设置项已移除，行为固定为「启动后不自动播放」，
+  // 因此这里恢复播放列表后不再自动 play()。
 }
 
 export default () => {

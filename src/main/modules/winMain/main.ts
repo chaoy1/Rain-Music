@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, session } from 'electron'
 import path from 'node:path'
 import { createTaskBarButtons, getWindowSizeInfo } from './utils'
 import { getOSVersion, getPlatform, isWin } from '@common/utils'
-import { getProxy, openDevTools as handleOpenDevTools } from '@main/utils'
+import { openDevTools as handleOpenDevTools } from '@main/utils'
 import { mainSend } from '@common/mainIpc'
 import { WIN_MAIN_RENDERER_EVENT_NAME } from '@common/ipcNames'
 import { sendFocus, sendTaskbarButtonClick } from './rendererEvent'
@@ -16,7 +16,9 @@ const winEvent = () => {
   if (!browserWindow) return
 
   browserWindow.on('close', event => {
-    if (global.rain.isSkipTrayQuit || !global.rain.appSetting['tray.enable']) {
+    // 托盘常驻：原先的 tray.enable 设置项已移除，行为固定为启用。
+    // 只有明确要退出应用时才真正关闭窗口，否则隐藏到托盘。
+    if (global.rain.isSkipTrayQuit) {
       browserWindow!.setProgressBar(-1)
       // global.rain.mainWindowClosed = true
       global.rain.event_app.main_window_close()
@@ -91,8 +93,6 @@ export const createWindow = () => {
 
   const { shouldUseDarkColors, theme } = global.rain.theme
   const ses = session.fromPartition('persist:win-main')
-  const proxy = getProxy()
-  setSesProxy(ses, proxy?.host, proxy?.port)
 
   /**
    * Initial window options
@@ -132,10 +132,7 @@ export const createWindow = () => {
   // 窗口不透明，直接用主题的主底色作为窗口底色。
   // 真正的玻璃观感由渲染进程自绘（壁纸模糊层 + 半透明面板）。
   options.backgroundColor = theme.colors['--color-primary-light-1000']
-  if (global.rain.appSetting['common.startInFullscreen']) {
-    options.fullscreen = true
-    options.resizable = true
-  }
+  // common.startInFullscreen 设置项已移除，行为固定为「不以此启动」
   browserWindow = new BrowserWindow(options)
 
   const winURL = process.env.NODE_ENV !== 'production' ? 'http://localhost:9080' : `file://${path.join(encodePath(__dirname), 'index.html')}`
@@ -160,25 +157,6 @@ export const closeWindow = () => {
   if (!browserWindow) return
   browserWindow.close()
 }
-
-const setSesProxy = (ses: Electron.Session, host?: string, port?: string | number) => {
-  if (host) {
-    void ses.setProxy({
-      mode: 'fixed_servers',
-      proxyRules: `http://${host}:${port}`,
-    })
-  } else {
-    void ses.setProxy({
-      mode: 'direct',
-    })
-  }
-}
-export const setProxy = () => {
-  if (!browserWindow) return
-  const proxy = getProxy()
-  setSesProxy(browserWindow.webContents.session, proxy?.host, proxy?.port)
-}
-
 
 export const sendEvent = <T = any>(name: string, params?: T) => {
   if (!browserWindow) return
@@ -301,15 +279,13 @@ export const setFullScreen = async(isFullscreen: boolean): Promise<boolean> => {
 
 const taskBarButtonFlags: Rain.TaskBarButtonFlags = {
   empty: true,
-  collect: false,
   play: false,
   next: true,
   prev: true,
 }
-export const setThumbarButtons = ({ empty, collect, play, next, prev }: Rain.TaskBarButtonFlags = taskBarButtonFlags) => {
+export const setThumbarButtons = ({ empty, play, next, prev }: Rain.TaskBarButtonFlags = taskBarButtonFlags) => {
   if (!isWin || !browserWindow) return
   taskBarButtonFlags.empty = empty
-  taskBarButtonFlags.collect = collect
   taskBarButtonFlags.play = play
   taskBarButtonFlags.next = next
   taskBarButtonFlags.prev = prev
@@ -332,6 +308,30 @@ export const clearCache = async() => {
 export const getCacheSize = async() => {
   if (!browserWindow) throw new Error('main window is undefined')
   return browserWindow.webContents.session.getCacheSize()
+}
+
+/**
+ * 资源缓存「超过一定大小时自动清理」。
+ *
+ * 阈值来自设置项 `common.resourceCacheAutoCleanSize`（单位 MB，0 表示关闭），
+ * 由用户在设置页选择预设档位。清理复用上面的 clearCache()，
+ * 不额外实现一套删除逻辑（清理的就是 Electron 会话缓存，
+ * 与设置页「清理资源缓存」按钮完全一致）。
+ *
+ * 触发时机：软件启动、主窗口创建后检查一次。
+ * 之所以不做定期检查：该缓存由 Electron 自己按磁盘空间动态管理，
+ * 启动时清理上一轮会话残留的缓存已经能覆盖「缓存无限增长」的场景，
+ * 定期轮询会带来不必要的 IO 与复杂度。
+ */
+export const autoCleanResourceCache = async() => {
+  if (!browserWindow) return
+  const autoCleanSize = global.rain.appSetting['common.resourceCacheAutoCleanSize']
+  if (!autoCleanSize || autoCleanSize <= 0) return
+  const maxCacheSize = autoCleanSize * 1024 * 1024
+  const cacheSize = await getCacheSize()
+  if (cacheSize <= maxCacheSize) return
+  await clearCache()
+  console.log(`resource cache auto cleaned: ${cacheSize} > ${maxCacheSize}`)
 }
 
 export const getWebContents = (): Electron.WebContents => {

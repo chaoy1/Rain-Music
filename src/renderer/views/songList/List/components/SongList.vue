@@ -14,7 +14,6 @@
               <div :class="$style.songlist_info">
                 <span v-if="item.total != null"><svg-icon name="music" />{{ item.total }}</span>
                 <span v-if="item.play_count != null"><svg-icon name="headphones" />{{ item.play_count }}</span>
-                <span v-if="visibleSource">{{ item.source }}</span>
               </div>
             </div>
           </div>
@@ -39,12 +38,9 @@ import type { ListInfo, ListInfoItem } from '@renderer/store/songList/state'
 import { useRoute, useRouter } from '@common/utils/vueRouter'
 
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   listInfo: ListInfo
-  visibleSource?: boolean
-}>(), {
-  visibleSource: false,
-})
+}>()
 
 const router = useRouter()
 const route = useRoute()

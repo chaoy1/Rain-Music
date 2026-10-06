@@ -1,149 +1,61 @@
-<p align="center"><a href="https://github.com/chaoy1/Rain-Music"><img width="200" src="https://github.com/chaoy1/Rain-Music/blob/master/doc/images/icon.png" alt="rain-music logo"></a></p>
+<p align="center"><img width="144" src="./doc/images/icon.png" alt="Rain Music"></p>
 
-<h1 align="center">Rain Music 桌面版</h1>
+<h1 align="center">Rain Music</h1>
+
+<p align="center">基于 Electron、Vue 3 和 TypeScript 的桌面音乐播放器 · v1.0.0</p>
 
 <p align="center">
-  <a href="https://github.com/chaoy1/Rain-Music/releases"><img src="https://img.shields.io/github/release/chaoy1/Rain-Music" alt="Release version"></a>
-  <a href="https://github.com/chaoy1/Rain-Music/actions/workflows/release.yml"><img src="https://github.com/chaoy1/Rain-Music/workflows/Build/badge.svg" alt="Build status"></a>
-  <a href="https://github.com/chaoy1/Rain-Music/actions/workflows/beta-pack.yml"><img src="https://github.com/chaoy1/Rain-Music/workflows/Build%20Beta/badge.svg" alt="Build status"></a>
-  <a href="https://electronjs.org/releases/stable"><img src="https://img.shields.io/github/package-json/dependency-version/chaoy1/Rain-Music/dev/electron/master" alt="Electron version"></a>
-  <!-- <a href="https://github.com/chaoy1/Rain-Music/releases"><img src="https://img.shields.io/github/downloads/chaoy1/Rain-Music/latest/total" alt="Downloads"></a> -->
-  <a href="https://github.com/chaoy1/Rain-Music/tree/dev"><img src="https://img.shields.io/github/package-json/v/chaoy1/Rain-Music/dev" alt="Dev branch version"></a>
-  <!-- <a href="https://github.com/chaoy1/Rain-Music/blob/master/LICENSE"><img src="https://img.shields.io/github/license/chaoy1/Rain-Music" alt="License"></a> -->
+  <a href="https://github.com/chaoy1/Rain-Music/releases">下载与版本</a> ·
+  <a href="./FAQ.md">使用帮助</a> ·
+  <a href="./CHANGELOG.md">更新日志</a> ·
+  <a href="./LICENSE">Apache-2.0</a>
 </p>
 
-<!-- [![GitHub release][1]][2]
-[![Build status][3]][4]
-[![GitHub Releases Download][5]][6]
-[![dev branch][7]][8]
-[![GitHub license][9]][10] -->
+## 功能
 
-<!-- [1]: https://img.shields.io/github/release/chaoy1/Rain-Music
-[2]: https://github.com/chaoy1/Rain-Music/releases
-[3]: https://ci.appveyor.com/api/projects/status/flrsqd5ymp8fnte5?svg=true
-[4]: https://ci.appveyor.com/project/chaoy1/Rain-Music
-[5]: https://img.shields.io/github/downloads/chaoy1/Rain-Music/latest/total
-[5]: https://img.shields.io/github/downloads/chaoy1/Rain-Music/total
-[6]: https://github.com/chaoy1/Rain-Music/releases
-[7]: https://img.shields.io/github/package-json/v/chaoy1/Rain-Music/dev
-[8]: https://github.com/chaoy1/Rain-Music/tree/dev
-[9]: https://img.shields.io/github/license/chaoy1/Rain-Music
-[10]: https://github.com/chaoy1/Rain-Music/blob/master/LICENSE -->
+- 搜索歌曲、浏览在线歌单与排行榜，管理本地播放列表。
+- 点击歌曲红心选择要添加的歌单；红心反映歌曲是否已在自建歌单中。
+- 播放控制、进度调整、音量控制、歌词详情与桌面歌词。未选择歌曲时隐藏时间轴。
+- 浅色、深色和跟随系统主题，壁纸与窗口外观设置。
+- 连续滚动的设置页面；低频选项折叠，常用项使用紧凑选择控件。
+- 自定义音乐源、快捷键、下载管理和数据备份。
 
-<p align="center">一个基于 Electron & Vue 开发的音乐软件</p>
+在线音频链接由用户导入的自定义源提供。接口说明见 [自定义源文档](./docs/custom-source.md)。
 
-## 说明
+## 界面
 
-所用技术栈：
+![Rain Music 界面](./doc/images/app.png)
 
-- Electron 30+
-- Vue 3
+## 安装与数据
 
-已支持的平台：
+v1.0.0 的发布目标为 **Windows 10/11 x64**。下载后解压目录版并运行 `rain-music-desktop.exe`。
+macOS、Linux 和其他架构保留构建入口，尚未完成此版本的运行验证。
 
-- Linux
-- macOS
-- Windows 7 及以上
+默认数据目录为 `%APPDATA%/rain-music-desktop`，歌单和设置位于其 `RainDatas` 子目录。
+Windows 下在程序旁创建 `portable` 文件夹即可使用便携模式，数据位于 `portable/userData`。
+升级前可在“设置 → 备份与恢复”导出备份；应用版本与内部配置迁移版本独立管理。
 
-软件变化请查看[更新日志](https://github.com/chaoy1/Rain-Music/blob/master/CHANGELOG.md)。
+## 本地开发
 
-软件下载请查看 [GitHub Releases](https://github.com/chaoy1/Rain-Music/releases)。
+需要 Node.js 22.15+、npm 8.5+。仓库默认分支为 `master`。
 
-使用常见问题请参阅[常见问题](https://github.com/chaoy1/Rain-Music/blob/master/FAQ.md)。
+```powershell
+git clone https://github.com/chaoy1/Rain-Music.git
+cd Rain-Music
+npm ci
+npm run dev
+```
 
-目前本项目的原始发布地址只有 [**GitHub**](https://github.com/chaoy1/Rain-Music/releases)，其他渠道均为第三方转载发布，与本项目无关！
+```powershell
+npm run verify   # 类型检查、单元测试、含 lint 的完整构建
+npm run test:ui  # Electron 交互回归，需要图形桌面
+npm run pack:dir # 构建并打包目录版
+```
 
-为了提高使用门槛，本软件内的默认设置、UI 操作不以新手友好为目标，所以使用前建议先根据你的喜好浏览调整一遍软件设置，阅读一遍[常见问题](https://github.com/chaoy1/Rain-Music/blob/master/FAQ.md)。
+更多命令、目录说明和发布流程见 [开发与发布](./docs/development.md)。
 
-### Scheme URL 支持
+## 贡献与协议
 
-从 v1.17.0 起支持 Scheme URL，可以使用该功能在浏览器等场景下调用 Rain Music，协议名为 `rainmusic://`。
-
-### 数据同步服务
-
-从 v2.2.0 起支持独立的数据同步服务。如果你有服务器，可以将其部署到服务器上作为私人多端同步服务使用。
-
-### 开放 API 支持
-
-从 v2.7.0 起支持开放 API 服务。启用该功能后，将会在本地启动一个 HTTP 服务，提供播放器相关的接口供第三方软件调用。
-
-### 数据存储目录
-
-默认情况下，软件的数据存储在：
-
-- Linux：`$XDG_CONFIG_HOME/rain-music-desktop` 或 `~/.config/rain-music-desktop`
-- macOS：`~/Library/Application Support/rain-music-desktop`
-- Windows：`%APPDATA%/rain-music-desktop`
-
-在 Windows 平台上，若程序文件夹中存在 `portable` 文件夹，则自动使用此文件夹作为数据存储文件夹（适用于 v1.17.0 及以上版本）。
-
-## 用户界面
-
-<p><img width="100%" src="./doc/images/app.png" alt="rain-music desktop UI"></p>
-
-## 贡献代码
-
-本项目欢迎 PR，但为了 PR 能顺利合并，需要注意以下几点：
-
-- 对于添加新功能的 PR，建议在提交 PR 前先创建 Issue 进行说明，以确认该功能是否确实需要。
-- 对于修复 bug 的 PR，请提供修复前后的说明及重现方式。
-- 对于其他类型的 PR，则适当附上说明。
-
-贡献代码步骤：
-
-1. 克隆本仓库代码并切换至 `dev` 分支进行开发；
-2. 提交 PR 至 `dev` 分支。
-
-## 项目协议
-
-本项目基于 [Apache License 2.0](https://github.com/chaoy1/Rain-Music/blob/master/LICENSE) 许可证发行，以下协议是对于 Apache License 2.0 的补充，如有冲突，以以下协议为准。
-
----
-
-*词语约定：本协议中的“本项目”指 Rain Music 桌面版项目；“使用者”指签署本协议的使用者；“官方音乐平台”指对本项目内置的包括酷我、酷狗、咪咕等音乐源的官方平台统称；“版权数据”指包括但不限于图像、音频、名字等在内的他人拥有所属版权的数据。*
-
-### 一、数据来源
-
-1.1 本项目的各官方平台在线数据来源原理是从其公开服务器中拉取数据（与未登录状态在官方平台 APP 获取的数据相同），经过对数据简单地筛选与合并后进行展示，因此本项目不对数据的合法性、准确性负责。
-
-1.2 本项目本身没有获取某个音频数据的能力，本项目使用的在线音频数据来源来自软件设置内“自定义源”设置所选择的“源”返回的在线链接。例如播放某首歌，本项目所做的只是将希望播放的歌曲名、艺术家等信息传递给“源”，若“源”返回了一个链接，则本项目将认为这就是该歌曲的音频数据而进行使用，至于这是不是正确的音频数据本项目无法校验其准确性，所以使用本项目的过程中可能会出现希望播放的音频与实际播放的音频不对应或者无法播放的问题。
-
-1.3 本项目的非官方平台数据（例如“我的列表”内列表）来自使用者本地系统或者使用者连接的同步服务，本项目不对这些数据的合法性、准确性负责。
-
-### 二、版权数据
-
-2.1 使用本项目的过程中可能会产生版权数据。对于这些版权数据，本项目不拥有它们的所有权。为了避免侵权，使用者务必在 **24 小时内** 清除使用本项目的过程中所产生的版权数据。
-
-### 三、音乐平台别名
-
-3.1 本项目内的官方音乐平台别名为本项目内对官方音乐平台的一个称呼，不包含恶意。如果官方音乐平台觉得不妥，可联系本项目更改或移除。
-
-### 四、资源使用
-
-4.1 本项目内使用的部分包括但不限于字体、图片等资源来源于互联网。如果出现侵权可联系本项目移除。
-
-### 五、免责声明
-
-5.1 由于使用本项目产生的包括由于本协议或由于使用或无法使用本项目而引起的任何性质的任何直接、间接、特殊、偶然或结果性损害（包括但不限于因商誉损失、停工、计算机故障或故障引起的损害赔偿，或任何及所有其他商业损害或损失）由使用者负责。
-
-### 六、使用限制
-
-6.1 本项目完全免费，且开源发布于 GitHub 面向全世界人用作对技术的学习交流。本项目不对项目内的技术可能存在违反当地法律法规的行为作保证。
-
-6.2 **禁止在违反当地法律法规的情况下使用本项目。** 对于使用者在明知或不知当地法律法规不允许的情况下使用本项目所造成的任何违法违规行为由使用者承担，本项目不承担由此造成的任何直接、间接、特殊、偶然或结果性责任。
-
-### 七、版权保护
-
-7.1 音乐平台不易，请尊重版权，支持正版。
-
-### 八、非商业性质
-
-8.1 本项目仅用于对技术可行性的探索及研究，不接受任何商业（包括但不限于广告等）合作及捐赠。
-
-### 九、接受协议
-
-9.1 若你使用了本项目，即代表你接受本协议。
-
----
-
-若对此有疑问请联系 zhouchaoyi03@foxmail.com。
+Bug 反馈请附版本、系统、复现步骤和截图；提交 PR 至 `master`，并说明验证结果。
+第三方依赖及许可证保留在 [vendor](./vendor/README.md) 和 [licenses](./licenses)。
+项目许可证见 [LICENSE](./LICENSE)，原有补充协议见 [项目使用协议](./docs/usage.md)。

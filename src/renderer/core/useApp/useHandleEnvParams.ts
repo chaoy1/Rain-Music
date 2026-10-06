@@ -1,6 +1,6 @@
 import { useRouter } from '@common/utils/vueRouter'
 import { parseUrlParams } from '@common/utils/common'
-import { defaultList, loveList, userLists } from '@renderer/store/list/state'
+import { defaultList, userLists } from '@renderer/store/list/state'
 import { getListMusics } from '@renderer/store/list/action'
 import usePlaySonglist from './compositions/usePlaySonglist'
 import { playList } from '@renderer/core/player'
@@ -43,7 +43,7 @@ const useInitEnvParamPlay = () => {
 
   return async(playStr?: string) => {
     if (playStr == null || typeof playStr != 'string') return
-    // -play="source=kw&link=链接、ID"
+    // -play="source=tx&link=链接、ID"
     // -play="source=myList&name=名字"
     // -play="source=myList&name=名字&index=位置"
     const params = parseUrlParams(playStr)
@@ -52,7 +52,7 @@ const useInitEnvParamPlay = () => {
       case 'myList':
         if (params.name != null) {
           let targetList
-          const lists = [defaultList, loveList, ...userLists]
+          const lists = [defaultList, ...userLists]
           for (const list of lists) {
             if (list.name === params.name) {
               targetList = list
@@ -64,10 +64,8 @@ const useInitEnvParamPlay = () => {
           playList(targetList.id, getListPlayIndex(await getListMusics(targetList.id), params.index))
         }
         break
-      case 'kw':
-      case 'kg':
       case 'tx':
-      case 'mg':
+      case 'kg':
       case 'wy':
         void playSongListDetail(params.source, params.link, parseInt(params.index))
         break

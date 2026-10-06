@@ -25,14 +25,11 @@ export default () => {
   })
 
   // 已编辑的歌词
+  // 「已调整过偏移时间的歌词管理」分区与其底层能力已停用：
+  // 不再记录歌词偏移时间的调整，因此这里的写入（保存/删除已编辑歌词）通道一并删除。
+  // 读取通道与数据库中已有的旧数据保留，未做清理（避免误删用户历史数据）。
   mainHandle<string, Rain.Music.LyricInfo>(WIN_MAIN_RENDERER_EVENT_NAME.get_lyric_edited, async({ params: id }) => {
     return global.rain.worker.dbService.getEditedLyric(id)
-  })
-  mainHandle<Rain.Music.LyricInfoSave>(WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_edited, async({ params: { id, lyrics } }) => {
-    await global.rain.worker.dbService.editedLyricUpdateAddAndUpdate(id, lyrics)
-  })
-  mainHandle<string>(WIN_MAIN_RENDERER_EVENT_NAME.remove_lyric_edited, async({ params: id }) => {
-    await global.rain.worker.dbService.editedLyricRemove([id])
   })
   mainHandle<string>(WIN_MAIN_RENDERER_EVENT_NAME.clear_lyric_edited, async() => {
     await global.rain.worker.dbService.editedLyricClear()
@@ -84,17 +81,15 @@ export default () => {
 
   //   return {
   //     defaultList: electronStore_list.get('defaultList'),
-  //     loveList: electronStore_list.get('loveList'),
   //     tempList: electronStore_list.get('tempList'),
   //     userList: electronStore_list.get('userList'),
   //     downloadList: getStore('downloadList').get('list'),
   //   }
   // })
 
-  // const handleSaveList = ({ defaultList, loveList, userList, tempList }: Partial<Rain.List.MyAllList>) => {
+  // const handleSaveList = ({ defaultList, userList, tempList }: Partial<Rain.List.MyAllList>) => {
   //   let data: Partial<Rain.List.MyAllList> = {}
   //   if (defaultList != null) data.defaultList = defaultList
-  //   if (loveList != null) data.loveList = loveList
   //   if (userList != null) data.userList = userList
   //   if (tempList != null) data.tempList = tempList
   //   getStore('playList').set(data)

@@ -147,9 +147,7 @@ export const gunzipData = async(buf: Buffer): Promise<string> => {
  */
 export const saveRainConfigFile = async(path: string, data: any) => {
   if (!path.endsWith('.rainmc')) path += '.rainmc'
-  fs.writeFile(path, await gzipData(JSON.stringify(data)), 'binary', err => {
-    console.log(err)
-  })
+  await fs.promises.writeFile(path, await gzipData(JSON.stringify(data)))
 }
 
 /**

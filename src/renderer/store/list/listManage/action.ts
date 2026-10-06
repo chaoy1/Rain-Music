@@ -2,7 +2,6 @@ import { markRaw, markRawList, toRaw } from '@common/utils/vueTools'
 import {
   allMusicList,
   defaultList,
-  loveList,
   tempList,
   userLists,
 } from './state'
@@ -73,7 +72,6 @@ const updateList = ({
   let targetList
   switch (id) {
     case defaultList.id:
-    case loveList.id:
       break
     case tempList.id:
       tempList.meta = meta ?? {}
@@ -106,7 +104,7 @@ const overwriteUserList = (lists: Rain.List.UserListInfo[]) => {
 // }
 
 
-export const listDataOverwrite = ({ defaultList, loveList, userList, tempList }: MakeOptional<Rain.List.ListDataFull, 'tempList'>): string[] => {
+export const listDataOverwrite = ({ defaultList, userList, tempList }: MakeOptional<Rain.List.ListDataFull, 'tempList'>): string[] => {
   const updatedListIds: string[] = []
   const newUserIds: string[] = []
   const newUserListInfos = userList.map(({ list, ...listInfo }) => {
@@ -129,14 +127,11 @@ export const listDataOverwrite = ({ defaultList, loveList, userList, tempList }:
     updatedListIds.push(LIST_IDS.DEFAULT)
   }
 
-  overwriteMusicList(LIST_IDS.LOVE, loveList)
-  updatedListIds.push(LIST_IDS.LOVE)
-
   if (tempList && allMusicList.has(LIST_IDS.TEMP)) {
     overwriteMusicList(LIST_IDS.TEMP, tempList)
     updatedListIds.push(LIST_IDS.TEMP)
   }
-  const newIds = [LIST_IDS.DEFAULT, LIST_IDS.LOVE, ...userList.map(l => l.id)]
+  const newIds = [LIST_IDS.DEFAULT, ...userList.map(l => l.id)]
   if (tempList) newIds.push(LIST_IDS.TEMP)
   void overwriteListPosition(newIds)
   void overwriteListUpdateInfo(newIds)
@@ -207,7 +202,7 @@ export const userListsUpdatePosition = (position: number, ids: string[]) => {
 export const listMusicOverwrite = (listId: string, musicInfos: Rain.Music.MusicInfo[]): string[] => {
   const isExist = allMusicList.has(listId)
   overwriteMusicList(listId, musicInfos)
-  return isExist || listId == loveList.id ? [listId] : []
+  return isExist ? [listId] : []
 }
 
 export const listMusicClear = (ids: string[]): string[] => {
@@ -223,7 +218,7 @@ export const listMusicClear = (ids: string[]): string[] => {
 
 export const listMusicAdd = (id: string, musicInfos: Rain.Music.MusicInfo[], addMusicLocationType: Rain.AddMusicLocationType): string[] => {
   const targetList = allMusicList.get(id)
-  if (!targetList) return id == loveList.id ? [id] : []
+  if (!targetList) return []
 
   const listSet = new Set<string>()
   for (const item of targetList) listSet.add(item.id)
@@ -255,7 +250,7 @@ export const listMusicMove = (fromId: string, toId: string, musicInfos: Rain.Mus
 
 export const listMusicRemove = (listId: string, ids: string[]): string[] => {
   let targetList = allMusicList.get(listId)
-  if (!targetList) return listId == loveList.id ? [listId] : []
+  if (!targetList) return []
 
   const idsSet = new Set<string>(ids)
   const newList = targetList.filter(mInfo => !idsSet.has(mInfo.id))
@@ -288,7 +283,7 @@ export const listMusicUpdateInfo = (musicInfos: Rain.List.ListActionMusicUpdate)
 
 export const listMusicUpdatePosition = async(listId: string, position: number, ids: string[]): Promise<string[]> => {
   let targetList = allMusicList.get(listId)
-  if (!targetList) return listId == loveList.id ? [listId] : []
+  if (!targetList) return []
 
 
   // const infos = Array(ids.length)

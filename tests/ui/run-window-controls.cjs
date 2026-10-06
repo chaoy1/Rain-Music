@@ -6,6 +6,7 @@ const data = path.join(root, '.design/traffic-test-data')
 fs.mkdirSync(data, { recursive: true })
 const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
+env.RAIN_NO_PROTOCOL_REGISTRATION = '1'
 const result = spawnSync(require('electron'), [path.join(__dirname, 'traffic-lights.electron.cjs'), `--user-data-dir=${data}`], {
   cwd: root, env, stdio: 'inherit', windowsHide: true, timeout: 30000,
 })

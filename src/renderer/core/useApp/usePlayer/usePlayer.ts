@@ -3,8 +3,6 @@ import { useI18n } from '@renderer/plugins/i18n'
 import { setTitle } from '@renderer/utils'
 
 import {
-  getCurrentTime,
-  getDuration,
   setPause, setStop,
 } from '@renderer/plugins/player'
 
@@ -16,6 +14,7 @@ import {
   musicInfo,
   playMusicInfo,
   playedList,
+  isPlay,
 } from '@renderer/store/player/state'
 import {
   setPlay,
@@ -31,7 +30,7 @@ import useLyric from './useLyric'
 import useVolume from './useVolume'
 import useWatchList from './useWatchList'
 import { HOTKEY_PLAYER } from '@common/hotKey'
-import { playNext, pause, playPrev, togglePlay, collectMusic, uncollectMusic, dislikeMusic } from '@renderer/core/player'
+import { playNext, pause, playPrev, togglePlay } from '@renderer/core/player'
 import usePlaybackRate from './usePlaybackRate'
 import useSoundEffect from './useSoundEffect'
 import useMaxOutputChannelCount from './useMaxOutputChannelCount'
@@ -67,6 +66,14 @@ export default () => {
     setPowerSaveBlocker(false)
   }
 
+  // 「播放歌曲时阻止电脑休眠」已从设置页移除，行为固定为 true。
+  // 原设置项改为固定值后，这里在软件启动（播放器初始化完成）时应用一次，
+  // 代替原本由设置页 handler 触发的那次调用。
+  const restorePowerSaveBlocker = () => {
+    if (isPlay.value) setPowerSaveBlocker(true, true)
+  }
+  restorePowerSaveBlocker()
+
   const setPlayStatus = () => {
     setPlay(true)
   }
@@ -98,24 +105,6 @@ export default () => {
     // })
   }
 
-  const setProgress = (time: number) => {
-    window.app_event.setProgress(time)
-  }
-  const handleSeekforward = () => {
-    const seekOffset = 5
-    const curTime = getCurrentTime()
-    const time = Math.min(getCurrentTime() + seekOffset, getDuration())
-    if (Math.trunc(curTime) == Math.trunc(time)) return
-    setProgress(time)
-  }
-  const handleSeekbackward = () => {
-    const seekOffset = 5
-    const curTime = getCurrentTime()
-    const time = Math.max(getCurrentTime() - seekOffset, 0)
-    if (Math.trunc(curTime) == Math.trunc(time)) return
-    setProgress(time)
-  }
-
   const setStopStatus = () => {
     setPlay(false)
     setTitle(null)
@@ -136,11 +125,6 @@ export default () => {
   window.key_event.on(HOTKEY_PLAYER.next.action, handlePlayNext)
   window.key_event.on(HOTKEY_PLAYER.prev.action, handlePlayPrev)
   window.key_event.on(HOTKEY_PLAYER.toggle_play.action, togglePlay)
-  window.key_event.on(HOTKEY_PLAYER.music_love.action, collectMusic)
-  window.key_event.on(HOTKEY_PLAYER.music_unlove.action, uncollectMusic)
-  window.key_event.on(HOTKEY_PLAYER.music_dislike.action, dislikeMusic)
-  window.key_event.on(HOTKEY_PLAYER.seekbackward.action, handleSeekbackward)
-  window.key_event.on(HOTKEY_PLAYER.seekforward.action, handleSeekforward)
 
   window.app_event.on('play', setPlayStatus)
   window.app_event.on('pause', setPauseStatus)
@@ -160,11 +144,6 @@ export default () => {
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     window.key_event.off(HOTKEY_PLAYER.prev.action, handlePlayPrev)
     window.key_event.off(HOTKEY_PLAYER.toggle_play.action, togglePlay)
-    window.key_event.off(HOTKEY_PLAYER.music_love.action, collectMusic)
-    window.key_event.off(HOTKEY_PLAYER.music_unlove.action, uncollectMusic)
-    window.key_event.off(HOTKEY_PLAYER.music_dislike.action, dislikeMusic)
-    window.key_event.off(HOTKEY_PLAYER.seekbackward.action, handleSeekbackward)
-    window.key_event.off(HOTKEY_PLAYER.seekforward.action, handleSeekforward)
 
 
     window.app_event.off('play', setPlayStatus)

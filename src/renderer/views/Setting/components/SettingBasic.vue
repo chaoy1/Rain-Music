@@ -1,22 +1,11 @@
 <template lang="pug">
 dt#basic {{ $t('setting__basic') }}
-dd
-  div
-    .gap-top
-      base-checkbox(id="setting_show_animate" :model-value="appSetting['common.isShowAnimation']" :label="$t('setting__basic_show_animation')" @update:model-value="updateSetting({'common.isShowAnimation': $event})")
-    .gap-top
-      base-checkbox(id="setting_animate" :disabled="!appSetting['common.isShowAnimation']" :model-value="appSetting['common.randomAnimate']" :label="$t('setting__basic_animation')" @update:model-value="updateSetting({'common.randomAnimate': $event})")
-    .gap-top
-      base-checkbox(id="setting_start_in_fullscreen" :model-value="appSetting['common.startInFullscreen']" :label="$t('setting__basic_start_in_fullscreen')" @update:model-value="updateSetting({'common.startInFullscreen': $event})")
-    .gap-top
-      base-checkbox(id="setting_to_tray" :model-value="appSetting['tray.enable']" :label="$t('setting__basic_to_tray')" @update:model-value="updateSetting({'tray.enable': $event})")
-    .p.gap-top
-      base-btn.btn(min @click="isShowPlayTimeoutModal = true") {{ $t('setting__play_timeout')}} {{ timeLabel ? ` (${timeLabel})` : '' }}
-
+//- 原先这一节的「显示动画效果 / 弹出层随机动画 / 全屏模式启动 / 关闭窗口最小化 / 定时关闭」
+//- 控件已全部移除，对应行为固定在代码里（见 src/common/constants.ts 与各处注释）。
 dd
   h3#basic_theme {{ $t('setting__basic_theme') }}
   div
-    ul(:class="$style.theme")
+    ul#settings-themes(:class="$style.theme")
       li(v-for="theme in themeList" :key="theme.id" :aria-label="theme.name" :style="theme.styles" :class="[$style.themeItem, {[$style.active]: themeId == theme.id}]" @click="toggleTheme(theme)" @contextmenu="handleEditTheme(theme)")
         div(:class="$style.bg")
         span(:class="$style.label") {{ theme.name }}
@@ -31,9 +20,9 @@ dd
           div(:class="$style.bgContent")
             svg-icon(:class="$style.icon" name="plus")
         span(:class="$style.label") {{ $t('theme_add') }}
-      li(v-if="!showAllTheme" :aria-label="$t('theme_more_btn_show')" :class="[$style.themeItem, $style.moreThme]" @click="showAllTheme = true")
-        span(:class="$style.label") {{ $t('theme_more_btn_show') }}
-        svg-icon(name="angle-right-solid" :class="$style.activeIcon")
+    base-btn(:class="$style.themeToggle" data-theme-toggle :aria-expanded="showAllTheme" aria-controls="settings-themes" @click="showAllTheme = !showAllTheme")
+      | {{ $t(showAllTheme ? 'theme_more_btn_hide' : 'theme_more_btn_show') }}
+      span(aria-hidden="true") {{ showAllTheme ? '−' : '+' }}
 
 dd
   h3#basic_source {{ $t('setting__basic_source') }}
@@ -50,66 +39,36 @@ dd
       base-btn.btn(min @click="isShowUserApiModal = true") {{ $t('setting__basic_source_user_api_btn') }}
 
 dd
-  h3#basic_window_size {{ $t('setting__basic_window_size') }}
-  div
-    base-checkbox.gap-left(
-      v-for="item in windowSizeList" :id="`setting_window_size_${item.id}`" :key="item.id"
-      name="setting_window_size" need :model-value="appSetting['common.windowSizeId']" :disabled="isFullscreen" :value="item.id" :label="$t('setting__basic_window_size_' + item.name)"
-      @update:model-value="updateSetting({'common.windowSizeId': $event})")
+  .settings-fields
+    .settings-field
+      label(for="setting_window_size") {{ $t('setting__basic_window_size') }}
+      select#setting_window_size.settings-select(:value="appSetting['common.windowSizeId']" :disabled="isFullscreen" @change="updateSetting({'common.windowSizeId': Number($event.target.value)})")
+        option(v-for="item in windowSizeList" :key="item.id" :value="item.id") {{ $t('setting__basic_window_size_' + item.name) }}
+    .settings-field
+      label(for="setting_font_size") {{ $t('setting__basic_font_size') }}
+      select#setting_font_size.settings-select(:value="appSetting['common.fontSize']" :disabled="isFullscreen" @change="updateSetting({'common.fontSize': Number($event.target.value)})")
+        option(v-for="item in fontSizeList" :key="item.id" :value="item.id") {{ item.label }}
+    .settings-field
+      label(for="setting_language") {{ $t('setting__basic_lang') }}
+      select#setting_language.settings-select(:value="appSetting['common.langId']" @change="updateSetting({'common.langId': $event.target.value})")
+        option(v-for="item in langList" :key="item.locale" :value="item.locale") {{ item.name }}
 
-dd
-  h3#basic_font_size {{ $t('setting__basic_font_size') }}
-  div
-    //- base-selection.gap-teft(:list="fontSizeList" :model-value="appSetting['common.fontSize']" @update:model-value="updateSetting({'common.fontSize': $event})")
-    base-checkbox.gap-left(
-      v-for="item in fontSizeList" :id="`setting_basic_font_size_${item.id}`" :key="item.id"
-      name="setting_basic_font_size" need :model-value="appSetting['common.fontSize']" :value="item.id"
-      :label="item.label" :disabled="isFullscreen" @update:model-value="updateSetting({'common.fontSize': $event})")
-
-dd
-  h3#basic_font {{ $t('setting__basic_font') }}
-  div(style="--selection-width: 12rem;")
-    base-selection.gap-left(:list="fontList" :model-value="fonts[0]" item-key="id" item-name="label" @update:model-value="updateFonts($event, fonts[1])")
-    base-selection.gap-left(v-if="fonts[0]" :list="fontList" :model-value="fonts[1]" item-key="id" item-name="label" @update:model-value="updateFonts(fonts[0], $event)")
-    //- base-selection.gap-teft(:list="fontList" :model-value="appSetting['common.font']" item-key="id" item-name="label" @update:model-value="updateSetting({'common.font': $event})")
-
-dd
-  h3#basic_lang {{ $t('setting__basic_lang') }}
-  div
-    base-checkbox.gap-left(
-      v-for="item in langList" :id="`setting_lang_${item.locale}`" :key="item.locale" name="setting_lang"
-      need :model-value="appSetting['common.langId']" :value="item.locale" :label="item.name" @update:model-value="updateSetting({'common.langId': $event})")
-
-dd
-  h3#basic_sourcename {{ $t('setting__basic_sourcename') }}
-  div
-    base-checkbox.gap-left(
-      v-for="item in sourceNameTypes" :id="`setting_abasic_sourcename_${item.id}`" :key="item.id"
-      name="setting_basic_sourcename" need :model-value="appSetting['common.sourceNameType']" :value="item.id" :label="item.label" @update:model-value="updateSetting({'common.sourceNameType': $event})")
-dd
-  h3#basic_control_btn_position {{ $t('setting__basic_control_btn_position') }}
-  div
-    base-checkbox.gap-left(
-      v-for="item in controlBtnPositionList" :id="`setting_basic_control_btn_position_${item.id}`" :key="item.id"
-      name="setting_basic_control_btn_position" need :model-value="appSetting['common.controlBtnPosition']" :value="item.id" :label="item.name" @update:model-value="updateSetting({'common.controlBtnPosition': $event})")
+//- 「字体」分区与「控制按钮位置」分区已整体删除：
+//- common.font 固定使用主题默认字体，common.controlBtnPosition 固定为 'left'。
 ThemeSelectorModal(v-model="isShowThemeSelectorModal")
 ThemeEditModal(v-model="isShowThemeEditModal" :theme-id="editThemeId" @submit="handleRefreshTheme")
-play-timeout-modal(v-model="isShowPlayTimeoutModal")
 user-api-modal(v-model="isShowUserApiModal")
 </template>
 
 <script>
 import { computed, ref, watch, reactive, shallowReactive } from '@common/utils/vueTools'
-import { windowSizeList, userApi, isFullscreen, themeId } from '@renderer/store'
+import { userApi, isFullscreen, themeId, windowSizeList } from '@renderer/store'
 import { langList, useI18n } from '@root/lang'
-import { getSystemFonts } from '@renderer/utils/ipc'
 import apiSourceInfo from '@renderer/utils/musicSdk/api-source-info'
-import { useTimeout } from '@renderer/core/player/timeoutStop'
 import { dialog } from '@renderer/plugins/Dialog'
 
 import ThemeSelectorModal from './ThemeSelectorModal.vue'
 import ThemeEditModal from './ThemeEditModal/index.vue'
-import PlayTimeoutModal from './PlayTimeoutModal.vue'
 import UserApiModal from './UserApiModal.vue'
 import { appSetting, updateSetting } from '@renderer/store/setting'
 import { getThemes, applyTheme, findTheme, buildBgUrl } from '@renderer/store/utils'
@@ -119,7 +78,6 @@ export default {
   components: {
     ThemeSelectorModal,
     ThemeEditModal,
-    PlayTimeoutModal,
     UserApiModal,
   },
   setup() {
@@ -237,9 +195,6 @@ export default {
     }
     const isShowThemeEditModal = ref(false)
 
-    const isShowPlayTimeoutModal = ref(false)
-    const { timeLabel } = useTimeout()
-
     const isShowUserApiModal = ref(false)
     const getApiStatus = () => {
       let status
@@ -270,48 +225,15 @@ export default {
       ]
     })
 
-    const sourceNameTypes = computed(() => {
-      return [
-        { id: 'real', label: t('setting__basic_sourcename_real') },
-        { id: 'alias', label: t('setting__basic_sourcename_alias') },
-      ]
-    })
+    // common.controlBtnPosition 设置项已移除，控件与分区一并删除，行为固定为 'left'。
+    // common.font 分区已删除，字体固定使用主题默认字体。
 
-
-    const controlBtnPositionList = computed(() => {
-      return [
-        { id: 'left', name: t('setting__basic_control_btn_position_left') },
-        { id: 'right', name: t('setting__basic_control_btn_position_right') },
-      ]
-    })
-
-    const systemFontList = ref([])
-    const fontList = computed(() => {
-      return [{ id: '', label: t('setting__desktop_lyric_font_default') }, ...systemFontList.value]
-    })
-    void getSystemFonts().then(fonts => {
-      systemFontList.value = fonts.map(f => ({ id: f, label: f.replace(/(^"|"$)/g, '') }))
-    })
-
-    const fonts = computed(() => {
-      if (!appSetting['common.font']) return ['', '']
-      let [f1 = '', f2 = ''] = appSetting['common.font'].split(',')
-      return [f1.trim(), f2.trim()]
-    })
-    const updateFonts = (font1, font2) => {
-      let font = []
-      if (font1) font.push(font1)
-      if (font2) font.push(font2)
-      updateSetting({ 'common.font': font.join(', ') })
-    }
     const fontSizeList = computed(() => {
+      // 只保留中文标签为「小」「标准」「大」的三档
       return [
-        { id: 14, label: t('setting__basic_font_size_14px') },
         { id: 15, label: t('setting__basic_font_size_15px') },
         { id: 16, label: t('setting__basic_font_size_16px') },
         { id: 17, label: t('setting__basic_font_size_17px') },
-        { id: 18, label: t('setting__basic_font_size_18px') },
-        { id: 19, label: t('setting__basic_font_size_19px') },
       ]
     })
 
@@ -323,23 +245,16 @@ export default {
       autoTheme,
       showAllTheme,
       themeList,
-      fonts,
-      updateFonts,
       // currentStting,
       // themes,
       // themeClassName,
       isShowThemeSelectorModal,
       isShowThemeEditModal,
       handleSetThemeAuto,
-      isShowPlayTimeoutModal,
-      timeLabel,
       apiSources,
       isShowUserApiModal,
       windowSizeList,
       langList,
-      sourceNameTypes,
-      controlBtnPositionList,
-      fontList,
       isFullscreen,
       toggleTheme,
       themeId,
@@ -359,7 +274,7 @@ export default {
   display: flex;
   flex-flow: row wrap;
   // padding: 0 15px;
-  margin-bottom: -20px;
+  margin-bottom: 0;
 
   .themeItem {
     display: flex;
@@ -542,5 +457,7 @@ export default {
     margin-left: 5px;
   }
 }
+
+.themeToggle { margin-top: 2px; }
 
 </style>

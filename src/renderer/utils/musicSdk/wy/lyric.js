@@ -250,8 +250,6 @@ const parseTools = {
 //   })
 //   return requestObj
 // }
-
-// 上游 issue #370
 const fixTimeLabel = (lrc, tlrc, romalrc) => {
   if (lrc) {
     let newLrc = lrc.replace(/\[(\d{2}:\d{2}):(\d{2})]/g, '[$1.$2]')

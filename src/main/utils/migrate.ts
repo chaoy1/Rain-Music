@@ -34,17 +34,17 @@ interface OldUserListInfo {
  * @returns
  */
 export const migrateDBData = async() => {
-  let playList = await parseDataFile<{ defaultList?: { list: any[] }, loveList?: { list: any[] }, tempList?: { list: any[] }, userList?: OldUserListInfo[] }>('playList.json')
+  // 旧数据里的 loveList（我的收藏）已随该列表一起废弃：这里刻意不再读取，
+  // 让老用户的收藏数据不会被迁移进新库（用户要求连同数据删除，不做迁移）。
+  let playList = await parseDataFile<{ defaultList?: { list: any[] }, tempList?: { list: any[] }, userList?: OldUserListInfo[] }>('playList.json')
   let listDataAll: Rain.List.ListDataFull = {
     defaultList: [],
-    loveList: [],
     userList: [],
     tempList: [],
   }
   let isRequiredSave = false
   if (playList) {
     if (playList.defaultList) listDataAll.defaultList = filterMusicList(playList.defaultList.list.map(m => toNewMusicInfo(m)))
-    if (playList.loveList) listDataAll.loveList = filterMusicList(playList.loveList.list.map(m => toNewMusicInfo(m)))
     if (playList.tempList) listDataAll.tempList = filterMusicList(playList.tempList.list.map(m => toNewMusicInfo(m)))
     if (playList.userList) {
       listDataAll.userList = playList.userList.map(l => {
@@ -57,11 +57,10 @@ export const migrateDBData = async() => {
     }
     isRequiredSave = true
   } else {
-    const config = await parseDataFile<{ list?: { defaultList?: any[], loveList?: any[] } }>('config.json')
+    const config = await parseDataFile<{ list?: { defaultList?: any[] } }>('config.json')
     if (config?.list) {
       const list = config.list
       if (list.defaultList) listDataAll.defaultList = filterMusicList(list.defaultList.map(m => toNewMusicInfo(m)))
-      if (list.loveList) listDataAll.loveList = filterMusicList(list.loveList.map(m => toNewMusicInfo(m)))
       isRequiredSave = true
     }
   }

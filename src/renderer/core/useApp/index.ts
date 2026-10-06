@@ -1,10 +1,8 @@
 import { getEnvParams, getViewPrevState, sendInited } from '@renderer/utils/ipc'
 
-import { proxy, isFullscreen, themeId, wallpaperUrl } from '@renderer/store'
+import { themeId, wallpaperUrl } from '@renderer/store'
 import { appSetting } from '@renderer/store/setting'
 
-import useSync from './useSync'
-import useOpenAPI from './useOpenAPI'
 import useStatusbarLyric from './useStatusbarLyric'
 import useDataInit from './useDataInit'
 import useHandleEnvParams from './useHandleEnvParams'
@@ -13,6 +11,7 @@ import useDeeplink from './useDeeplink'
 import usePlayer from './usePlayer'
 import useSettingSync from './useSettingSync'
 import { useRouter } from '@common/utils/vueRouter'
+import { LEGACY_LOVE_LIST_ID } from '@common/constants'
 import handleListAutoUpdate from './listAutoUpdate'
 
 /**
@@ -36,15 +35,10 @@ const applyWallpaper = (wallpaper?: string | null) => {
 
 export default () => {
   // apiSource.value = appSetting['common.apiSource']
-  proxy.enable = appSetting['network.proxy.enable']
-  proxy.host = appSetting['network.proxy.host']
-  proxy.port = appSetting['network.proxy.port']
-  isFullscreen.value = appSetting['common.startInFullscreen']
+  // common.startInFullscreen 设置项已移除，行为固定为「不以此启动」
   themeId.value = appSetting['theme.id']
 
   const router = useRouter()
-  const initSyncService = useSync()
-  const initOpenAPI = useOpenAPI()
   const initStatusbarLyric = useStatusbarLyric()
   useEventListener()
   const initPlayer = usePlayer()
@@ -56,34 +50,19 @@ export default () => {
   useSettingSync()
 
   void getEnvParams().then(async(envParams) => {
-    // 移除代理相关的环境变量设置，防止请求库自动应用它们
-    // eslint-disable-next-line no-undef
-    // const processEnv = ENVIRONMENT
-    // for (const key of Object.keys(processEnv)) {
-    //   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    //   if (/^(?:http_proxy|https_proxy|NO_PROXY)$/i.test(key)) delete processEnv[key]
-    // }
     applyWallpaper(envParams.wallpaper)
 
-    const envProxy = envParams.cmdParams['proxy-server']
-    if (envProxy && typeof envProxy == 'string') {
-      const [host, port = ''] = envProxy.split(':')
-      proxy.envProxy = {
-        host,
-        port,
-      }
-    }
-
     const state = await getViewPrevState()
-    await router.replace({ path: '/list', query: state.url === '/list' ? state.query : {} })
+    // 内置「我的收藏」列表已删除：老配置里记录的列表页选中项不再有效，
+    // 此时不带上 query，让列表页回落到「试听列表」（见 utils/data.ts 的 getListPrevSelectId）
+    const isRemovedLoveList = (state.query as { id?: string }).id === LEGACY_LOVE_LIST_ID
+    await router.replace({ path: '/list', query: state.url === '/list' && !isRemovedLoveList ? state.query : {} })
 
     // 初始化我的列表、下载列表等数据
     void initData().then(() => {
       initPlayer()
       handleEnvParams(envParams) // 处理传入的启动参数
       void initDeeplink(envParams)
-      void initSyncService()
-      void initOpenAPI()
       void initStatusbarLyric()
       sendInited()
 

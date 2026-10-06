@@ -5,6 +5,7 @@ import { isPlay, musicInfo } from '@renderer/store/player/state'
 import { setStatusText } from '@renderer/store/player/action'
 import { markRawList } from '@common/utils/vueTools'
 import { appSetting } from '@renderer/store/setting'
+import { PLAY_RAINLRC, SHOW_LYRIC_ROMA, SHOW_LYRIC_TRANSLATION, SWAP_LYRIC_TRANSLATION_AND_ROMA } from '@common/constants'
 import { onNewDesktopLyricProcess } from '@renderer/utils/ipc'
 
 const getCurrentTime = () => {
@@ -160,12 +161,14 @@ export const setLyric = () => {
   if (!musicInfo.id) return
   if (musicInfo.lrc) {
     const extendedLyrics = []
-    if (appSetting['player.isShowLyricRoma'] && musicInfo.rlrc) extendedLyrics.push(musicInfo.rlrc)
-    if (appSetting['player.isShowLyricTranslation'] && musicInfo.tlrc) extendedLyrics.push(musicInfo.tlrc)
-    if (appSetting['player.isSwapLyricTranslationAndRoma']) extendedLyrics.reverse()
+    // 「显示罗马音」/「显示歌词翻译」/「调换翻译与罗马音位置」/「使用卡拉OK歌词」
+    // 四个设置项已移除，行为固定为 src/common/constants.ts 里的常量。
+    if (SHOW_LYRIC_ROMA && musicInfo.rlrc) extendedLyrics.push(musicInfo.rlrc)
+    if (SHOW_LYRIC_TRANSLATION && musicInfo.tlrc) extendedLyrics.push(musicInfo.tlrc)
+    if (SWAP_LYRIC_TRANSLATION_AND_ROMA) extendedLyrics.reverse()
 
     lrc.setLyric(
-      appSetting['player.isPlayRainlrc'] && musicInfo.rainlrc ? musicInfo.rainlrc : musicInfo.lrc,
+      PLAY_RAINLRC && musicInfo.rainlrc ? musicInfo.rainlrc : musicInfo.lrc,
       extendedLyrics,
     )
     sendDesktopLyricInfo({

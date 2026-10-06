@@ -114,19 +114,14 @@ const modules = {
     clear_lyric_raw: 'clear_lyric_raw',
     get_lyric_raw_count: 'get_lyric_raw_count',
     get_lyric_edited: 'get_lyric_edited',
-    save_lyric_edited: 'save_lyric_edited',
-    remove_lyric_edited: 'remove_lyric_edited',
+    // 歌词偏移时间的调整不再持久化（「已调整过偏移时间的歌词管理」已停用），
+    // 对应的写入通道 save_lyric_edited / remove_lyric_edited 已删除。
     clear_lyric_edited: 'clear_lyric_edited',
     get_lyric_edited_count: 'get_lyric_edited_count',
     get_music_url: 'get_music_url',
     save_music_url: 'save_music_url',
     clear_music_url: 'clear_music_url',
     get_music_url_count: 'get_music_url_count',
-
-    open_api_action: 'open_api_action',
-    sync_action: 'sync_action',
-    sync_get_server_devices: 'sync_get_server_devices',
-    sync_remove_server_device: 'sync_remove_server_device',
 
     process_new_desktop_lyric_client: 'process_new_desktop_lyric_client',
 
@@ -161,6 +156,7 @@ const modules = {
     enable: 'enable',
     status: 'status',
     set_config: 'set_config',
+    apply_config: 'apply_config',
   },
 }
 

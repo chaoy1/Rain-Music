@@ -19,35 +19,6 @@ const denyEvents = [
   'media-started-playing',
 ] as const
 
-
-export const getProxy = () => {
-  if (global.rain.appSetting['network.proxy.enable'] && global.rain.appSetting['network.proxy.host']) {
-    return {
-      host: global.rain.appSetting['network.proxy.host'],
-      port: global.rain.appSetting['network.proxy.port'],
-    }
-  }
-  const envProxy = envParams.cmdParams['proxy-server']
-  if (envProxy) {
-    if (envProxy && typeof envProxy == 'string') {
-      const [host, port = ''] = envProxy.split(':')
-      return {
-        host,
-        port,
-      }
-    }
-  }
-  return {
-    host: '',
-    port: '',
-  }
-}
-const handleUpdateProxy = (keys: Array<keyof Rain.AppSetting>) => {
-  if (keys.includes('network.proxy.enable') || (global.rain.appSetting['network.proxy.enable'] && keys.some(k => k.startsWith('network.proxy.')))) {
-    sendEvent(USER_API_RENDERER_EVENT_NAME.proxyUpdate, getProxy())
-  }
-}
-
 const winEvent = () => {
   if (!browserWindow) return
   browserWindow.on('closed', () => {
@@ -123,8 +94,7 @@ export const createWindow = async(userApi: Rain.UserApi.UserApiInfo) => {
   await browserWindow.loadURL('data:text/html;charset=UTF-8,' + encodeURIComponent(html))
 
   browserWindow.on('ready-to-show', async() => {
-    global.rain.event_app.on('updated_config', handleUpdateProxy)
-    sendEvent(USER_API_RENDERER_EVENT_NAME.initEnv, { ...userApi, script: await getScript(userApi.id), proxy: getProxy() })
+    sendEvent(USER_API_RENDERER_EVENT_NAME.initEnv, { ...userApi, script: await getScript(userApi.id) })
   })
 
   // global.modules.userApiWindow.loadFile(join(dir, 'renderer/user-api.html'))
@@ -132,7 +102,6 @@ export const createWindow = async(userApi: Rain.UserApi.UserApiInfo) => {
 }
 
 export const closeWindow = async() => {
-  global.rain.event_app.off('updated_config', handleUpdateProxy)
   if (!browserWindow) return
   await Promise.all([
     browserWindow.webContents.session.clearAuthCache(),

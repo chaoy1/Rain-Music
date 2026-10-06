@@ -1,65 +1,36 @@
-import { rendererSend, rendererInvoke, rendererOn, rendererOff } from '@common/rendererIpc'
-import { CMMON_EVENT_NAME, WIN_LYRIC_RENDERER_EVENT_NAME } from '@common/ipcNames'
+import type {} from '../types/bridge'
 
 type RemoveListener = () => void
+type Listener<T> = (payload: { params: T }) => void
 
-export const getSetting = async() => {
-  return rendererInvoke<Rain.DesktopLyric.Config>(WIN_LYRIC_RENDERER_EVENT_NAME.get_config)
+export const getSetting = async() => window.lyricBridge.getSetting()
+export const updateSetting = async(setting: Partial<Rain.DesktopLyric.Config>) => window.lyricBridge.updateSetting(setting)
+export const onSettingChanged = (listener: Listener<Partial<Rain.DesktopLyric.Config>>): RemoveListener => {
+  return window.lyricBridge.onSettingChanged(params => { listener({ params }) })
 }
-export const updateSetting = async(setting: Partial<Rain.DesktopLyric.Config>) => {
-  await rendererInvoke(WIN_LYRIC_RENDERER_EVENT_NAME.set_config, setting)
-}
-export const onSettingChanged = (listener: Rain.IpcRendererEventListenerParams<Partial<Rain.DesktopLyric.Config>>): RemoveListener => {
-  rendererOn<Partial<Rain.DesktopLyric.Config>>(WIN_LYRIC_RENDERER_EVENT_NAME.on_config_change, listener)
-  return () => {
-    rendererOff(WIN_LYRIC_RENDERER_EVENT_NAME.on_config_change, listener)
-  }
-}
-export const setWindowBounds = (bounds: Rain.DesktopLyric.NewBounds) => {
-  rendererSend<Rain.DesktopLyric.NewBounds>(WIN_LYRIC_RENDERER_EVENT_NAME.set_win_bounds, bounds)
-}
+export const setWindowBounds = (bounds: Rain.DesktopLyric.NewBounds) => { window.lyricBridge.setWindowBounds(bounds) }
 let previousResizable: boolean | null = null
 export const setWindowResizeable = (resizable: boolean) => {
   if (previousResizable === resizable) return
   previousResizable = resizable
   // https://github.com/electron/electron/issues/48352
-  // rendererSend<boolean>(WIN_LYRIC_RENDERER_EVENT_NAME.set_win_resizeable, resizable)
+  // Resizing remains disabled to avoid the Electron transparency regression.
 }
 
-export const sendConnectMainWindowEvent = () => {
-  rendererSend(WIN_LYRIC_RENDERER_EVENT_NAME.request_main_window_channel)
-}
-export const onProvideMainWindowChannel = (listener: Rain.IpcRendererEventListener): RemoveListener => {
-  rendererOn(WIN_LYRIC_RENDERER_EVENT_NAME.provide_main_window_channel, listener)
-  return () => {
-    rendererOff(WIN_LYRIC_RENDERER_EVENT_NAME.provide_main_window_channel, listener)
+export const sendConnectMainWindowEvent = () => { window.lyricBridge.requestMainWindowChannel() }
+export const onProvideMainWindowChannel = (listener: (port: MessagePort) => void): RemoveListener => {
+  const wrapped = (event: MessageEvent) => {
+    if (event.source !== window || event.data?.type !== 'rain-lyric-main-window-channel' || event.ports.length !== 1) return
+    listener(event.ports[0])
   }
+  window.addEventListener('message', wrapped)
+  return () => { window.removeEventListener('message', wrapped) }
 }
-export const onMainWindowInited = (listener: Rain.IpcRendererEventListener): RemoveListener => {
-  rendererOn(WIN_LYRIC_RENDERER_EVENT_NAME.main_window_inited, listener)
-  return () => {
-    rendererOff(WIN_LYRIC_RENDERER_EVENT_NAME.main_window_inited, listener)
-  }
+export const onMainWindowInited = (listener: () => void): RemoveListener => window.lyricBridge.onMainWindowInited(listener)
+export const sendMouseEnterLeave = (isEnter: boolean) => { window.lyricBridge.setMouseInWindow(isEnter) }
+export const onMouseEnterLeave = (listener: Listener<boolean>): RemoveListener => {
+  return window.lyricBridge.onMouseEnterLeave(params => { listener({ params }) })
 }
-
-export const sendMouseEnterLeave = (isEnter: boolean) => {
-  rendererSend(WIN_LYRIC_RENDERER_EVENT_NAME.mouse_enter_leave, isEnter)
-}
-export const onMouseEnterLeave = (listener: Rain.IpcRendererEventListenerParams<boolean>): RemoveListener => {
-  rendererOn<boolean>(WIN_LYRIC_RENDERER_EVENT_NAME.mouse_enter_leave, listener)
-  return () => {
-    rendererOff(WIN_LYRIC_RENDERER_EVENT_NAME.mouse_enter_leave, listener)
-  }
-}
-
-/**
- * On Theme Change
- * @param listener Rain.IpcRendererEventListenerParams<shouldUseDarkColors: boolean>
- * @returns RemoveListener Fn
- */
-export const onThemeChange = (listener: Rain.IpcRendererEventListenerParams<Rain.ThemeSetting>): RemoveListener => {
-  rendererOn(CMMON_EVENT_NAME.theme_change, listener)
-  return () => {
-    rendererOff(CMMON_EVENT_NAME.theme_change, listener)
-  }
+export const onThemeChange = (listener: Listener<Rain.ThemeSetting>): RemoveListener => {
+  return window.lyricBridge.onThemeChange(params => { listener({ params }) })
 }

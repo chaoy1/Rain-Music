@@ -3,7 +3,7 @@
     <main :class="$style.main">
       <h2>{{ $t('list_add__' + (isMove ? 'title_first_move' : 'title_first_add')) }}&nbsp;<span :class="$style.name">{{ currentMusicInfo.name }}</span>&nbsp;{{ $t('list_add__title_last') }}</h2>
       <div class="scroll" :class="$style.btnContent">
-        <base-btn v-for="(item, index) in lists" :key="item.id" :class="$style.btn" :aria-label="$t('list_add__btn_title', { name: item.name })" :disabled="item.isExist" @click="handleClick(index)">{{ item.name }}</base-btn>
+        <base-btn v-for="(item, index) in lists" :key="item.id" :class="$style.btn" :aria-label="$t('list_add__btn_title', { name: item.name })" :disabled="isSaving || item.isExist" @click="handleClick(index)">{{ item.name }}</base-btn>
         <base-btn :class="[$style.btn, $style.newList, isEditing ? $style.editing : null]" :aria-label="$t('lists__new_list_btn')" @click="handleEditing($event)">
           <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink" viewBox="0 0 42 42" space="preserve">
             <use xlink:href="#icon-addTo" />
@@ -12,14 +12,15 @@
         </base-btn>
         <span v-for="i in spaceNum" :key="i" :class="$style.btn" />
       </div>
+      <p v-if="saveError" role="status" :class="$style.error">{{ saveError }}</p>
     </main>
   </material-modal>
 </template>
 
 <script>
 // import { mapMutations } from 'vuex'
-import { watch, ref, onBeforeUnmount } from '@common/utils/vueTools'
-import { defaultList, loveList, userLists } from '@renderer/store/list/state'
+import { watch, ref, shallowRef, toRaw, onBeforeUnmount } from '@common/utils/vueTools'
+import { defaultList, userLists } from '@renderer/store/list/state'
 import { addListMusics, moveListMusics, createUserList, getMusicExistListIds } from '@renderer/store/list/action'
 import useKeyDown from '@renderer/utils/compositions/useKeyDown'
 import { useI18n } from '@root/lang'
@@ -62,13 +63,13 @@ export default {
       default: '#root',
     },
   },
-  emits: ['update:show'],
+  emits: ['update:show', 'select'],
   setup(props) {
     const keyModDown = useKeyDown('mod')
     const t = useI18n()
     const lists = ref([])
 
-    const currentMusicInfo = ref({})
+    const currentMusicInfo = shallowRef({})
 
     const checkMusicExist = (musicInfo) => {
       const mid = musicInfo.id
@@ -85,7 +86,6 @@ export default {
     const getList = () => {
       lists.value = [
         { ...defaultList, name: t(defaultList.name) },
-        { ...loveList, name: t(loveList.name) },
         ...userLists,
       ].filter(l => !props.excludeListId.includes(l.id)).map(l => ({ ...l, isExist: false }))
       checkMusicExist(currentMusicInfo.value)
@@ -125,6 +125,8 @@ export default {
   data() {
     return {
       isEditing: false,
+      isSaving: false,
+      saveError: '',
       newListName: '',
       rowNum: 3,
     }
@@ -150,17 +152,27 @@ export default {
           ? 4
           : width < 3840 ? 5 : 6
     },
-    handleClick(index) {
-      if (this.isMove) void moveListMusics(this.fromListId, this.lists[index].id, [this.currentMusicInfo])
-      else void addListMusics(this.lists[index].id, [this.currentMusicInfo])
-
-      this.lists[index].isExist = true
-      if (this.keyModDown && !this.isMove) return
-      this.$nextTick(() => {
+    async handleClick(index) {
+      const item = this.lists[index]
+      if (this.isSaving || !item || item.isExist) return
+      this.isSaving = true
+      this.saveError = ''
+      try {
+        const music = toRaw(this.currentMusicInfo)
+        if (this.isMove) await moveListMusics(this.fromListId, item.id, [music])
+        else await addListMusics(item.id, [music])
+        this.$emit('select', item.id, item)
+        item.isExist = true
+        if (this.keyModDown && !this.isMove) return
         this.handleClose()
-      })
+      } catch {
+        this.saveError = this.$t('list_add__failed')
+      } finally {
+        this.isSaving = false
+      }
     },
     handleClose() {
+      this.saveError = ''
       this.$emit('update:show', false)
     },
     handleEditing(event) {
@@ -208,6 +220,7 @@ export default {
 .name {
   color: var(--color-primary);
 }
+.error { margin: 0 15px 15px; color: #df6370; font-size: 12px; }
 
 .btnContent {
   flex: auto;

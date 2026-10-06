@@ -3,6 +3,12 @@ import { getDB } from '../../db'
 
 /**
  * 创建列表查询语句
+ *
+ * 用户自建歌单的顺序以 "position" 列为准（拖拽排序时由
+ * updateUserListsPosition 重写并持久化），因此查询必须显式按它排序，
+ * 否则取回的是 SQLite 的存储顺序（rowid），VACUUM 后可能改变，
+ * 排序结果便无法保证重启后仍然生效。
+ * 排序值相同的旧数据再按 rowid 兜底，保持其原有先后顺序。
  * @returns 查询语句
  */
 export const createListQueryStatement = () => {
@@ -10,6 +16,7 @@ export const createListQueryStatement = () => {
   return db.prepare<[]>(`
     SELECT "id", "name", "source", "sourceListId", "position", "locationUpdateTime"
     FROM "main"."my_list"
+    ORDER BY "position" ASC, "rowid" ASC
     `)
 }
 

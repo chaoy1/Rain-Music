@@ -31,7 +31,7 @@ body:
   attributes:
     label: Rain Music 版本
     description: 你使用什么版本的 Rain Music？
-    placeholder: 例如 2.9.0
+    placeholder: 例如 1.0.0
   validations:
     required: true
 - type: input
@@ -39,7 +39,7 @@ body:
   attributes:
     label: 最后正常的版本
     description: 如果有，请在此处填写最后正常的版本。
-    placeholder: 例如 2.8.0
+    placeholder: 例如此前测试版
 - type: input
   id: operating-system-version
   attributes:

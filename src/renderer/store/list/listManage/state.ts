@@ -9,11 +9,6 @@ export const defaultList = markRaw<Rain.List.MyDefaultListInfo>({
   // name: '试听列表',
 })
 
-export const loveList = markRaw<Rain.List.MyLoveListInfo>({
-  id: LIST_IDS.LOVE,
-  name: 'list__name_love',
-  // name: '我的收藏',
-})
 export const tempList = markRaw<Rain.List.MyTempListInfo>({
   id: LIST_IDS.TEMP,
   name: '临时列表',

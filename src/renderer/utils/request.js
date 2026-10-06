@@ -4,30 +4,7 @@ import { debugRequest } from './env'
 import { requestMsg } from './message'
 import { bHh } from './musicSdk/options'
 import { deflateRaw } from 'zlib'
-import { proxy } from '@renderer/store'
-import { httpOverHttp, httpsOverHttp } from 'tunnel'
 // import fs from 'fs'
-
-const httpsRxp = /^https:/
-const getRequestAgent = url => {
-  let options
-  if (proxy.enable && proxy.host) {
-    options = {
-      proxy: {
-        host: proxy.host,
-        port: proxy.port,
-      },
-    }
-  } else if (proxy.envProxy) {
-    options = {
-      proxy: {
-        host: proxy.envProxy.host,
-        port: proxy.envProxy.port,
-      },
-    }
-  }
-  return options ? (httpsRxp.test(url) ? httpsOverHttp : httpOverHttp)(options) : undefined
-}
 
 
 const request = (url, options, callback) => {
@@ -300,7 +277,6 @@ const fetchData = async(url, method, {
     method,
     headers: Object.assign({}, defaultHeaders, headers),
     timeout,
-    agent: getRequestAgent(url),
     json: format === 'json',
   }, (err, resp, body) => {
     if (err) return callback(err, null)

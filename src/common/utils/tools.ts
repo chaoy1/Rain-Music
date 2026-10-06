@@ -43,12 +43,6 @@ export const toNewMusicInfo = (oldMusicInfo: any): Rain.Music.MusicInfo => {
         meta.id = oldMusicInfo.songId
         meta.albumMid = oldMusicInfo.albumMid
         break
-      case 'mg':
-        meta.copyrightId = oldMusicInfo.copyrightId
-        meta.lrcUrl = oldMusicInfo.lrcUrl
-        meta.mrcUrl = oldMusicInfo.mrcUrl
-        meta.trcUrl = oldMusicInfo.trcUrl
-        break
     }
   }
 
@@ -86,12 +80,6 @@ export const toOldMusicInfo = (minfo: Rain.Music.MusicInfo) => {
         oInfo.strMediaMid = minfo.meta.strMediaMid
         oInfo.albumMid = minfo.meta.albumMid
         oInfo.songId = minfo.meta.id
-        break
-      case 'mg':
-        oInfo.copyrightId = minfo.meta.copyrightId
-        oInfo.lrcUrl = minfo.meta.lrcUrl
-        oInfo.mrcUrl = minfo.meta.mrcUrl
-        oInfo.trcUrl = minfo.meta.trcUrl
         break
     }
   }

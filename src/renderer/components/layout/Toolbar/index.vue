@@ -1,6 +1,7 @@
 <template>
   <div :class="[$style.toolbar, { [$style.fullscreen]: isFullscreen }]">
     <h1 :class="$style.title">{{ title }}</h1>
+    <DetailDismissButton v-if="route.name === 'SongListDetail'" data-playlist-back @click="handleSongListBack" />
   </div>
 </template>
 
@@ -10,9 +11,12 @@ import { isShowPlayerDetail } from '@renderer/store/player/state'
 import { computed } from '@common/utils/vueTools'
 import { useRoute } from '@common/utils/vueRouter'
 import { useI18n } from '@root/lang'
+import DetailDismissButton from '@renderer/components/common/DetailDismissButton.vue'
+import useSongListBack from '@renderer/views/songList/Detail/useSongListBack'
 
 const route = useRoute()
 const t = useI18n()
+const handleSongListBack = useSongListBack()
 const titles = { Search: 'search', SongList: 'song_list', Leaderboard: 'leaderboard', List: 'my_list', Download: 'download', Setting: 'setting' }
 const title = computed(() => t(isShowPlayerDetail.value ? 'player__detail_title' : titles[route.meta.name] || 'song_list'))
 

@@ -1,5 +1,4 @@
 const path = require('path')
-const ESLintPlugin = require('eslint-webpack-plugin')
 
 module.exports = {
   target: 'electron-main',
@@ -39,8 +38,5 @@ module.exports = {
       },
     ],
   },
-  plugins: [
-    // 预览构建可通过 DISABLE_ESLINT=1 跳过 lint，避免上游既有 lint 问题阻断构建
-    ...(process.env.DISABLE_ESLINT ? [] : [new ESLintPlugin({ exclude: ['node_modules', 'vendor'] })]),
-  ],
+  plugins: [],
 }

@@ -113,23 +113,19 @@ export const mergeSetting = (originSetting: Rain.AppSetting, targetSetting?: Par
   }
 }
 
-const applyInitSetting = (setting: Rain.AppSetting) => {
-  if (global.envParams.cmdParams.hidden && !setting['tray.enable']) {
-    setting['tray.enable'] = true
-  }
-}
-
 export const updateSetting = (setting?: Partial<Rain.AppSetting>, isInit: boolean = false) => {
   const electronStore_config = getStore(STORE_NAMES.APP_SETTINGS)
 
   let originSetting: Rain.AppSetting
   if (isInit) {
     setting &&= migrateSetting(setting)
-    applyInitSetting(setting as Rain.AppSetting)
     originSetting = { ...defaultSetting }
   } else originSetting = global.rain.appSetting
 
   const result = mergeSetting(originSetting, setting)
+
+  // 注：原 applyInitSetting 会在「隐藏启动」时强制打开托盘；
+  // tray.enable 设置项已移除且行为固定为启用，因此该函数一并删除。
 
   result.setting.version = defaultSetting.version
 
@@ -305,32 +301,4 @@ export const setPowerSaveBlocker = (enabled: boolean) => {
     powerSaveBlocker.stop(powerSaveBlockerId!)
     powerSaveBlockerId = null
   }
-}
-
-
-let envProxy: null | { host: string, port: number } = null
-export const getProxy = () => {
-  if (global.rain.appSetting['network.proxy.enable'] && global.rain.appSetting['network.proxy.host']) {
-    return {
-      host: global.rain.appSetting['network.proxy.host'],
-      port: parseInt(global.rain.appSetting['network.proxy.port'] || '80'),
-    }
-  }
-  if (envProxy) {
-    return {
-      host: envProxy.host,
-      port: envProxy.port,
-    }
-  } else {
-    const envProxyStr = envParams.cmdParams['proxy-server']
-    if (envProxyStr && typeof envProxyStr == 'string') {
-      const [host, port = ''] = envProxyStr.split(':')
-      return envProxy = {
-        host,
-        port: parseInt(port || '80'),
-      }
-    }
-  }
-
-  return null
 }

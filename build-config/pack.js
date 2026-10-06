@@ -1,7 +1,9 @@
 process.env.NODE_ENV = 'production'
 
 const chalk = require('chalk')
-const del = require('del')
+const cleanOutput = require('./clean-output.cjs')
+const path = require('node:path')
+const { spawnSync } = require('node:child_process')
 const webpack = require('webpack')
 const Spinnies = require('spinnies')
 
@@ -18,7 +20,11 @@ const { Worker, isMainThread, parentPort } = require('worker_threads')
 
 function build() {
   console.time('build')
-  del.sync(['dist/**', 'build/**'])
+  if (!process.env.DISABLE_ESLINT) {
+    const lint = spawnSync(process.execPath, [path.join(__dirname, '../node_modules/eslint/bin/eslint.js'), '--ext', '.ts,.js,.vue', 'src'], { cwd: path.join(__dirname, '..'), stdio: 'inherit', windowsHide: true })
+    if (lint.status !== 0) process.exit(lint.status || 1)
+  }
+  cleanOutput(path.join(__dirname, '..'))
 
   const spinners = new Spinnies({ color: 'blue' })
   spinners.add('main', { text: 'main building' })

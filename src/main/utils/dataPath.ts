@@ -11,7 +11,7 @@
  * 都会落在 exe 同级的 `portable` 文件夹内。
  *
  * 触发条件（任一）：
- *  - exe 同级存在 `portable` 文件夹（官方原有的便携模式约定）
+ *  - exe 同级存在 `portable` 文件夹（便携模式约定）
  *  - 设置了 `RAIN_DATA_DIR`，便于调试时指定任意数据目录
  */
 
@@ -42,7 +42,7 @@ export const applyPortableDataPath = (): void => {
 
   const base = resolvePortableBase()
   if (!base) {
-    // 非便携模式：保持官方原有行为
+    // 非便携模式：保持默认数据目录行为
     global.rainDataPath = path.join(global.rainOldDataPath, 'RainDatas')
     if (!existsSync(global.rainDataPath)) mkdirSync(global.rainDataPath, { recursive: true })
     return

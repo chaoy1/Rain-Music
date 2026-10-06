@@ -1,7 +1,6 @@
 import { onMounted, onBeforeUnmount } from '@common/utils/vueTools'
 import { useRoute, useRouter } from '@common/utils/vueRouter'
 import { setListPosition, getListPosition } from '@renderer/utils/data'
-import { appSetting } from '@renderer/store/setting'
 
 export default ({ props, listRef, list, handleRestoreScroll }) => {
   const route = useRoute()
@@ -20,7 +19,8 @@ export default ({ props, listRef, list, handleRestoreScroll }) => {
     if (!list.value.length) return
     if (index == null) {
       let location = await getListPosition(props.listId) || 0
-      if (appSetting['list.isSaveScrollLocation'] && location != null) {
+      // 自动恢复列表滚动位置已固定为「启用」（list.isSaveScrollLocation -> true）
+      if (location != null) {
         listRef.value?.scrollTo(location)
       }
       return

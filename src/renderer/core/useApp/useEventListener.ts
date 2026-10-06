@@ -1,11 +1,9 @@
 import { getFontSizeWithScreen } from '@renderer/utils'
 import {
-  minWindow,
   onFocus,
   onSettingChanged,
   onThemeChange,
   openDevTools,
-  quitApp,
   setFullScreen,
   getFullScreen,
   onFullscreenChanged,
@@ -18,16 +16,13 @@ import {
 } from '@renderer/store'
 import {
   appSetting,
-  isShowAnimation,
   mergeSetting,
 } from '@renderer/store/setting'
 
 import {
   onBeforeUnmount,
   watch,
-  nextTick,
 } from '@common/utils/vueTools'
-import { useRouter, useRoute } from '@common/utils/vueRouter'
 // import { isLinux, isProd } from '@common/utils'
 import { openUrl } from '@common/utils/electron'
 import { HOTKEY_COMMON } from '@common/hotKey'
@@ -80,15 +75,6 @@ const handle_selection = (event: Rain.KeyDownEevent) => {
 }
 
 export default () => {
-  const router = useRouter()
-  const route = useRoute()
-  const handleFocusSearch = () => {
-    if (route.meta.name === 'Search') return
-    void router.push('/search').then(async() => {
-      await nextTick()
-      document.querySelector<HTMLInputElement>('[data-page-search] input')?.focus()
-    })
-  }
   watch(isFullscreen, val => {
     if (val) {
       document.documentElement.classList.remove(window.dt ? 'disableTransparent' : 'transparent')
@@ -103,19 +89,8 @@ export default () => {
     immediate: true,
   })
 
-  watch(isShowAnimation, val => {
-    if (val) {
-      if (document.documentElement.classList.contains('disableAnimation')) {
-        document.documentElement.classList.remove('disableAnimation')
-      }
-    } else {
-      if (!document.documentElement.classList.contains('disableAnimation')) {
-        document.documentElement.classList.add('disableAnimation')
-      }
-    }
-  }, {
-    immediate: true,
-  })
+  // common.isShowAnimation 设置项已移除，行为固定为「显示动画」，
+  // 因此这里不再往 <html> 上加 disableAnimation 类。
 
   const rSetConfig = onSettingChanged(({ params: setting }) => {
     // console.log(config)
@@ -139,10 +114,8 @@ export default () => {
     window.setTheme(setting.theme.colors)
   })
 
-  window.key_event.on(HOTKEY_COMMON.min.action, minWindow)
+  // 可配置的快捷键动作已收窄为「显示/隐藏程序」一项（见 src/common/hotKey.ts）
   window.key_event.on(HOTKEY_COMMON.hide_toggle.action, showHideWindowToggle)
-  window.key_event.on(HOTKEY_COMMON.close.action, quitApp)
-  window.key_event.on(HOTKEY_COMMON.focusSearchInput.action, handleFocusSearch)
 
   window.app_event.on('keyDown', handle_key_down)
   window.key_event.on('key_mod+f12_down', handle_open_devtools)
@@ -151,10 +124,7 @@ export default () => {
   document.body.addEventListener('click', handleBodyClick, true)
 
   onBeforeUnmount(() => {
-    window.key_event.off(HOTKEY_COMMON.min.action, minWindow)
     window.key_event.off(HOTKEY_COMMON.hide_toggle.action, showHideWindowToggle)
-    window.key_event.off(HOTKEY_COMMON.close.action, quitApp)
-    window.key_event.off(HOTKEY_COMMON.focusSearchInput.action, handleFocusSearch)
 
     window.app_event.off('keyDown', handle_key_down)
     window.key_event.off('key_mod+f12_down', handle_open_devtools)

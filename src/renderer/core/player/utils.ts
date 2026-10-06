@@ -1,9 +1,9 @@
 import { toRaw, markRawList } from '@common/utils/vueTools'
 // import { qualityList } from '@renderer/store'
 import { clearPlayedList } from '@renderer/store/player/action'
-import { appSetting } from '@renderer/store/setting'
 import { dislikeInfo } from '@renderer/store/dislikeList'
 import { setPowerSaveBlocker as setPowerSaveBlockerRemote } from '@renderer/utils/ipc'
+import { POWER_SAVE_BLOCKER } from '@common/constants'
 
 // export const getPlayType = (highQuality: boolean, musicInfo: Rain.Music.MusicInfo | Rain.Download.ListItem): Rain.Quality | null => {
 //   if ('progress' in musicInfo || musicInfo.source == 'local') return null
@@ -51,7 +51,8 @@ const clearTimer = () => {
 export const setPowerSaveBlocker = (enabled: boolean, force = false) => {
   if (enabled) {
     clearTimer()
-    if (!force && !appSetting['player.powerSaveBlocker']) return
+    // 「播放歌曲时阻止电脑休眠」已从设置页移除，行为固定为 POWER_SAVE_BLOCKER(true)
+    if (!force && !POWER_SAVE_BLOCKER) return
     setPowerSaveBlockerRemote(true)
   } else if (force) {
     clearTimer()

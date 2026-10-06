@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict')
+const { test } = require('node:test')
+const fs = require('node:fs')
+const path = require('node:path')
+const { imageSize } = require('image-size')
+
+test('cover metadata uses the patched image parser and preserves PNG dimensions', () => {
+  const entry = require.resolve('image-size')
+  const root = entry.slice(0,entry.lastIndexOf(`${path.sep}dist${path.sep}`))
+  const pkg = JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'))
+  assert.ok(require('semver').gte(pkg.version,'2.0.3'), 'image parser must include the infinite-loop fixes')
+  const dimensions = imageSize(fs.readFileSync(path.resolve(__dirname,'../../resources/icons/icon.png')))
+  assert.equal(dimensions.width,512)
+  assert.equal(dimensions.height,512)
+})

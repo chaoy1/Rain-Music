@@ -1,28 +1,12 @@
 import zh_cn from './zh-cn.json'
-import zh_tw from './zh-tw.json'
 import en_us from './en-us.json'
-import ko_kr from './ko-kr.json'
 
 type Message = Record<keyof typeof zh_cn, string>
-| Record<keyof typeof zh_tw, string>
 | Record<keyof typeof en_us, string>
-| Record<keyof typeof ko_kr, string>
 
 type Messages = Record<(typeof langs)[number]['locale'], Message>
 
 const langs = [
-  {
-    name: 'English',
-    locale: 'en-us',
-    country: 'us',
-    message: en_us,
-  },
-  {
-    name: '한국어',
-    locale: 'ko-kr',
-    country: 'kr',
-    message: ko_kr,
-  },
   {
     name: '简体中文',
     locale: 'zh-cn',
@@ -32,11 +16,10 @@ const langs = [
     message: zh_cn,
   },
   {
-    name: '繁體中文',
-    locale: 'zh-tw',
-    // alternate: 'zh-hk',
-    country: 'cn',
-    message: zh_tw,
+    name: 'English',
+    locale: 'en-us',
+    country: 'us',
+    message: en_us,
   },
 ] as const
 

@@ -13,12 +13,11 @@ import {
   removePlayedList,
 } from '@renderer/store/player/action'
 import { appSetting } from '@renderer/store/setting'
+import { AUTO_CLEAN_PLAYED_LIST, AUTO_SKIP_ON_ERROR, SAVE_PLAY_TIME } from '@common/constants'
 import { getMusicUrl, getPicPath, getLyricInfo } from '../music/index'
 import { filterList } from './utils'
 import { requestMsg } from '@renderer/utils/message'
 import { getRandom } from '@renderer/utils/index'
-import { addListMusics, removeListMusics } from '@renderer/store/list/action'
-import { loveList } from '@renderer/store/list/state'
 import { addDislikeInfo } from '@renderer/core/dislikeList'
 // import { checkMusicFileAvailable } from '@renderer/utils/music'
 
@@ -88,7 +87,7 @@ const delayRetry = async(musicInfo: Rain.Music.MusicInfo | Rain.Download.ListIte
 const getMusicPlayUrl = async(musicInfo: Rain.Music.MusicInfo | Rain.Download.ListItem, isRefresh = false, isRetryed = false): Promise<string | null> => {
   // this.musicInfo.url = await getMusicPlayUrl(targetSong, type)
   setAllStatus(window.i18n.t('player__getting_url'))
-  if (appSetting['player.autoSkipOnError']) addLoadTimeout()
+  if (AUTO_SKIP_ON_ERROR) addLoadTimeout()
 
   // const type = getPlayType(appSetting['player.highQuality'], musicInfo)
   let toggleMusicInfo = ('progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo).meta.toggleMusicInfo
@@ -126,7 +125,7 @@ const getMusicPlayUrl = async(musicInfo: Rain.Music.MusicInfo | Rain.Download.Li
 }
 
 export const setMusicUrl = (musicInfo: Rain.Music.MusicInfo | Rain.Download.ListItem, isRefresh?: boolean) => {
-  // if (appSetting['player.autoSkipOnError']) addLoadTimeout()
+  // if (AUTO_SKIP_ON_ERROR) addLoadTimeout()
   if (!diffCurrentMusicInfo(musicInfo)) return
   if (cancelDelayRetry) cancelDelayRetry()
   gettingUrlId = createGettingUrlId(musicInfo)
@@ -137,7 +136,7 @@ export const setMusicUrl = (musicInfo: Rain.Music.MusicInfo | Rain.Download.List
     console.log(err)
     setAllStatus(err.message)
     window.app_event.error()
-    if (appSetting['player.autoSkipOnError']) addDelayNextTimeout()
+    if (AUTO_SKIP_ON_ERROR) addDelayNextTimeout()
   }).finally(() => {
     if (musicInfo === playMusicInfo.musicInfo) {
       gettingUrlId = ''
@@ -153,7 +152,7 @@ const handleRestorePlay = async(restorePlayInfo: Rain.Player.SavedPlayInfo) => {
 
   setImmediate(() => {
     if (musicInfo.id != playMusicInfo.musicInfo?.id) return
-    window.app_event.setProgress(appSetting['player.isSavePlayTime'] ? restorePlayInfo.time : 0, restorePlayInfo.maxTime)
+    window.app_event.setProgress(SAVE_PLAY_TIME ? restorePlayInfo.time : 0, restorePlayInfo.maxTime)
     window.app_event.pause()
   })
 
@@ -244,7 +243,7 @@ export const playListById = (listId: string, id: string) => {
   const musicInfo = getList(listId).find(m => m.id == id)
   if (!musicInfo) return
   setPlayMusicInfo(listId, musicInfo)
-  if (appSetting['player.isAutoCleanPlayedList'] || prevListId != listId) clearPlayedList()
+  if (AUTO_CLEAN_PLAYED_LIST || prevListId != listId) clearPlayedList()
   clearTempPlayeList()
   handlePlay()
 }
@@ -259,7 +258,7 @@ export const playList = (listId: string, index: number) => {
   setPlayListId(listId)
   // pause()
   setPlayMusicInfo(listId, getList(listId)[index])
-  if (appSetting['player.isAutoCleanPlayedList'] || prevListId != listId) clearPlayedList()
+  if (AUTO_CLEAN_PLAYED_LIST || prevListId != listId) clearPlayedList()
   clearTempPlayeList()
   handlePlay()
 }
@@ -617,22 +616,6 @@ export const togglePlay = () => {
   } else {
     play()
   }
-}
-
-/**
- * 收藏当前播放的歌曲
- */
-export const collectMusic = () => {
-  if (!playMusicInfo.musicInfo) return
-  void addListMusics(loveList.id, ['progress' in playMusicInfo.musicInfo ? playMusicInfo.musicInfo.metadata.musicInfo : playMusicInfo.musicInfo])
-}
-
-/**
- * 取消收藏当前播放的歌曲
- */
-export const uncollectMusic = () => {
-  if (!playMusicInfo.musicInfo) return
-  void removeListMusics({ listId: loveList.id, ids: ['progress' in playMusicInfo.musicInfo ? playMusicInfo.musicInfo.metadata.musicInfo.id : playMusicInfo.musicInfo.id] })
 }
 
 /**

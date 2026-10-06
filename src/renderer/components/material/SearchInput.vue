@@ -2,6 +2,13 @@
   <div :class="[$style.container, { [$style.page]: page }]">
     <div :class="[$style.search, {[$style.active]: focus}, {[$style.big]: big}, {[$style.small]: small}]">
       <div :class="$style.form">
+        <button type="button" :class="$style.searchAction" :aria-label="placeholder" @click="handleSearch">
+          <slot>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round">
+              <circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" />
+            </svg>
+          </slot>
+        </button>
         <input
           ref="dom_input"
           v-model.trim="text"
@@ -18,21 +25,12 @@
           @contextmenu="handleContextMenu"
         >
         <transition enter-active-class="animated zoomIn" leave-active-class="animated zoomOut">
-          <button v-show="text" type="button" @click="handleClearList">
-            <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink" height="100%" viewBox="0 0 24 24" space="preserve">
-              <use xlink:href="#icon-window-close" />
-            </svg>
+          <button v-show="text" type="button" :aria-label="$t('search__clear_input')" @click="handleClearList">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m7 7 10 10M17 7 7 17" /></svg>
           </button>
         </transition>
-        <button type="button" @click="handleSearch">
-          <slot>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" />
-            </svg>
-          </slot>
-        </button>
       </div>
-      <div v-if="list" :class="$style.list" :style="listStyle">
+      <div v-if="list" v-show="isShow && list.length" :class="$style.list" :style="listStyle">
         <ul ref="dom_list" @mouseleave="selectIndex = -1">
           <li
             v-for="(item, index) in list"
@@ -51,8 +49,6 @@
 
 <script>
 import { clipboardReadText } from '@common/utils/electron'
-import { HOTKEY_COMMON } from '@common/hotKey'
-import { appSetting } from '@renderer/store/setting'
 
 export default {
   props: {
@@ -91,6 +87,7 @@ export default {
       text: this.modelValue,
       selectIndex: -1,
       focus: false,
+      blurTimer: null,
       listStyle: {
         height: 0,
       },
@@ -112,32 +109,29 @@ export default {
     },
   },
   mounted() {
-    if (appSetting['search.isFocusSearchBox']) this.handleFocusInput()
-    this.handleRegisterEvent('on')
+    // search.isFocusSearchBox 设置项已移除，行为固定为「启动时不自动聚焦」，
+    // 因此这里不再调用 handleFocusInput()。
+    // 另：common_focus_search_input 快捷键动作已移除（可配置动作只剩四项，
+    // 见 src/common/hotKey.ts），这里不再向 key_event 注册聚焦事件。
   },
   beforeUnmount() {
-    this.handleRegisterEvent('off')
+    clearTimeout(this.blurTimer)
   },
   methods: {
-    handleRegisterEvent(action) {
-      let eventHub = window.key_event
-      let name = action == 'on' ? 'on' : 'off'
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      eventHub[name](HOTKEY_COMMON.focusSearchInput.action, this.handleFocusInput)
-    },
-    handleFocusInput() {
-      this.$refs.dom_input.focus()
-    },
     handleTemplistClick(index) {
       console.log(index)
       this.sendEvent('listClick', index)
     },
     handleFocus() {
+      clearTimeout(this.blurTimer)
+      this.blurTimer = null
       this.focus = true
       this.sendEvent('focus')
     },
     handleBlur() {
-      setTimeout(() => {
+      clearTimeout(this.blurTimer)
+      this.blurTimer = setTimeout(() => {
+        this.blurTimer = null
         this.focus = false
         this.sendEvent('blur')
       }, 80)
@@ -338,28 +332,40 @@ export default {
   }
 }
 .page {
-  width: min(100%, 600px);
-  height: 42px;
+  width: min(100%, 640px);
+  height: 36px;
   .search {
     border-radius: 10px;
-    background-color: var(--control-well);
-    background-image: none;
-    box-shadow: inset 0 0 0 1px var(--glass-edge);
-    transition: background-color .18s ease, box-shadow .18s ease;
+    background-color: color-mix(in srgb, var(--control-well) 60%, transparent);
+    background-image: linear-gradient(180deg, var(--surface-subtle), transparent);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 0 0 1px var(--glass-edge);
+    transition: background-color .2s ease, box-shadow .2s ease;
     &.active, &:focus-within {
-      background-color: var(--surface-popup);
-      box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 0 0 1px var(--control-outline), 0 3px 10px var(--glass-edge);
+      background-color: color-mix(in srgb, var(--surface-popup) 85%, transparent);
+      box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 0 0 1px var(--control-outline), 0 4px 14px var(--glass-edge);
       .form button { opacity: 1; }
       input::placeholder { opacity: .7; }
     }
   }
   .form {
-    height: 42px;
+    height: 36px;
     align-items: center;
-    input { height: 100%; box-sizing: border-box; padding: 0 15px; font-size: 14px; line-height: 42px; &::placeholder { opacity: .55; } }
-    button { width: 34px; height: 34px; margin-right: 4px; padding: 9px; border-radius: 8px; opacity: .65; transition: opacity .18s ease, background-color .14s ease; }
+    input { height: 100%; box-sizing: border-box; padding: 0 8px 0 2px; font-size: 13px; line-height: 36px; letter-spacing: .02em; &::placeholder { opacity: .55; } }
+    button { width: 30px; height: 30px; margin: 0 7px 0 0; padding: 7px; border-radius: 8px; opacity: .6; transition: opacity .18s ease, background-color .14s ease; }
+    .searchAction { width: 34px; margin: 0 0 0 7px; padding: 8px; }
   }
-  .list { font-size: 14px; li { padding: 10px 12px; border-radius: 7px; } }
+  .list {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    border-radius: 12px;
+    background: var(--surface-popup);
+    box-shadow: inset 0 0 0 1px var(--glass-edge), 0 8px 28px rgba(0, 0, 0, .12);
+    backdrop-filter: blur(24px);
+    font-size: 14px;
+    li { padding: 10px 12px; border-radius: 7px; &:first-child { margin-top: 5px; } &:last-child { margin-bottom: 5px; } }
+  }
 }
 @media (prefers-reduced-motion: reduce) { .page .search, .page .form button { transition: none; } }
 

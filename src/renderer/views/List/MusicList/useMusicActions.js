@@ -4,7 +4,7 @@ import { openUrl, clipboardWriteText } from '@common/utils/electron'
 import { dialog } from '@renderer/plugins/Dialog'
 import { useI18n } from '@renderer/plugins/i18n'
 import { removeListMusics } from '@renderer/store/list/action'
-import { appSetting } from '@renderer/store/setting'
+import { MUSIC_FILE_NAME_FORMAT } from '@common/constants'
 import { formatMusicName, toOldMusicInfo } from '@renderer/utils/index'
 import { addDislikeInfo, hasDislike } from '@renderer/core/dislikeList'
 import { playNext } from '@renderer/core/player'
@@ -34,7 +34,7 @@ export default ({ props, list, selectedList, removeAllSelect }) => {
 
   const handleCopyName = index => {
     const minfo = list.value[index]
-    clipboardWriteText(formatMusicName(appSetting['download.fileName'], minfo.name, minfo.singer))
+    clipboardWriteText(formatMusicName(MUSIC_FILE_NAME_FORMAT, minfo.name, minfo.singer))
   }
 
   const handleDislikeMusic = async(index) => {

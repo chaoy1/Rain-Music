@@ -64,6 +64,9 @@ export default {
     const router = useRouter()
     const route = useRoute()
     const handleToggleSource = (id) => {
+      // 切换音源时清空榜单 id：BoardList 会为新音源自动选中第一个榜单，
+      // 避免沿用上一个音源（或已删除音源）的榜单 id
+      boardId.value = null
       void router.replace({
         path: route.path,
         query: {

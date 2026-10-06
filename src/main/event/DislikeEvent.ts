@@ -9,11 +9,10 @@ export class Event extends EventEmitter {
   /**
    * 覆盖整个列表数据
    * @param dislikeData 列表数据
-   * @param isRemote 是否属于远程操作
    */
-  async dislike_data_overwrite(dislikeData: Rain.Dislike.DislikeRules, isRemote: boolean = false) {
+  async dislike_data_overwrite(dislikeData: Rain.Dislike.DislikeRules) {
     await global.rain.worker.dbService.dislikeInfoOverwrite(dislikeData)
-    this.emit('dislike_data_overwrite', dislikeData, isRemote)
+    this.emit('dislike_data_overwrite', dislikeData)
     this.dislike_changed()
   }
 
@@ -22,26 +21,24 @@ export class Event extends EventEmitter {
    * @param dislikeId 列表id
    * @param musicInfos 添加的歌曲信息
    * @param addMusicLocationType 添加在到列表的位置
-   * @param isRemote 是否属于远程操作
    */
-  async dislike_music_add(musicInfo: Rain.Dislike.DislikeMusicInfo[], isRemote: boolean = false) {
+  async dislike_music_add(musicInfo: Rain.Dislike.DislikeMusicInfo[]) {
     // const changedIds =
     await global.rain.worker.dbService.dislikeInfoAdd(musicInfo)
     // await checkUpdateDislike(changedIds)
-    this.emit('dislike_music_add', musicInfo, isRemote)
+    this.emit('dislike_music_add', musicInfo)
     this.dislike_changed()
   }
 
   /**
    * 清空列表内的歌曲
    * @param ids 列表Id
-   * @param isRemote 是否属于远程操作
    */
-  async dislike_music_clear(isRemote: boolean = false) {
+  async dislike_music_clear() {
     // const changedIds =
     await global.rain.worker.dbService.dislikeInfoOverwrite('')
     // await checkUpdateDislike(changedIds)
-    this.emit('dislike_music_clear', isRemote)
+    this.emit('dislike_music_clear')
     this.dislike_changed()
   }
 }

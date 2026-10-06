@@ -23,16 +23,6 @@ declare namespace Rain {
     dhmkh?: boolean
 
     /**
-     * 设置代理服务器，代理应用的所有流量，例：-proxy-server="127.0.0.1:1081"（不支持设置账号密码，v1.17.0起新增）。注：应用内“设置-网络-代理设置”仅代理接口请求的流量，优先级更高
-     */
-    'proxy-server'?: string
-
-    /**
-     * 以分号分隔的主机列表绕过代理服务器，例：-proxy-bypass-list="<local>;*.google.com;*foo.com;1.2.3.4:5678"（与-proxy-server一起使用才有效，v1.17.0起新增）。注：此设置对应用内接口请求无效
-     */
-    'proxy-bypass-list'?: string
-
-    /**
      * 启动时播放指定列表的音乐
      */
     play?: string
@@ -45,7 +35,7 @@ declare namespace Rain {
     [key: string]: boolean | number | string
   }
 
-  type OnlineSource = 'kw' | 'kg' | 'tx' | 'wy' | 'mg'
+  type OnlineSource = 'kg' | 'tx' | 'wy'
   type Source = OnlineSource | 'local'
   type Quality = '128k' | '320k' | 'flac' | 'flac24bit' | '192k' | 'ape' | 'wav'
 
@@ -92,6 +82,17 @@ declare namespace Rain {
     status: boolean
     info: HotKey
   }>
+  /**
+   * 全局快捷键注册失败信息（导入快捷键设置后用于提示用户）
+   */
+  interface HotKeyRegisterFailInfo {
+    /** 快捷键按键，例如 mod+alt+p */
+    key: string
+    /** 动作名称，例如 player_toggle_play */
+    name: string
+    /** 动作 id，例如 player_toggle_play */
+    action: string
+  }
   interface HotKeyActionWrap<T, D> {
     action: T
     data: D
@@ -109,7 +110,6 @@ declare namespace Rain {
 
   interface TaskBarButtonFlags {
     empty: boolean
-    collect: boolean
     play: boolean
     next: boolean
     prev: boolean

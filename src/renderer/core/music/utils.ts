@@ -8,7 +8,7 @@ import {
   getPlayerLyric as getStoreLyric,
 } from '@renderer/utils/ipc'
 import { appSetting } from '@renderer/store/setting'
-import { langS2T, toNewMusicInfo, toOldMusicInfo } from '@renderer/utils'
+import { toNewMusicInfo, toOldMusicInfo } from '@renderer/utils'
 import { requestMsg } from '@renderer/utils/message'
 import { apis } from '@renderer/utils/musicSdk/api-source'
 
@@ -77,49 +77,11 @@ export const getOtherSource = async(musicInfo: Rain.Music.MusicInfo | Rain.Downl
 
 
 export const buildLyricInfo = async(lyricInfo: MakeOptional<Rain.Player.LyricInfo, 'rawlrcInfo'>): Promise<Rain.Player.LyricInfo> => {
-  if (!appSetting['player.isS2t']) {
-    // @ts-expect-error
-    if (lyricInfo.rawlrcInfo) return lyricInfo
-    return { ...lyricInfo, rawlrcInfo: { ...lyricInfo } }
-  }
-
-  if (appSetting['player.isS2t']) {
-    const tasks = [
-      lyricInfo.lyric ? langS2T(lyricInfo.lyric) : Promise.resolve(''),
-      lyricInfo.tlyric ? langS2T(lyricInfo.tlyric) : Promise.resolve(''),
-      lyricInfo.rlyric ? langS2T(lyricInfo.rlyric) : Promise.resolve(''),
-      lyricInfo.rainlyric ? langS2T(lyricInfo.rainlyric) : Promise.resolve(''),
-    ]
-    if (lyricInfo.rawlrcInfo) {
-      tasks.push(lyricInfo.lyric ? langS2T(lyricInfo.lyric) : Promise.resolve(''))
-      tasks.push(lyricInfo.tlyric ? langS2T(lyricInfo.tlyric) : Promise.resolve(''))
-      tasks.push(lyricInfo.rlyric ? langS2T(lyricInfo.rlyric) : Promise.resolve(''))
-      tasks.push(lyricInfo.rainlyric ? langS2T(lyricInfo.rainlyric) : Promise.resolve(''))
-    }
-    return Promise.all(tasks).then(([lyric, tlyric, rlyric, rainlyric, lyric_raw, tlyric_raw, rlyric_raw, rainlyric_raw]) => {
-      const rawlrcInfo = lyric_raw ? {
-        lyric: lyric_raw,
-        tlyric: tlyric_raw,
-        rlyric: rlyric_raw,
-        rainlyric: rainlyric_raw,
-      } : {
-        lyric,
-        tlyric,
-        rlyric,
-        rainlyric,
-      }
-      return {
-        lyric,
-        tlyric,
-        rlyric,
-        rainlyric,
-        rawlrcInfo,
-      }
-    })
-  }
-
+  // player.isS2t 设置项已移除，行为固定为「不做简繁转换」，
+  // 原来的 langS2T 转换分支随之删除（功能仍在 worker 里保留）。
   // @ts-expect-error
-  return lyricInfo.rawlrcInfo ? lyricInfo : { ...lyricInfo, rawlrcInfo: { ...lyricInfo } }
+  if (lyricInfo.rawlrcInfo) return lyricInfo
+  return { ...lyricInfo, rawlrcInfo: { ...lyricInfo } }
 }
 
 export const getCachedLyricInfo = async(musicInfo: Rain.Music.MusicInfo): Promise<Rain.Player.LyricInfo | null> => {
@@ -138,8 +100,6 @@ export const getCachedLyricInfo = async(musicInfo: Rain.Music.MusicInfo): Promis
       if (lrcInfo.rainlyric == null) {
         switch (musicInfo.source) { // 以下源支持rainlyric 重新获取
           case 'kg':
-          case 'kw':
-          case 'mg':
           case 'wy':
           case 'tx':
             break

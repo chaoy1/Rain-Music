@@ -24,7 +24,7 @@ import { sources, listInfo, isVisibleListDetail } from '@renderer/store/songList
 import { sourceNames } from '@renderer/store'
 import { useRoute, useRouter } from '@common/utils/vueRouter'
 
-const source = ref<Rain.OnlineSource>('kw')
+const source = ref<Rain.OnlineSource>('tx')
 const tagId = ref<string>('')
 const sortId = ref<string>('')
 const page = ref<number>(1)

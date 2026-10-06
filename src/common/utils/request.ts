@@ -4,7 +4,6 @@ import {
   getGlobalDispatcher,
   interceptors,
   request as nodeRrequest,
-  ProxyAgent,
   setGlobalDispatcher,
   type Dispatcher,
 } from 'undici'
@@ -28,7 +27,6 @@ const dispatchers = [
   }),
   // interceptors.responseError(),
 ] as const
-let proxyAgent: ProxyAgent | null = null
 let globalDispatcher = getGlobalDispatcher()
 const buildDispatcher = (redirectDispatcher: Dispatcher.DispatcherComposeInterceptor | null, retryNum = 3) => {
   const otherInterceptors =
@@ -44,20 +42,13 @@ const buildDispatcher = (redirectDispatcher: Dispatcher.DispatcherComposeInterce
           }),
         ]
   if (redirectDispatcher) {
-    return (proxyAgent ?? globalDispatcher).compose(redirectDispatcher, ...otherInterceptors)
+    return globalDispatcher.compose(redirectDispatcher, ...otherInterceptors)
   }
-  return (proxyAgent ?? globalDispatcher).compose(...otherInterceptors)
+  return globalDispatcher.compose(...otherInterceptors)
 }
 
 setGlobalDispatcher(buildDispatcher(redirectDispatcher))
 
-export const setProxy = (url?: string) => {
-  proxyAgent = url ? new ProxyAgent(url) : null
-  setGlobalDispatcher(buildDispatcher(redirectDispatcher))
-}
-export const setProxyByHost = (host?: string, port?: string) => {
-  setProxy(host ? `http://${host}:${port}` : undefined)
-}
 const CONTENT_TYPE = {
   json: 'application/json',
   form: 'application/x-www-form-urlencoded',

@@ -8,7 +8,7 @@ import { addHistoryWord } from '@renderer/store/search/action'
 import { search as searchMusic, listInfos, type ListInfo } from '@renderer/store/search/music'
 import { assertApiSupport } from '@renderer/store/utils'
 
-export type SearchSource = Rain.OnlineSource | 'all'
+export type SearchSource = Rain.OnlineSource
 
 export default () => {
   const listRef = ref<any>(null)

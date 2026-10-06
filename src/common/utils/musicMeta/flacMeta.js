@@ -1,7 +1,7 @@
 const fs = require('fs')
 const fsPromises = fs.promises
 const path = require('path')
-const getImgSize = require('image-size')
+const { imageSize: getImgSize } = require('image-size')
 const download = require('./downloader')
 
 const FlacProcessor = require('./flac-metadata/index')

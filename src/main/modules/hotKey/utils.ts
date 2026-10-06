@@ -67,3 +67,21 @@ export const init = (isForce = false) => {
     }
   }
 }
+
+/**
+ * 获取最近一次注册后仍处于注册失败的全局快捷键列表
+ * （init() 会重建 global.rain.hotKey.state，status 为 false 即注册失败，
+ * 通常是该按键已被系统或其它程序占用）
+ */
+export const getHotKeyRegisterFailList = (): Rain.HotKeyRegisterFailInfo[] => {
+  const failList: Rain.HotKeyRegisterFailInfo[] = []
+  for (const [key, item] of global.rain.hotKey.state) {
+    if (item.status) continue
+    failList.push({
+      key,
+      name: item.info?.name ?? '',
+      action: item.info?.action ?? '',
+    })
+  }
+  return failList
+}

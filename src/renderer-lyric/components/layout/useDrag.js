@@ -1,6 +1,6 @@
 import { onMounted, onBeforeUnmount } from '@common/utils/vueTools'
 import { setWindowBounds, setWindowResizeable } from '@lyric/utils/ipc'
-import { isWin } from '@common/utils'
+import { isWin } from '@lyric/utils/platform'
 
 export default () => {
   const winEvent = {
@@ -17,7 +17,6 @@ export default () => {
     winEvent.msDownY = y
     winEvent.windowW = window.innerWidth
     winEvent.windowH = window.innerHeight
-    // 上游 issue #2244
     if (isWin) setWindowResizeable(false)
   }
   const handleLyricMouseDown = event => {
@@ -39,7 +38,6 @@ export default () => {
 
   const handleMove = (x, y) => {
     if (!winEvent.isMsDown) return
-    // 上游 issue #2244
     if (isWin) {
       setWindowBounds({
         x: x - winEvent.msDownX,

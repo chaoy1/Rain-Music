@@ -1,5 +1,6 @@
-import { ref, onBeforeUnmount, toRef } from '@common/utils/vueTools'
+import { ref, computed, onBeforeUnmount, toRef } from '@common/utils/vueTools'
 import { playProgress } from '@renderer/store/player/playProgress'
+import { musicInfo } from '@renderer/store/player/state'
 
 export default () => {
   const isActiveTransition = ref(false)
@@ -8,6 +9,8 @@ export default () => {
   const maxPlayTimeStr = toRef(playProgress, 'maxPlayTimeStr')
   const nowPlayTime = toRef(playProgress, 'nowPlayTime')
   const maxPlayTime = toRef(playProgress, 'maxPlayTime')
+  const hasTimeline = computed(() => !!musicInfo.id)
+  const canSeek = computed(() => hasTimeline.value && Number.isFinite(maxPlayTime.value) && maxPlayTime.value > 0)
 
   const handleTransitionEnd = () => {
     isActiveTransition.value = false
@@ -23,6 +26,8 @@ export default () => {
   })
 
   return {
+    hasTimeline,
+    canSeek,
     nowPlayTimeStr,
     maxPlayTimeStr,
     nowPlayTime,

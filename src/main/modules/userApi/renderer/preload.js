@@ -3,7 +3,6 @@ import needle from 'needle'
 import zlib from 'zlib'
 import { createCipheriv, publicEncrypt, constants, randomBytes, createHash } from 'crypto'
 import USER_API_RENDERER_EVENT_NAME from '../rendererEvent/name'
-import { httpOverHttp, httpsOverHttp } from 'tunnel'
 
 
 const sendMessage = (action, data, status, message) => {
@@ -11,10 +10,6 @@ const sendMessage = (action, data, status, message) => {
 }
 
 let isInitedApi = false
-const proxy = {
-  host: '',
-  port: '',
-}
 let isShowedUpdateAlert = false
 const EVENT_NAMES = {
   request: 'request',
@@ -25,33 +20,19 @@ const eventNames = Object.values(EVENT_NAMES)
 const events = {
   request: null,
 }
-const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local']
+// 内置音源顺序：QQ音乐(tx) → 酷狗音乐(kg) → 网易云音乐(wy)，本地音源(local) 单独支持
+const allSources = ['tx', 'kg', 'wy', 'local']
 const supportQualitys = {
-  kw: ['128k', '320k', 'flac', 'flac24bit'],
-  kg: ['128k', '320k', 'flac', 'flac24bit'],
   tx: ['128k', '320k', 'flac', 'flac24bit'],
+  kg: ['128k', '320k', 'flac', 'flac24bit'],
   wy: ['128k', '320k', 'flac', 'flac24bit'],
-  mg: ['128k', '320k', 'flac', 'flac24bit'],
   local: [],
 }
 const supportActions = {
-  kw: ['musicUrl'],
-  kg: ['musicUrl'],
   tx: ['musicUrl'],
+  kg: ['musicUrl'],
   wy: ['musicUrl'],
-  mg: ['musicUrl'],
-  xm: ['musicUrl'],
   local: ['musicUrl', 'lyric', 'pic'],
-}
-
-const httpsRxp = /^https:/
-const getRequestAgent = url => {
-  return proxy.host ? (httpsRxp.test(url) ? httpsOverHttp : httpOverHttp)({
-    proxy: {
-      host: proxy.host,
-      port: proxy.port,
-    },
-  }) : undefined
 }
 
 const verifyLyricInfo = (info) => {
@@ -117,12 +98,11 @@ const handleRequest = (context, { requestKey, data }) => {
  *                    openDevTools: false,
  *                    message: 'xxx',
  *                    sources: {
- *                         kw: ['128k', '320k', 'flac', 'flac24bit'],
- *                         kg: ['128k', '320k', 'flac', 'flac24bit'],
  *                         tx: ['128k', '320k', 'flac', 'flac24bit'],
+ *                         kg: ['128k', '320k', 'flac', 'flac24bit'],
  *                         wy: ['128k', '320k', 'flac', 'flac24bit'],
- *                         mg: ['128k', '320k', 'flac', 'flac24bit'],
- *                     }
+ *                         local: ['musicUrl', 'lyric', 'pic'],
+ *                    }
  *                 }
  */
 const handleInit = (context, info) => {
@@ -186,15 +166,11 @@ const onError = (errorMessage) => {
 }
 
 const initEnv = (userApi) => {
-  proxy.host = userApi.proxy.host
-  proxy.port = userApi.proxy.port
-
   contextBridge.exposeInMainWorld('rain', {
     EVENT_NAMES,
     request(url, { method = 'get', timeout, headers, body, form, formData }, callback) {
       let options = {
         headers,
-        agent: getRequestAgent(url),
       }
       let data
       if (body) {
@@ -369,9 +345,4 @@ window.addEventListener('unhandledrejection', (event) => {
 
 ipcRenderer.on(USER_API_RENDERER_EVENT_NAME.initEnv, (event, data) => {
   initEnv(data)
-})
-
-ipcRenderer.on(USER_API_RENDERER_EVENT_NAME.proxyUpdate, (event, data) => {
-  proxy.host = data.host
-  proxy.port = data.port
 })

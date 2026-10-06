@@ -37,7 +37,6 @@
                   <span v-if="item.meta._qualitys.flac24bit" class="no-select badge badge-theme-primary">{{ $t('tag__lossless_24bit') }}</span>
                   <span v-else-if="item.meta._qualitys.ape || item.meta._qualitys.flac || item.meta._qualitys.wav" class="no-select badge badge-theme-primary">{{ $t('tag__lossless') }}</span>
                   <span v-else-if="item.meta._qualitys['320k']" class="no-select badge badge-theme-secondary">{{ $t('tag__high_quality') }}</span>
-                  <span v-if="sourceTag" class="no-select badge badge-theme-tertiary">{{ item.source }}</span>
                 </div>
                 <div class="list-item-cell" style="flex: 0 0 22%;"><span class="select" :aria-label="item.singer">{{ item.singer }}</span></div>
                 <div class="list-item-cell" style="flex: 0 0 22%;"><span class="select" :aria-label="item.meta.albumName">{{ item.meta.albumName }}</span></div>
@@ -65,7 +64,6 @@
                   <span v-if="item.meta._qualitys.flac24bit" class="no-select badge badge-theme-primary">{{ $t('tag__lossless_24bit') }}</span>
                   <span v-else-if="item.meta._qualitys.ape || item.meta._qualitys.flac || item.meta._qualitys.wav" class="no-select badge badge-theme-primary">{{ $t('tag__lossless') }}</span>
                   <span v-else-if="item.meta._qualitys['320k']" class="no-select badge badge-theme-secondary">{{ $t('tag__high_quality') }}</span>
-                  <span v-if="sourceTag" class="no-select badge badge-theme-tertiary">{{ item.source }}</span>
                 </div>
                 <div class="list-item-cell" style="flex: 0 0 24%;"><span class="select" :aria-label="item.singer">{{ item.singer }}</span></div>
                 <div class="list-item-cell" style="flex: 0 0 27%;"><span class="select" :aria-label="item.meta.albumName">{{ item.meta.albumName }}</span></div>
@@ -108,7 +106,6 @@ import usePlay from './usePlay'
 import useMusicDownload from './useMusicDownload'
 import useMusicAdd from './useMusicAdd'
 import useMusicActions from './useMusicActions'
-import { appSetting } from '@renderer/store/setting'
 export default {
   name: 'MaterialOnlineList',
   props: {
@@ -130,10 +127,6 @@ export default {
       type: Number,
       required: true,
     },
-    sourceTag: {
-      type: Boolean,
-      default: false,
-    },
     noItem: {
       type: String,
       default: '',
@@ -145,7 +138,8 @@ export default {
   },
   emits: ['show-menu', 'play-list', 'togglePage'],
   setup(props, { emit }) {
-    const actionButtonsVisible = appSetting['list.actionButtonsVisible']
+    // 列表操作按钮列已固定为「不显示」（list.actionButtonsVisible -> false）
+    const actionButtonsVisible = false
     const rightClickSelectedIndex = ref(-1)
     const dom_listContent = ref(null)
     const listRef = ref(null)

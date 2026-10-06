@@ -2,7 +2,6 @@ const path = require('path')
 const { VueLoaderPlugin } = require('vue-loader')
 const HTMLPlugin = require('html-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
-const ESLintPlugin = require('eslint-webpack-plugin')
 
 const vueLoaderConfig = require('../vue-loader.config')
 const { mergeCSSLoader } = require('../utils')
@@ -10,15 +9,12 @@ const { mergeCSSLoader } = require('../utils')
 const isDev = process.env.NODE_ENV === 'development'
 
 module.exports = {
-  target: 'electron-renderer',
+  target: 'web',
   entry: {
     'renderer-lyric': path.join(__dirname, '../../src/renderer-lyric/main.ts'),
   },
   output: {
     filename: '[name].js',
-    library: {
-      type: 'commonjs2',
-    },
     path: path.join(__dirname, '../../dist'),
     publicPath: '',
   },
@@ -87,16 +83,7 @@ module.exports = {
       {
         test: /\.svg$/,
         include: path.join(__dirname, '../../src/renderer/assets/svgs'),
-        use: [
-          {
-            loader: 'svg-sprite-loader',
-            options: {
-              symbolId: 'icon-[name]',
-            },
-          },
-          'svg-transform-loader',
-          'svgo-loader',
-        ],
+        use: [path.join(__dirname, '../loaders/svg-symbol.cjs')],
       },
       {
         test: /\.(mp4|webm|ogg|mp3|wav|flac|aac)(\?.*)?$/,
@@ -139,13 +126,5 @@ module.exports = {
       filename: isDev ? '[name].css' : '[name].[contenthash:8].css',
       chunkFilename: isDev ? '[id].css' : '[id].[contenthash:8].css',
     }),
-    // 预览构建可通过 DISABLE_ESLINT=1 跳过 lint，避免上游既有 lint 问题阻断构建
-    ...(process.env.DISABLE_ESLINT
-      ? []
-      : [new ESLintPlugin({
-        extensions: ['js', 'vue'],
-        exclude: ['node_modules', 'vendor'],
-        formatter: require('eslint-formatter-friendly'),
-      })]),
   ],
 }

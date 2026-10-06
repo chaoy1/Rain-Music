@@ -68,7 +68,7 @@ export const setSelectListInfo = (info: ListInfoItem) => {
 export const clearListDetail = () => {
   listDetailInfo.list = []
   listDetailInfo.id = ''
-  listDetailInfo.source = 'kw'
+  listDetailInfo.source = 'tx'
   listDetailInfo.total = 0
   listDetailInfo.limit = 30
   listDetailInfo.page = 1

@@ -1,13 +1,8 @@
 <template>
   <teleport to="#root">
     <div ref="dom_menu" :class="$style.container" :style="menuStyles" :aria-hidden="!modelValue">
-      <!-- <div :class="$style.group">
-      <div :class="$style.title">{{ $t('lyric_menu__align') }}</div>
-      <div :class="$style.subGroup">
-        <div :class="[$style.btn, { [$style.active]: appSetting['playDetail.style.align'] == 'left' }]" role="button" @click="setFontAlign('left')" ignore-tip :aria-label="$t('lyric_menu__align_left')">{{ $t('lyric_menu__align_left') }}</div>
-        <div :class="[$style.btn, { [$style.active]: appSetting['playDetail.style.align'] == 'center' }]" role="button" @click="setFontAlign('center')" ignore-tip :aria-label="$t('lyric_menu__align_center')">{{ $t('lyric_menu__align_center') }}</div>
-      </div>
-    </div> -->
+      <!-- 歌词对齐方式已固定为「居中」（playDetail.style.align 设置项已移除），
+           原来这里注释掉的居左/居中切换块随之删除。 -->
       <div :class="$style.group">
         <div :class="$style.subGroup">
           <div :class="$style.title">{{ $t('lyric_menu__lrc_size', { size: appSetting['playDetail.style.fontSize'] }) }}</div>
@@ -47,19 +42,10 @@
 <script>
 import { computed, ref, watch } from '@common/utils/vueTools'
 import useMenuLocation from '@renderer/utils/compositions/useMenuLocation'
-import { debounce } from '@common/utils/common'
-import { saveLyricEdited, removeLyricEdited } from '@renderer/utils/ipc'
-import { appSetting, setPlayDetailLyricFont, setPlayDetailLyricAlign } from '@renderer/store/setting'
+import { appSetting, setPlayDetailLyricFont } from '@renderer/store/setting'
 
 const offsetTagRxp = /(?:^|\n)\s*\[offset:\s*(\S+(?:\d+)*)\s*\]/
 const offsetTagAllRxp = /(^|\n)\s*\[offset:\s*(\S+(?:\d+)*)\s*\]/g
-
-const saveLyric = debounce((musicInfo, lyricInfo) => {
-  void saveLyricEdited(musicInfo, lyricInfo)
-})
-const removeLyric = debounce(musicInfo => {
-  void removeLyricEdited(musicInfo)
-})
 
 const getOffset = lrc => {
   let offset = offsetTagRxp.exec(lrc)
@@ -101,11 +87,6 @@ export default {
       emit('update:modelValue', false)
     }
 
-    const setFontAlign = val => {
-      if (appSetting['playDetail.style.align'] == val) return
-      setPlayDetailLyricAlign(val)
-    }
-
     const fontSizeUp = step => {
       if (appSetting['playDetail.style.fontSize'] >= 200) return
       setPlayDetailLyricFont(Math.min(appSetting['playDetail.style.fontSize'] + step, 200))
@@ -135,18 +116,10 @@ export default {
         rlyric &&= `[offset:${offset}]\n` + rlyric
       }
 
-      const musicInfo = 'progress' in props.lyricInfo.musicInfo ? props.lyricInfo.musicInfo.metadata.musicInfo : props.lyricInfo.musicInfo
-
-      if (offset == originOffset.value) {
-        removeLyric(musicInfo)
-      } else {
-        saveLyric(musicInfo, {
-          lyric,
-          tlyric,
-          rlyric,
-          rainlyric,
-        })
-      }
+      // 「已调整过偏移时间的歌词管理」已停用（SAVE_EDITED_LYRIC = false）：
+      // 这里不再把调整后的歌词写入数据库（原先会 saveLyricEdited / removeLyricEdited），
+      // 只通过 updateLyric 事件让本次播放会话立即生效。
+      // 也就是说：偏移在当前会话内仍可自由调整，但重启软件后回到歌词自带的 [offset:] 值。
 
       emit('updateLyric', {
         lyric,
@@ -199,7 +172,6 @@ export default {
       fontSizeReset,
       setOffset,
       offsetReset,
-      setFontAlign,
       offsetDisabled,
     }
   },

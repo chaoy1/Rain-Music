@@ -63,8 +63,12 @@ void getSetting().then(setting => {
   window.setLang(setting['common.langId'])
   window.i18n.setLanguage(setting['common.langId'])
 
-  if (!setting['common.startInFullscreen'] && (document.body.clientHeight > window.screen.availHeight || document.body.clientWidth > window.screen.availWidth) && setting['common.windowSizeId'] > 1) {
-    void updateSetting({ 'common.windowSizeId': 1 })
+  // common.startInFullscreen 设置项已移除，行为固定为「不以此启动」，条件里不再判断它。
+  // 注意：窗口尺寸列表已删掉 id 0/1（更小、小）与 id 6（巨大），
+  // 这里的兜底尺寸从原来的 id 1 改为列表中最小的 id 2（medium），
+  // 否则会写入一个列表里不存在的 id（渲染进程按窗口尺寸换算会取不到值）。
+  if ((document.body.clientHeight > window.screen.availHeight || document.body.clientWidth > window.screen.availWidth) && setting['common.windowSizeId'] > 1) {
+    void updateSetting({ 'common.windowSizeId': 2 })
   }
 
   // store.commit('setSetting', setting)

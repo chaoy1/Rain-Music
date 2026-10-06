@@ -1,7 +1,7 @@
 import { markRaw } from '@common/utils/vueTools'
 import { useRouter } from '@common/utils/vueRouter'
 import { decodeName } from '@renderer/utils'
-// import { allList, defaultList, loveList, userLists } from '@renderer/store/list'
+// import { allList, defaultList, userLists } from '@renderer/store/list'
 import { playMusicInfo, isShowPlayerDetail } from '@renderer/store/player/state'
 import { setShowPlayerDetail, addTempPlayList } from '@renderer/store/player/action'
 
@@ -37,8 +37,7 @@ const useSearchMusic = () => {
     }
 
     if (isShowPlayerDetail.value) setShowPlayerDetail(false)
-    const sourceList = [...sources, 'all']
-    source = sourceList.includes(source) ? source : null
+    source = sources.includes(source) ? source : null
     setTimeout(() => {
       router.replace({
         path: '/search',
@@ -55,19 +54,6 @@ const useSearchMusic = () => {
 const usePlayMusic = () => {
   const filterInfoByPlayMusic = musicInfo => {
     switch (musicInfo.source) {
-      case 'kw':
-        musicInfo = dataVerify([
-          { key: 'name', types: ['string'], required: true, max: 200 },
-          { key: 'singer', types: ['string'], required: true, max: 200 },
-          { key: 'source', types: ['string'], required: true },
-          { key: 'songmid', types: ['string', 'number'], max: 64, required: true },
-          { key: 'img', types: ['string'], max: 1024 },
-          { key: 'albumId', types: ['string', 'number'], max: 64 },
-          { key: 'interval', types: ['string'], max: 64 },
-          { key: 'albumName', types: ['string'], max: 200 },
-          { key: 'types', types: ['object'], required: true },
-        ], musicInfo)
-        break
       case 'kg':
         musicInfo = dataVerify([
           { key: 'name', types: ['string'], required: true, max: 200 },
@@ -111,24 +97,6 @@ const usePlayMusic = () => {
           { key: 'interval', types: ['string'], max: 64 },
           { key: 'albumName', types: ['string'], max: 200 },
           { key: 'types', types: ['object'], required: true },
-        ], musicInfo)
-        break
-      case 'mg':
-        musicInfo = dataVerify([
-          { key: 'name', types: ['string'], required: true, max: 200 },
-          { key: 'singer', types: ['string'], required: true, max: 200 },
-          { key: 'source', types: ['string'], required: true },
-          { key: 'songmid', types: ['string', 'number'], max: 64, required: true },
-          { key: 'img', types: ['string'], max: 1024 },
-          { key: 'albumId', types: ['string', 'number'], max: 64 },
-          { key: 'interval', types: ['string'], max: 64 },
-          { key: 'albumName', types: ['string'], max: 200 },
-          { key: 'types', types: ['object'], required: true },
-
-          { key: 'copyrightId', types: ['string', 'number'], required: true, max: 64 },
-          { key: 'lrcUrl', types: ['string'], max: 1024 },
-          { key: 'trcUrl', types: ['string'], max: 1024 },
-          { key: 'mrcUrl', types: ['string'], max: 1024 },
         ], musicInfo)
         break
       default: throw new Error('Unknown source: ' + musicInfo.source)

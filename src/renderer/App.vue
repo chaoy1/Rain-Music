@@ -1,6 +1,6 @@
 <template>
   <div id="wallpaper-layer" :class="{ show: wallpaperUrl }" :style="wallpaperUrl ? { backgroundImage: `url(&quot;${wallpaperUrl}&quot;)` } : undefined" />
-  <div id="container" class="view-container" :class="{ 'reduce-control-motion': !appSetting['common.isShowAnimation'] }">
+  <div id="container" class="view-container">
     <div id="app-chrome" :class="{ 'detail-settled': detailSettled }" :inert="detailPresent ? '' : undefined" :aria-hidden="detailPresent ? 'true' : undefined">
       <layout-aside id="left" data-glass />
       <div id="right">
@@ -13,8 +13,6 @@
       <PlayDetail v-if="isShowPlayerDetail" />
     </Transition>
     <layout-icons />
-    <layout-sync-mode-modal />
-    <layout-sync-auth-code-modal />
   </div>
 </template>
 
@@ -24,7 +22,6 @@ import { onMounted } from '@common/utils/vueTools'
 // import '@common/utils/effects/snow.min'
 import useApp from '@renderer/core/useApp'
 import { wallpaperUrl } from '@renderer/store'
-import { appSetting } from '@renderer/store/setting'
 import { isShowPlayerDetail } from '@renderer/store/player/state'
 import usePlayerDetailTransition from '@renderer/utils/compositions/usePlayerDetailTransition'
 import PlayDetail from '@renderer/components/layout/PlayDetail/index.vue'

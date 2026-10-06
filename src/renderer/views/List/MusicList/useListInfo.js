@@ -1,7 +1,6 @@
 import { ref, watch, computed, onBeforeUnmount } from '@common/utils/vueTools'
 import { playMusicInfo, playInfo } from '@renderer/store/player/state'
 import { getListMusics } from '@renderer/store/list/action'
-import { appSetting } from '@renderer/store/setting'
 
 
 export default ({ props, onLoadedList }) => {
@@ -33,7 +32,8 @@ export default ({ props, onLoadedList }) => {
     selectedIndex.value = index
   }
 
-  const isShowSource = computed(() => appSetting['list.isShowSource'])
+  // 是否显示歌曲来源已固定为「不显示」（list.isShowSource -> false）
+  const isShowSource = computed(() => false)
 
   const handleMyListUpdate = (ids) => {
     if (!ids.includes(props.listId)) return

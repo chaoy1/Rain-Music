@@ -1,8 +1,8 @@
 import path from 'node:path'
 import { renameSync } from 'fs'
 import { app, shell, screen, nativeTheme, dialog } from 'electron'
-import { URL_SCHEME_RXP } from '@common/constants'
-import { getProxy, getTheme, initHotKey, initSetting, parseEnvParams } from './utils'
+import { URL_SCHEME_RXP, TRANSPARENT_WINDOW } from '@common/constants'
+import { getTheme, initHotKey, initSetting, parseEnvParams } from './utils'
 import { navigationUrlWhiteList } from '@common/config'
 import defaultSetting from '@common/defaultSetting'
 import { isExistWindow as isExistMainWindow, showWindow as showMainWindow } from './modules/winMain'
@@ -11,7 +11,6 @@ import { isMac, log } from '@common/utils'
 import createWorkers from './worker'
 import { migrateDBData } from './utils/migrate'
 import { openDirInExplorer } from '@common/utils/electron'
-import { setProxyByHost } from '@common/utils/request'
 import { getWallpaperPath } from './utils/wallpaper'
 
 export const initGlobalData = () => {
@@ -70,7 +69,6 @@ export const initGlobalData = () => {
       tlyric: '',
       rlyric: '',
       rainlyric: '',
-      collect: false,
       volume: 0,
       mute: false,
     },
@@ -118,12 +116,6 @@ export const applyElectronEnvParams = () => {
   app.commandLine.appendSwitch('wm-window-animations-disabled')
 
   app.commandLine.appendSwitch('--disable-gpu-sandbox')
-
-  // proxy
-  if (global.envParams.cmdParams['proxy-server']) {
-    app.commandLine.appendSwitch('proxy-server', global.envParams.cmdParams['proxy-server'])
-    app.commandLine.appendSwitch('proxy-bypass-list', global.envParams.cmdParams['proxy-bypass-list'] ?? '<local>')
-  }
 }
 
 export const registerDeeplink = (startApp: () => void) => {
@@ -185,7 +177,6 @@ export const listenerAppEvent = (startApp: () => void) => {
     })
 
     // disable create dictionary
-    // 上游 issue #773
     contents.session.setSpellCheckerDictionaryDownloadURL('http://0.0.0.0')
   })
 
@@ -221,17 +212,7 @@ export const listenerAppEvent = (startApp: () => void) => {
     global.rain?.event_app.system_theme_change(shouldUseDarkColors)
   })
 
-  const setProxy = () => {
-    const proxy = getProxy()
-    if (proxy) {
-      setProxyByHost(proxy.host, proxy.port ? String(proxy.port) : undefined)
-    } else setProxyByHost()
-  }
   global.rain.event_app.on('updated_config', (keys, setting) => {
-    if (keys.includes('network.proxy.enable') || (global.rain.appSetting['network.proxy.enable'] && keys.some(k => k.includes('network.proxy.')))) {
-      setProxy()
-    }
-
     if (keys.includes('player.volume')) {
       global.rain.event_app.player_status({ volume: Math.trunc(setting['player.volume']! * 100) })
     }
@@ -240,7 +221,6 @@ export const listenerAppEvent = (startApp: () => void) => {
     }
   })
   global.rain.event_app.on('app_inited', () => {
-    setProxy()
     global.rain.event_app.player_status({ volume: Math.trunc(global.rain.appSetting['player.volume'] * 100) })
     global.rain.event_app.player_status({ mute: global.rain.appSetting['player.isMute'] })
   })
@@ -272,15 +252,14 @@ const initTheme = () => {
 
 const backupDB = (backupPath: string) => {
   const dbPath = path.join(global.rainDataPath, 'rain.data.db')
-  try {
-    renameSync(dbPath, backupPath)
-  } catch {}
-  try {
-    renameSync(`${dbPath}-wal`, `${backupPath}-wal`)
-  } catch {}
-  try {
-    renameSync(`${dbPath}-shm`, `${backupPath}-shm`)
-  } catch {}
+  renameSync(dbPath, backupPath)
+  for (const suffix of ['-wal', '-shm']) {
+    try {
+      renameSync(`${dbPath}${suffix}`, `${backupPath}${suffix}`)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
   openDirInExplorer(backupPath)
 }
 
@@ -304,11 +283,15 @@ export const initAppSetting = async() => {
       })
       backupDB(backupPath)
       dbFileExists = await global.rain.worker.dbService.init(global.rainDataPath)
+      if (dbFileExists === null) throw new Error('Database recovery failed; the backup has been preserved')
     }
     global.rain.appSetting = (await initSetting()).setting
     if (!dbFileExists) await migrateDBData().catch(err => { log.error(err) })
     initTheme()
-    if (envParams.cmdParams.dt == null) envParams.cmdParams.dt = !global.rain.appSetting['common.transparentWindow']
+    // 「主窗口使用软件内置的圆角及阴影」(common.transparentWindow) 设置项已移除，
+    // 行为固定为 true（TRANSPARENT_WINDOW）——即始终不使用系统原生窗口样式。
+    // 注意：命令行参数 --dt（非透明模式）仍然有效，只有未显式传入时才应用固定行为。
+    if (envParams.cmdParams.dt == null) envParams.cmdParams.dt = !TRANSPARENT_WINDOW
   }
   // global.rain.theme = getTheme()
 

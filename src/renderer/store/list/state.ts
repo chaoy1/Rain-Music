@@ -3,7 +3,6 @@ import { reactive } from '@common/utils/vueTools'
 export {
   allMusicList,
   defaultList,
-  loveList,
   tempList,
   userLists,
 } from '@renderer/store/list/listManage'
@@ -18,11 +17,6 @@ export {
 // export const defaultList: Omit<Rain.List.MyDefaultListInfo, 'list'> = reactive({
 //   id: 'default',
 //   name: '试听列表',
-// })
-
-// export const loveList: Omit<Rain.List.MyLoveListInfo, 'list'> = reactive({
-//   id: 'love',
-//   name: '我的收藏',
 // })
 
 // export const tempList: Omit<Rain.List.MyTempListInfo, 'list'> = reactive({

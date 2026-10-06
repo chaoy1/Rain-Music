@@ -17,13 +17,6 @@ declare namespace Rain {
       // list: Rain.Music.MusicInfo[]
     }
 
-    interface MyLoveListInfo {
-      id: 'love'
-      name: 'list__name_love'
-      // name: '我的收藏'
-      // list: Rain.Music.MusicInfo[]
-    }
-
     interface MyTempListInfo {
       id: 'temp'
       name: '临时列表'
@@ -34,11 +27,10 @@ declare namespace Rain {
       }
     }
 
-    type MyListInfo = MyDefaultListInfo | MyLoveListInfo | UserListInfo
+    type MyListInfo = MyDefaultListInfo | UserListInfo
 
     interface MyAllList {
       defaultList: MyDefaultListInfo
-      loveList: MyLoveListInfo
       userList: UserListInfo[]
       tempList: MyTempListInfo
     }
@@ -123,9 +115,6 @@ declare namespace Rain {
     interface MyDefaultListInfoFull extends MyDefaultListInfo {
       list: Rain.Music.MusicInfo[]
     }
-    interface MyLoveListInfoFull extends MyLoveListInfo {
-      list: Rain.Music.MusicInfo[]
-    }
     interface UserListInfoFull extends UserListInfo {
       list: Rain.Music.MusicInfo[]
     }
@@ -135,7 +124,6 @@ declare namespace Rain {
 
     interface ListDataFull {
       defaultList: Rain.Music.MusicInfo[]
-      loveList: Rain.Music.MusicInfo[]
       userList: UserListInfoFull[]
       tempList: Rain.Music.MusicInfo[]
     }

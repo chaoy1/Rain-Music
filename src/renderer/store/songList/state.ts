@@ -88,7 +88,7 @@ export const listInfo = reactive<ListInfo>({
   limit: 30,
   key: null,
   noItemLabel: '',
-  source: 'kw',
+  source: 'tx',
   tagId: '',
   sortId: '',
 })
@@ -101,7 +101,7 @@ export const listDetailInfo = reactive<ListDetailInfo>({
   page: 1,
   limit: 30,
   key: null,
-  source: 'kw',
+  source: 'tx',
   info: {},
   noItemLabel: '',
 })
@@ -115,7 +115,7 @@ export const selectListInfo = markRaw<ListInfoItem>({
   img: '',
   // grade: basic.favorcnt / 10,
   desc: '',
-  source: 'kw',
+  source: 'tx',
 })
 
 export const isVisibleListDetail = ref(false)

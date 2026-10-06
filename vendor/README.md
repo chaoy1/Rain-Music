@@ -33,6 +33,4 @@
   如需升级，应从对应包的上游重新获取后整体替换，并重新执行上述裁剪。
 - 由于使用 `file:` 引用，npm 会在 `node_modules/<包名>` 建立指向本目录的符号链接；
   Webpack 与 ESLint 均可正常解析。
-- `eslint-webpack-plugin` 默认只排除 `node_modules`，而这些包的真实路径位于 `vendor/`，
-  因此 4 份 webpack 配置显式加入了 `exclude: ['node_modules', 'vendor']`，
-  另有 `.eslintignore` 兜底。新增构建入口时请一并保留该排除项。
+- 源码 lint 在构建前统一执行，第三方副本由 `.eslintignore` 排除。

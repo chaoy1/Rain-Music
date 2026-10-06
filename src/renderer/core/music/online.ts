@@ -46,10 +46,7 @@ export const getMusicUrl = async({ musicInfo, quality, isRefresh, allowToggleSou
   onToggleSource?: (musicInfo?: Rain.Music.MusicInfoOnline) => void
 }): Promise<string> => {
   // if (!musicInfo._types[type]) {
-  //   // 兼容旧版酷我源搜索列表过滤128k音质的bug
-  //   if (!(musicInfo.source == 'kw' && type == '128k')) throw new Error('该歌曲没有可播放的音频')
-
-  //   // return Promise.reject(new Error('该歌曲没有可播放的音频'))
+  //   throw new Error('该歌曲没有可播放的音频')
   // }
   const targetQuality = quality ?? getPlayQuality(appSetting['player.playQuality'], musicInfo)
   const cachedUrl = await getStoreMusicUrl(musicInfo, targetQuality)

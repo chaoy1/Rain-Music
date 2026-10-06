@@ -4,7 +4,7 @@ import { setMusicInfo, setIsPlay } from '../store/action'
 import { pause, play, setLyric, setLyricOffset, setPlaybackRate, stop } from './lyric'
 import { lyrics } from '@lyric/store/lyric'
 
-let mainWindowPort: Electron.IpcRendererEvent['ports'][0] | null = null
+let mainWindowPort: MessagePort | null = null
 export const sendDesktopLyricInfo = (info: Rain.DesktopLyric.WinMainActions) => {
   if (mainWindowPort == null) return
   mainWindowPort.postMessage({ action: info })
@@ -27,7 +27,7 @@ const handleDesktopLyricMessage = (event: Rain.DesktopLyric.LyricActions) => {
       lyrics.rainlyric = event.data.rainlrc
       setLyric()
       if (event.data.isPlay) {
-        setImmediate(() => {
+        window.setTimeout(() => {
           getStatus()
         })
       }
@@ -71,8 +71,8 @@ const handleDesktopLyricMessage = (event: Rain.DesktopLyric.LyricActions) => {
 }
 
 export const init = () => {
-  onProvideMainWindowChannel(({ event }) => {
-    const [port] = event.ports
+  onProvideMainWindowChannel((port) => {
+    mainWindowPort?.close()
     mainWindowPort = port
 
     // ... register a handler to receive results ...

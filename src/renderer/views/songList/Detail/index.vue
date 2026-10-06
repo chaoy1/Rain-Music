@@ -1,5 +1,5 @@
 <template>
-  <div :class="$style.container">
+  <div :class="$style.container" data-playlist-detail>
     <div :class="$style.songListHeader">
       <div :class="$style.songListHeaderLeft" :style="{ backgroundImage: 'url('+(picUrl || listDetailInfo.info.img)+')' }">
         <!-- <span v-if="listDetailInfo.info.play_count" :class="$style.playNum">{{ listDetailInfo.info.play_count }}</span> -->
@@ -7,23 +7,16 @@
       <div :class="$style.songListHeaderMiddle">
         <h3 :title="listDetailInfo.info.name">{{ listDetailInfo.info.name }}</h3>
         <p :title="listDetailInfo.info.desc">{{ listDetailInfo.info.desc }}</p>
-      </div>
-      <div :class="$style.songListHeaderRight">
-        <base-btn
-          :class="$style.headerRightBtn"
-          :disabled="!!listDetailInfo.noItemLabel"
-          @click="playSongListDetail(listDetailInfo.id, listDetailInfo.source, listDetailInfo.list)"
-        >
-          {{ $t('list__play') }}
-        </base-btn>
-        <base-btn
-          :class="$style.headerRightBtn"
-          :disabled="!!listDetailInfo.noItemLabel"
+        <button
+          type="button" :class="[$style.collect, { [$style.collected]: isCollected }]" data-playlist-collect :data-collected="isCollected"
+          :disabled="(!isCollected && !!listDetailInfo.noItemLabel) || collecting" :aria-busy="collecting"
+          :aria-pressed="isCollected" :aria-label="$t(isCollected ? 'favorite__remove_playlist' : 'songlist__collect')" :title="$t(isCollected ? 'favorite__remove_playlist' : 'songlist__collect')"
           @click="addSongListDetail(listDetailInfo.id, listDetailInfo.source, listDetailInfo.info.name)"
         >
-          {{ $t('list__collect') }}
-        </base-btn>
-        <base-btn :class="$style.headerRightBtn" @click="handleBack">{{ $t('back') }}</base-btn>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 5.5a5 5 0 0 0-7.1 0L12 6.9l-1.4-1.4a5 5 0 0 0-7.1 7.1L12 21l8.5-8.4a5 5 0 0 0 0-7.1Z" /></svg>
+          <span>{{ $t(isCollected ? 'songlist__collected' : 'songlist__collect') }}</span>
+        </button>
+        <span v-if="collectionError" :class="$style.collectionError" role="status">{{ collectionError }}</span>
       </div>
     </div>
     <div :class="$style.list">
@@ -42,16 +35,17 @@
 </template>
 
 <script lang="ts">
-import { ref, watch } from '@common/utils/vueTools'
+import { computed, ref, watch } from '@common/utils/vueTools'
 import { listDetailInfo } from '@renderer/store/songList/state'
 import { setVisibleListDetail } from '@renderer/store/songList/action'
 import { useRouter } from '@common/utils/vueRouter'
-import { addSongListDetail, playSongListDetail } from './action'
+import { toggleSongListCollection, getSavedSongList } from './action'
 import useList from './useList'
 import useKeyBack from './useKeyBack'
+import useSongListBack from './useSongListBack'
 
 
-const source = ref<Rain.OnlineSource>('kw')
+const source = ref<Rain.OnlineSource>('tx')
 const id = ref<string>('')
 const page = ref<number>(1)
 const picUrl = ref<string>('')
@@ -108,6 +102,22 @@ export default {
   beforeRouteUpdate: verifyQueryParams,
   setup() {
     const router = useRouter()
+    const collecting = ref(false)
+    const collectionError = ref('')
+    const isCollected = computed(() => !!getSavedSongList(listDetailInfo.id, listDetailInfo.source))
+    const addSongListDetail = async(id: string, source: Rain.OnlineSource, name?: string) => {
+      if (collecting.value) return
+      collecting.value = true
+      collectionError.value = ''
+      try {
+        await toggleSongListCollection(id, source, name)
+      } catch (error) {
+        console.warn('Unable to collect playlist', error)
+        collectionError.value = window.i18n.t('songlist__collect_failed')
+      } finally {
+        collecting.value = false
+      }
+    }
 
     const {
       listRef,
@@ -121,12 +131,7 @@ export default {
       void getListData(source.value, id.value, page, refresh.value)
     }
 
-    const handleBack = () => {
-      setVisibleListDetail(false)
-      if (window.rain.songListInfo.fromName) void router.replace({ name: window.rain.songListInfo.fromName })
-      else router.back()
-    }
-
+    const handleBack = useSongListBack()
     useKeyBack(handleBack)
 
     watch([source, id, page, refresh], async([_source, _id, _page, _refresh]) => {
@@ -150,7 +155,9 @@ export default {
       listRef,
       togglePage,
       addSongListDetail,
-      playSongListDetail,
+      collecting,
+      collectionError,
+      isCollected,
       handlePlayList,
       handleBack,
     }
@@ -210,38 +217,46 @@ export default {
   flex: auto;
   padding: 4px 16px;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   h3 {
     .mixin-ellipsis-1();
+    max-width: 100%;
     line-height: 1.5;
     padding-bottom: 5px;
     color: var(--color-font);
   }
   p {
-    .mixin-ellipsis(3);
+    .mixin-ellipsis(2);
+    max-width: 100%;
     font-size: 12px;
     line-height: 1.2;
     color: var(--color-font-label);
   }
 }
-.songListHeaderRight {
+.collect {
   flex: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  padding-right: 18px;
-  gap: 6px;
-
-  .headerRightBtn {
-    border-radius: 8px;
-    &:first-child {
-      border-top-left-radius: 8px;
-      border-bottom-left-radius: 8px;
-    }
-    &:last-child {
-      border-top-right-radius: 8px;
-      border-bottom-right-radius: 8px;
-    }
-  }
+  gap: 7px;
+  height: 32px;
+  margin-top: auto;
+  padding: 0 12px;
+  border: 0;
+  box-shadow: none !important;
+  background: var(--surface-hover);
+  color: var(--control-ink);
+  font-size: 12px;
+  font-weight: 400;
+  &.collected svg { color: #df6370; fill: currentColor; }
+  cursor: pointer;
+  &:focus-visible { outline: 2px solid var(--control-outline); outline-offset: 2px; }
+  &:disabled { opacity: .4; cursor: default; }
+  svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 }
+
+.collectionError { font-size: 12px; color: var(--color-font-label); }
 
 .list {
   position: relative;

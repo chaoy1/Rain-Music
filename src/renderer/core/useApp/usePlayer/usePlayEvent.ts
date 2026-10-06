@@ -4,7 +4,7 @@ import { musicInfo, playMusicInfo } from '@renderer/store/player/state'
 import { setStop, isEmpty } from '@renderer/plugins/player'
 import { playNext, setMusicUrl } from '@renderer/core/player'
 import { setAllStatus } from '@renderer/store/player/action'
-import { appSetting } from '@renderer/store/setting'
+import { AUTO_SKIP_ON_ERROR } from '@common/constants'
 
 export default () => {
   const t = useI18n()
@@ -59,7 +59,7 @@ export default () => {
 
   const handleLoadstart = () => {
     if (window.rain.isPlayedStop) return
-    if (appSetting['player.autoSkipOnError']) startLoadingTimeout()
+    if (AUTO_SKIP_ON_ERROR) startLoadingTimeout()
     setAllStatus(t('player__loading'))
   }
 
@@ -94,7 +94,7 @@ export default () => {
       return
     }
 
-    if (appSetting['player.autoSkipOnError']) {
+    if (AUTO_SKIP_ON_ERROR) {
       if (document.hidden) {
         console.warn('error skip to next')
         void playNext(true)

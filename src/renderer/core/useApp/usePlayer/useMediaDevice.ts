@@ -7,6 +7,7 @@ import { dialog } from '@renderer/plugins/Dialog'
 import { setMediaDeviceId } from '@renderer/plugins/player'
 import { isPlay } from '@renderer/store/player/state'
 import { appSetting, saveMediaDeviceId } from '@renderer/store/setting'
+import { MEDIA_DEVICE_REMOVED_STOP_PLAY } from '@common/constants'
 
 const getDevices = async() => {
   const devices = await navigator.mediaDevices.enumerateDevices()
@@ -59,7 +60,8 @@ export default () => {
     if (label != prevDeviceLabel) {
       window.app_event.playerDeviceChanged()
 
-      if (appSetting['player.isMediaDeviceRemovedStopPlay'] && isPlay.value) {
+      // 「输出设备改变时暂停歌曲」已从设置页移除，行为固定为 true
+      if (MEDIA_DEVICE_REMOVED_STOP_PLAY && isPlay.value) {
         window.rain.isPlayedStop = true
         pause()
       }

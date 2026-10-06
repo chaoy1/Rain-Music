@@ -34,12 +34,11 @@ export class Event extends EventEmitter {
   /**
    * 覆盖整个列表数据
    * @param listData 列表数据
-   * @param isRemote 是否属于远程操作
    */
-  async list_data_overwrite(listData: MakeOptional<Rain.List.ListDataFull, 'tempList'>, isRemote: boolean = false) {
+  async list_data_overwrite(listData: MakeOptional<Rain.List.ListDataFull, 'tempList'>) {
     fixListIdType(listData.userList)
     await global.rain.worker.dbService.listDataOverwrite(listData)
-    this.emit('list_data_overwrite', listData, isRemote)
+    this.emit('list_data_overwrite', listData)
     this.list_changed()
   }
 
@@ -47,34 +46,31 @@ export class Event extends EventEmitter {
    * 批量创建列表
    * @param position 列表位置
    * @param lists 列表信息
-   * @param isRemote 是否属于远程操作
    */
-  async list_create(position: number, lists: Rain.List.UserListInfo[], isRemote: boolean = false) {
+  async list_create(position: number, lists: Rain.List.UserListInfo[]) {
     fixListIdType(lists)
     await global.rain.worker.dbService.createUserLists(position, lists)
-    this.emit('list_create', position, lists, isRemote)
+    this.emit('list_create', position, lists)
     this.list_changed()
   }
 
   /**
    * 批量删除列表及列表内歌曲
    * @param ids 列表ids
-   * @param isRemote 是否属于远程操作
    */
-  async list_remove(ids: string[], isRemote: boolean = false) {
+  async list_remove(ids: string[]) {
     await global.rain.worker.dbService.removeUserLists(ids)
-    this.emit('list_remove', ids, isRemote)
+    this.emit('list_remove', ids)
     this.list_changed()
   }
 
   /**
    * 批量更新列表信息
    * @param lists 列表信息
-   * @param isRemote 是否属于远程操作
    */
-  async list_update(lists: Rain.List.UserListInfo[], isRemote: boolean = false) {
+  async list_update(lists: Rain.List.UserListInfo[]) {
     await global.rain.worker.dbService.updateUserLists(lists)
-    this.emit('list_update', lists, isRemote)
+    this.emit('list_update', lists)
     this.list_changed()
   }
 
@@ -82,11 +78,10 @@ export class Event extends EventEmitter {
    * 批量更新列表位置
    * @param position 列表位置
    * @param ids 列表ids
-   * @param isRemote 是否属于远程操作
    */
-  async list_update_position(position: number, ids: string[], isRemote: boolean = false) {
+  async list_update_position(position: number, ids: string[]) {
     await global.rain.worker.dbService.updateUserListsPosition(position, ids)
-    this.emit('list_update_position', position, ids, isRemote)
+    this.emit('list_update_position', position, ids)
     this.list_changed()
   }
 
@@ -94,11 +89,10 @@ export class Event extends EventEmitter {
    * 覆盖列表内歌曲
    * @param listId 列表id
    * @param musicInfos 音乐信息
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_overwrite(listId: string, musicInfos: Rain.Music.MusicInfo[], isRemote: boolean = false) {
+  async list_music_overwrite(listId: string, musicInfos: Rain.Music.MusicInfo[]) {
     await global.rain.worker.dbService.musicOverwrite(listId, musicInfos)
-    this.emit('list_music_overwrite', listId, musicInfos, isRemote)
+    this.emit('list_music_overwrite', listId, musicInfos)
     this.list_changed()
   }
 
@@ -107,11 +101,10 @@ export class Event extends EventEmitter {
    * @param listId 列表id
    * @param musicInfos 添加的歌曲信息
    * @param addMusicLocationType 添加在到列表的位置
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_add(listId: string, musicInfos: Rain.Music.MusicInfo[], addMusicLocationType: Rain.AddMusicLocationType, isRemote: boolean = false) {
+  async list_music_add(listId: string, musicInfos: Rain.Music.MusicInfo[], addMusicLocationType: Rain.AddMusicLocationType) {
     await global.rain.worker.dbService.musicsAdd(listId, musicInfos, addMusicLocationType)
-    this.emit('list_music_add', listId, musicInfos, addMusicLocationType, isRemote)
+    this.emit('list_music_add', listId, musicInfos, addMusicLocationType)
     this.list_changed()
   }
 
@@ -121,11 +114,10 @@ export class Event extends EventEmitter {
    * @param toId 目标列表id
    * @param musicInfos 移动的歌曲信息
    * @param addMusicLocationType 添加在到列表的位置
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_move(fromId: string, toId: string, musicInfos: Rain.Music.MusicInfo[], addMusicLocationType: Rain.AddMusicLocationType, isRemote: boolean = false) {
+  async list_music_move(fromId: string, toId: string, musicInfos: Rain.Music.MusicInfo[], addMusicLocationType: Rain.AddMusicLocationType) {
     await global.rain.worker.dbService.musicsMove(fromId, toId, musicInfos, addMusicLocationType)
-    this.emit('list_music_move', fromId, toId, musicInfos, addMusicLocationType, isRemote)
+    this.emit('list_music_move', fromId, toId, musicInfos, addMusicLocationType)
     this.list_changed()
   }
 
@@ -134,33 +126,30 @@ export class Event extends EventEmitter {
    * @param listId
    * @param listId 列表Id
    * @param ids 要删除歌曲的id
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_remove(listId: string, ids: string[], isRemote: boolean = false) {
+  async list_music_remove(listId: string, ids: string[]) {
     await global.rain.worker.dbService.musicsRemove(listId, ids)
-    this.emit('list_music_remove', listId, ids, isRemote)
+    this.emit('list_music_remove', listId, ids)
     this.list_changed()
   }
 
   /**
    * 批量更新歌曲信息
    * @param musicInfos 歌曲&列表信息
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_update(musicInfos: Rain.List.ListActionMusicUpdate, isRemote: boolean = false) {
+  async list_music_update(musicInfos: Rain.List.ListActionMusicUpdate) {
     await global.rain.worker.dbService.musicsUpdate(musicInfos)
-    this.emit('list_music_update', musicInfos, isRemote)
+    this.emit('list_music_update', musicInfos)
     this.list_changed()
   }
 
   /**
    * 清空列表内的歌曲
    * @param ids 列表Id
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_clear(ids: string[], isRemote: boolean = false) {
+  async list_music_clear(ids: string[]) {
     await global.rain.worker.dbService.musicsClear(ids)
-    this.emit('list_music_clear', ids, isRemote)
+    this.emit('list_music_clear', ids)
     this.list_changed()
   }
 
@@ -169,11 +158,10 @@ export class Event extends EventEmitter {
    * @param listId 列表ID
    * @param position 新位置
    * @param ids 歌曲id
-   * @param isRemote 是否属于远程操作
    */
-  async list_music_update_position(listId: string, position: number, ids: string[], isRemote: boolean = false) {
+  async list_music_update_position(listId: string, position: number, ids: string[]) {
     await global.rain.worker.dbService.musicsPositionUpdate(listId, position, ids)
-    this.emit('list_music_update_position', listId, position, ids, isRemote)
+    this.emit('list_music_update_position', listId, position, ids)
     this.list_changed()
   }
 }

@@ -1,27 +1,24 @@
 <template>
   <div :class="$style.dock" data-detail-dock data-glass ignore-tip>
-    <div :class="$style.timeline" data-detail-progress role="slider" tabindex="0" :aria-label="$t('player__detail_progress')" :aria-valuemin="0" :aria-valuemax="playProgress.maxPlayTime" :aria-valuenow="playProgress.nowPlayTime" :aria-valuetext="`${nowPlayTimeStr} / ${maxPlayTimeStr}`" @keydown="seekByKey">
+    <div v-if="hasTimeline" :class="$style.timeline" data-detail-progress role="slider" :tabindex="canSeek ? 0 : -1" :aria-disabled="!canSeek" :aria-label="$t('player__detail_progress')" :aria-valuemin="0" :aria-valuemax="playProgress.maxPlayTime" :aria-valuenow="playProgress.nowPlayTime" :aria-valuetext="`${nowPlayTimeStr} / ${maxPlayTimeStr}`" @keydown="seekByKey">
       <common-progress-bar :class-name="$style.progress" :progress="progress" :handle-transition-end="handleTransitionEnd" :is-active-transition="isActiveTransition" />
     </div>
-    <div :class="$style.time"><span>{{ nowPlayTimeStr }}</span><span>{{ maxPlayTimeStr }}</span></div>
+    <div v-if="hasTimeline" :class="$style.time" data-detail-time><span>{{ nowPlayTimeStr }}</span><span>{{ maxPlayTimeStr }}</span></div>
     <div :class="$style.primary">
-      <common-toggle-play-mode-btn />
+      <common-favorite-button />
       <common-playback-controls immersive />
-      <button type="button" data-detail-collect :aria-label="$t('player__add_music_to')" :title="$t('player__add_music_to')" :disabled="!musicInfo.id" @click="isShowAddMusicTo = true"><svg viewBox="0 0 512 512"><use xlink:href="#icon-add-2" /></svg></button>
+      <common-toggle-play-mode-btn />
     </div>
-    <common-list-add-modal v-model:show="isShowAddMusicTo" :music-info="playMusicInfo.musicInfo" />
   </div>
 </template>
 
 <script setup>
-import { ref } from '@common/utils/vueTools'
-import { musicInfo, playMusicInfo } from '@renderer/store/player/state'
 import { playProgress } from '@renderer/store/player/playProgress'
 import usePlayProgress from '@renderer/utils/compositions/usePlayProgress'
 
-const isShowAddMusicTo = ref(false)
-const { nowPlayTimeStr, maxPlayTimeStr, progress, isActiveTransition, handleTransitionEnd } = usePlayProgress()
+const { nowPlayTimeStr, maxPlayTimeStr, progress, isActiveTransition, handleTransitionEnd, hasTimeline, canSeek } = usePlayProgress()
 const seekByKey = event => {
+  if (!canSeek.value) return
   let time = playProgress.nowPlayTime
   switch (event.key) {
     case 'ArrowLeft': case 'ArrowDown': time -= 5; break

@@ -10,7 +10,7 @@ import {
   overwriteListMusics,
 } from '@renderer/store/list/listManage'
 import { toRaw } from '@common/utils/vueTools'
-import { LIST_IDS } from '@common/constants'
+import { LIST_IDS, ADD_MUSIC_LOCATION_TYPE } from '@common/constants'
 
 export const registerAction = (onListChanged: (listIds: string[]) => void) => {
   return registerListAction(appSetting, onListChanged)
@@ -39,7 +39,8 @@ export const addListMusics = async(id: string, musicInfos: Rain.Music.MusicInfo[
   return addListMusicsAction({
     id,
     musicInfos: toRaw(musicInfos),
-    addMusicLocationType: addMusicLocationType ?? appSetting['list.addMusicLocationType'],
+    // 添加歌曲位置已固定为「顶部」（list.addMusicLocationType -> ADD_MUSIC_LOCATION_TYPE）
+    addMusicLocationType: addMusicLocationType ?? ADD_MUSIC_LOCATION_TYPE,
   })
 }
 
@@ -48,7 +49,7 @@ export const moveListMusics = async(fromId: string, toId: string, musicInfos: Ra
     fromId,
     toId,
     musicInfos: toRaw(musicInfos),
-    addMusicLocationType: addMusicLocationType ?? appSetting['list.addMusicLocationType'],
+    addMusicLocationType: addMusicLocationType ?? ADD_MUSIC_LOCATION_TYPE,
   })
 }
 
@@ -73,6 +74,8 @@ export const createUserList = async({ name, id = `userlist_${Date.now()}`, list 
     ],
   })
   if (list) await addListMusics(id, list)
+  // 返回新列表 id，方便调用方继续操作该歌单。
+  return id
 }
 
 

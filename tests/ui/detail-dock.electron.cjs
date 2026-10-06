@@ -23,7 +23,7 @@ app.whenReady().then(async() => {
     const audio = { playPrev: () => calls.push('prev'), playNext: () => calls.push('next'), togglePlay: () => {calls.push('toggle');store.isPlay.value=!store.isPlay.value;} };
     const boundaries = {
       DetailTools: {template:'<span />'},
-      usePlayProgress: () => ({nowPlayTimeStr:'00:30',maxPlayTimeStr:'02:00',progress:.25,isActiveTransition:false,handleTransitionEnd:()=>{}}),
+      usePlayProgress: () => ({nowPlayTimeStr:'00:30',maxPlayTimeStr:'02:00',progress:.25,isActiveTransition:false,handleTransitionEnd:()=>{},hasTimeline:Vue.computed(()=>!!store.musicInfo.id),canSeek:Vue.computed(()=>!!store.musicInfo.id&&store.playProgress.maxPlayTime>0)}),
       useToggleDesktopLyric: () => ({toggleDesktopLyricBtnTitle:'desktop-lyric',toggleDesktopLyric:()=>calls.push('desktop'),toggleLockDesktopLyric:()=>calls.push('lock')})
     };
     window.app_event = {setProgress: value => seeks.push(value),setVolume:value=>{volumes.push(value);store.volume.value=value;},setVolumeIsMute:value=>{store.isMute.value=value;}};
@@ -40,14 +40,14 @@ app.whenReady().then(async() => {
     check('immersive play updates to a pause control',calls.at(-1)==='toggle'&&document.querySelector('[data-detail-play]').getAttribute('aria-label')==='player__pause');
     document.querySelector('[data-detail-play]').click();await Vue.nextTick();
     check('immersive pause returns to a play control',document.querySelector('[data-detail-play]').getAttribute('aria-label')==='player__play');
+    check('empty dock omits its timeline and time labels',!document.querySelector('[data-detail-progress],[data-detail-time]'));
+    store.musicInfo.id='fixture';await Vue.nextTick();check('a current song restores the dock timeline',!!document.querySelector('[data-detail-progress]'));
     const slider=document.querySelector('[data-detail-progress]');
     const key=k=>slider.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
     key('ArrowRight');key('ArrowLeft');check('keyboard seeks by five seconds in either direction',seeks.slice(-2).join(',')==='35,25');
     key('Home');key('End');check('Home and End seek to track boundaries',seeks.slice(-2).join(',')==='0,120');
     store.playProgress.nowPlayTime=119;key('ArrowUp');store.playProgress.nowPlayTime=1;key('ArrowDown');
     check('keyboard seek clamps to the actual track duration',seeks.slice(-2).join(',')==='120,0');
-    check('collection is disabled without a current song',document.querySelector('button[aria-label="player__add_music_to"]').disabled);
-    store.musicInfo.id='fixture';await Vue.nextTick();check('collection becomes available for a current song',!document.querySelector('button[aria-label="player__add_music_to"]').disabled);
     check('immersive dock keeps volume outside details',!document.querySelector('[data-detail-volume]'));
     const progressComponent=(()=>{${progressCode};component.__cssModules={$style:{}};return component;})();
     const progressHost=document.createElement('div');document.body.append(progressHost);

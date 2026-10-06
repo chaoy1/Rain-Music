@@ -5,7 +5,7 @@ const root = path.resolve(__dirname, '../..')
 const evidence = path.join(root, '.design')
 process.env.RAIN_DATA_DIR = path.join(evidence, 'shell-test-portable')
 fs.mkdirSync(path.join(process.env.RAIN_DATA_DIR, 'userData/RainDatas'), { recursive: true })
-fs.writeFileSync(path.join(process.env.RAIN_DATA_DIR, 'userData/RainDatas/config_v2.json'), JSON.stringify({version:'2.12.6',setting:{version:'2.12.8','theme.id':'mono','common.fontSize':16,'common.windowSizeId':2,'common.langId':'zh-cn','tray.enable':true,'download.enable':true,'common.isShowAnimation':true,'desktopLyric.enable':false}}))
+fs.writeFileSync(path.join(process.env.RAIN_DATA_DIR, 'userData/RainDatas/config_v2.json'), JSON.stringify({version:'2.12.6',setting:{version:'2.12.8','theme.id':'mono','common.fontSize':16,'common.windowSizeId':2,'common.langId':'zh-cn','download.enable':true,'desktopLyric.enable':false}}))
 const results = []
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 const evaluate = (win, code) => win.webContents.executeJavaScript(code)
@@ -33,9 +33,11 @@ app.on('browser-window-created', (_, win) => {
       check('search lives beneath source tabs inside the search page',await evaluate(win,`(()=>{const s=document.querySelector('#view [data-page-search]'),h=document.querySelector('#view .page-toolbar');return s&&h&&s.getBoundingClientRect().top>=h.getBoundingClientRect().bottom&&!document.querySelector('#toolbar input')&&!document.querySelector('#left input');})()`))
       check('search has one page field and sidebar keeps direct navigation',await evaluate(win,`document.querySelectorAll('#view [data-page-search] input').length===1&&!!document.querySelector('#left a[href="#/search"]')`))
       check('footer play button uses a slightly squared soft corner',await evaluate(win,`(()=>{const b=document.querySelector('[data-playback-controls] button:nth-child(2)'),r=b.getBoundingClientRect(),radius=parseFloat(getComputedStyle(b).borderTopLeftRadius);return Math.abs(r.width-r.height)<1&&radius>=10&&radius<r.width/2;})()`))
+      check('empty playback keeps the footer timeline and time labels hidden',await evaluate(win,`!document.querySelector('[data-footer-progress]')&&!document.querySelector('[data-footer-time]')`))
+      await evaluate(win,`(()=>{function find(v){if(!v)return;if(v.component?.type.name==='CorePlayBar')return v.component;const s=find(v.component?.subTree);if(s)return s;for(const child of Array.isArray(v.children)?v.children:[]){const c=find(child);if(c)return c;}}Object.assign(window.rainData.musicInfo,{id:'shell-progress-fixture',name:'晨光',singer:'界面验证'});find(document.querySelector('#root')._vnode).proxy.maxPlayTime=120;})()`);await wait(100)
       for(const variant of ['mini','middle','full']) {
         await evaluate(win,`window.rainData.updateSetting({'common.playBarProgressStyle':'${variant}'});void 0`);await wait(180)
-        check(`${variant} saved preference uses permanent full-width timeline`,await evaluate(win,`(()=>{const p=document.querySelector('#player'),s=p.querySelector('[data-footer-progress]');if(!s)return false;const r=s.getBoundingClientRect(),b=p.getBoundingClientRect();return Math.abs(r.left-b.left)<1&&Math.abs(r.width-b.width)<1&&getComputedStyle(s).visibility==='visible'&&s.querySelector('[data-seek-hit]').getBoundingClientRect().height>=24;})()`))
+        check(`${variant} saved preference keeps the timeline between song and time`,await evaluate(win,`(()=>{const p=document.querySelector('#player'),s=p.querySelector('[data-footer-progress]');if(!s)return false;const r=s.getBoundingClientRect(),song=p.querySelector('[data-footer-song]').getBoundingClientRect(),time=p.querySelector('[data-footer-time]').getBoundingClientRect();return r.left>=song.right&&r.right<=time.left&&r.width>=88&&getComputedStyle(s).visibility==='visible'&&s.querySelector('[data-seek-hit]').getBoundingClientRect().height>=24;})()`))
       }
       for(const theme of ['mono','mono_dark']) {
         await evaluate(win,`window.rainData.updateSetting({'theme.id':'${theme}'});void 0`);await wait(350)
@@ -44,14 +46,19 @@ app.on('browser-window-created', (_, win) => {
           await evaluate(win,`location.hash='#${route}';void 0`);await wait(350)
           if(route==='/search') {
             const readSearch=()=>evaluate(win,`(()=>{const e=document.querySelector('[data-page-search] input').parentElement.parentElement,s=getComputedStyle(e),r=e.getBoundingClientRect();return {background:s.backgroundColor,shadow:s.boxShadow,left:r.left,top:r.top,width:r.width,height:r.height};})()`)
-            await evaluate(win,`document.activeElement?.blur();void 0`);await wait(220)
+            await evaluate(win,`document.activeElement?.blur();void 0`)
+            await wait(100)
+            await until(()=>evaluate(win,`document.querySelector('[data-page-search] input').parentElement.parentElement.getAnimations().length===0`))
             const idle=await readSearch()
             await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(evidence,`soft-${theme}-search-idle.png`),img.toPNG()))
             await evaluate(win,`document.querySelector('[data-page-search] input').focus();void 0`);await wait(220)
             const focused=await readSearch()
             check(`${theme} search visibly distinguishes focus without shifting layout`,idle.background!==focused.background&&idle.shadow!==focused.shadow&&['left','top','width','height'].every(k=>idle[k]===focused[k]),{idle,focused})
             await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(evidence,`soft-${theme}-search-focused.png`),img.toPNG()))
-            await evaluate(win,`document.activeElement.blur();void 0`);await wait(220)
+            await evaluate(win,`document.activeElement.blur();void 0`)
+            // Blur waits 80 ms before changing state, then CSS animates for 180 ms.
+            await wait(100)
+            await until(()=>evaluate(win,`document.querySelector('[data-page-search] input').parentElement.parentElement.getAnimations().length===0`))
             const blurred=await readSearch()
             check(`${theme} search restores the quiet idle state after blur`,blurred.background===idle.background&&blurred.shadow===idle.shadow,{idle,blurred})
           }
@@ -69,7 +76,7 @@ app.on('browser-window-created', (_, win) => {
       }
       win.setContentSize(828,540); await wait(200)
       await evaluate(win,`location.hash='#/search';void 0`);await wait(350)
-      check('page search fits the minimum window and has a comfortable hit area',await evaluate(win,`(()=>{const a=document.querySelector('#view').getBoundingClientRect(),s=document.querySelector('[data-page-search] input')?.getBoundingClientRect();return s&&s.left>=a.left+15&&s.right<=a.right-15&&s.height>=40;})()`))
+      check('slim page search fits the minimum window with a usable hit area',await evaluate(win,`(()=>{const a=document.querySelector('#view').getBoundingClientRect(),s=document.querySelector('[data-page-search] input')?.getBoundingClientRect();return s&&s.left>=a.left+15&&s.right<=a.right-15&&s.height>=34&&s.height<=38;})()`))
       check('footer volume remains hidden at rest',await evaluate(win,`document.querySelector('[data-volume-panel]').getAttribute('aria-hidden')==='true'`))
       win.focus(); await wait(100)
       await evaluate(win,`(document.querySelector('[data-page-search] input')||document.querySelector('#toolbar input')).focus();void 0`)

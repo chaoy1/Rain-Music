@@ -84,3 +84,10 @@ src/**/*-internal.js
 !vendor/*/build/**
 !vendor/*/dist/
 !vendor/*/dist/**
+
+# Local credentials, user data and tooling artifacts
+.env.*
+!.env.example
+portable/
+*.tsbuildinfo
+*.bak

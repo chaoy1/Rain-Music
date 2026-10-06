@@ -13,29 +13,11 @@ const getIconPath = (name: string): Electron.NativeImage => {
 
 export const createTaskBarButtons = ({
   empty = false,
-  collect = false,
   play = false,
   next = true,
   prev = true,
 }: Rain.TaskBarButtonFlags, onClick: (action: Rain.Player.StatusButtonActions) => void): Electron.ThumbarButton[] => {
   const buttons: Electron.ThumbarButton[] = [
-    collect
-      ? {
-          icon: getIconPath('collected'),
-          click() {
-            onClick('unCollect')
-          },
-          tooltip: '取消收藏',
-          flags: ['nobackground'],
-        }
-      : {
-          icon: getIconPath('collect'),
-          click() {
-            onClick('collect')
-          },
-          tooltip: '收藏',
-          flags: ['nobackground'],
-        },
     {
       icon: getIconPath('prev'),
       click() {

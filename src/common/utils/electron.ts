@@ -38,7 +38,5 @@ export const clipboardReadText = (): string => {
 
 
 export const encodePath = (path: string) => {
-  // 上游 issue #963
-  // 上游 issue #1461
   return path.replaceAll('%', '%25').replaceAll('#', '%23')
 }

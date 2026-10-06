@@ -6,7 +6,8 @@ const evidence = path.join(root, '.design')
 fs.mkdirSync(evidence, { recursive: true })
 process.env.RAIN_DATA_DIR = path.join(evidence, 'refined-test-portable')
 fs.mkdirSync(path.join(process.env.RAIN_DATA_DIR, 'userData/RainDatas'), { recursive: true })
-fs.writeFileSync(path.join(process.env.RAIN_DATA_DIR, 'userData/RainDatas/config_v2.json'), JSON.stringify({version:'2.12.6',setting:{version:'2.12.8','theme.id':'mono','common.fontSize':16,'common.windowSizeId':2,'common.langId':'zh-cn','common.isAgreePact':true,'tray.enable':true,'download.enable':true,'common.isShowAnimation':true}}))
+// `tray.enable` 与 `common.isShowAnimation` 已从设置项中删除（托盘恒开、动画恒开），这里不再写入。
+fs.writeFileSync(path.join(process.env.RAIN_DATA_DIR, 'userData/RainDatas/config_v2.json'), JSON.stringify({version:'2.12.6',setting:{version:'2.12.8','theme.id':'mono','common.fontSize':16,'common.windowSizeId':2,'common.langId':'zh-cn','common.isAgreePact':true,'download.enable':true}}))
 const results = []
 const wait = ms => new Promise(r => setTimeout(r, ms))
 const check = (test, pass, detail) => { results.push({test,pass,detail}); console.log(`${pass?'PASS':'FAIL'} ${test} ${JSON.stringify(detail??'')}`) }
@@ -21,6 +22,7 @@ app.on('browser-window-created', (_, win) => {
     try {
       await initialized
       await wait(300)
+      check('empty player cover uses the Rain Music monogram', await evaluate(win, `document.querySelector('[data-player-cover]').textContent.trim()==='RM'`))
       await evaluate(win, `window.findComponent = function find(vnode, name) { if (!vnode) return; if(vnode.component?.type?.name === name) return vnode.component; const sub=find(vnode.component?.subTree,name); if(sub)return sub; for(const child of Array.isArray(vnode.children)?vnode.children:[]){const found=find(child,name);if(found)return found;} }; void 0`)
       check('song details are lazy until opened', await evaluate(win, `!findComponent(document.querySelector('#root')._vnode, 'CorePlayDetail')`))
       await evaluate(win, `document.querySelector('#player [data-player-cover]').click();void 0`)
@@ -69,12 +71,16 @@ app.on('browser-window-created', (_, win) => {
       }
       await evaluate(win, `location.hash='#/setting';void 0`)
       await wait(300)
-      await evaluate(win, `document.querySelector('#setting_show_animate').click();void 0`)
+      // 基本设置分区已不再提供普通复选框（动画、全屏启动等控件已删除），
+      // 改用列表设置分区的「显示歌曲来源平台」复选框验证同一个复选控件的样式与无障碍状态。
+      await evaluate(win, `document.querySelector('#view [role=toolbar] [role=tab][aria-label="列表设置"]').click();void 0`)
+      await wait(300)
+      await evaluate(win, `document.querySelector('#setting_list_showSource_enable').click();void 0`)
       await wait(250)
-      check('restyled checkbox toggles its setting and accessible state',await evaluate(win, `window.rainData.appSetting['common.isShowAnimation']===false&&document.querySelector('#setting_show_animate').nextElementSibling.querySelector('[role=checkbox]').getAttribute('aria-checked')==='false'`))
-      await evaluate(win, `document.querySelector('#setting_show_animate').click();void 0`)
+      check('restyled checkbox toggles its setting and accessible state',await evaluate(win, `window.rainData.appSetting['list.isShowSource']===false&&document.querySelector('#setting_list_showSource_enable').nextElementSibling.querySelector('[role=checkbox]').getAttribute('aria-checked')==='false'`))
+      await evaluate(win, `document.querySelector('#setting_list_showSource_enable').click();void 0`)
       await wait(250)
-      check('restyled checkbox can restore its enabled setting',await evaluate(win, `window.rainData.appSetting['common.isShowAnimation']===true`))
+      check('restyled checkbox can restore its enabled setting',await evaluate(win, `window.rainData.appSetting['list.isShowSource']===true`))
       await evaluate(win, `location.hash='#/search'; window.rainData.updateSetting({'theme.id':'mono'}); void 0`)
       await wait(500)
       const suggestions=await evaluate(win, `(() => {const find=v=>{if(!v)return; if(v.component?.type?.props?.visibleList)return v.component; const sub=find(v.component?.subTree);if(sub)return sub;for(const child of Array.isArray(v.children)?v.children:[]){const c=find(child);if(c)return c;}};const c=find(document.querySelector('#root')._vnode);if(!c)return false;window.suggestionComponent=c;c.props.list=['轻柔音乐','晚间爵士']; c.props.visibleList=true; c.proxy.focus=true; c.proxy.selectIndex=0;return true;})()`)
@@ -147,11 +153,10 @@ app.on('browser-window-created', (_, win) => {
       await wait(350)
       check('yellow minimizes real window',win.isMinimized())
       win.restore();await wait(250)
-      await evaluate(win, `window.rainData.updateSetting({'tray.enable':true});void 0`)
-      await wait(250)
+      // `tray.enable` 已删除：托盘恒开，关闭主窗口后进程与窗口都应继续存在。
       await evaluate(win, `document.querySelectorAll('#left button')[0].click();void 0`)
       await wait(350)
-      check('red respects tray setting',!win.isVisible()&&!win.isDestroyed())
+      check('red keeps the app alive in the tray',!win.isVisible()&&!win.isDestroyed())
       fs.writeFileSync(path.join(evidence,'refined-app-results.json'),JSON.stringify(results,null,2))
       clearTimeout(timeout); app.exit(results.every(r=>r.pass)?0:1)
     }catch(e){console.error(e);clearTimeout(timeout);app.exit(1)}

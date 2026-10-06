@@ -45,7 +45,7 @@
               <span :class="$style.title">{{ $t('theme_edit_modal__badge') }}</span>
               <span class="badge badge-theme-primary">{{ $t('tag__lossless') }}</span>
               <span class="badge badge-theme-secondary">{{ $t('tag__high_quality') }}</span>
-              <span class="badge badge-theme-tertiary">kw</span>
+              <span class="badge badge-theme-tertiary">tx</span>
             </div>
             <div :class="$style.groupContent">
               <div :class="$style.item">

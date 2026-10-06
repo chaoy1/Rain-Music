@@ -1,6 +1,6 @@
-import { collectMusic, dislikeMusic, pause, play, playNext, playPrev, togglePlay, uncollectMusic } from '@renderer/core/player'
+import { dislikeMusic, pause, play, playNext, playPrev, togglePlay } from '@renderer/core/player'
 
-type Action = 'play' | 'pause' | 'skipNext' | 'skipPrev' | 'togglePlay' | 'collect' | 'uncollect' | 'dislike'
+type Action = 'play' | 'pause' | 'skipNext' | 'skipPrev' | 'togglePlay' | 'dislike'
 
 export default () => {
   return async(action: Action) => {
@@ -19,12 +19,6 @@ export default () => {
         break
       case 'togglePlay':
         togglePlay()
-        break
-      case 'collect':
-        collectMusic()
-        break
-      case 'uncollect':
-        uncollectMusic()
         break
       case 'dislike':
         dislikeMusic()

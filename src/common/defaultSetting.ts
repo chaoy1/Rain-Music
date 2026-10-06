@@ -1,53 +1,35 @@
 import path from 'node:path'
 import os from 'node:os'
-import { TRAY_AUTO_ID, DEFAULT_THEME_ID, THEME_LIGHT_ID, THEME_DARK_ID } from './constants'
+import { RESOURCE_CACHE_AUTO_CLEAN_SIZE_OFF_MB, DEFAULT_THEME_ID, THEME_LIGHT_ID, THEME_DARK_ID } from './constants'
 
-const isMac = process.platform == 'darwin'
 const isWin = process.platform == 'win32'
 
 const defaultSetting: Rain.AppSetting = {
   // 需要与 migrateSetting.ts 中最后一个迁移块的版本号保持一致：
   // 若此值高于迁移目标版本，迁移会被 compareVer 跳过，改动无法生效。
-  version: '2.12.8',
+  version: '2.12.10',
 
   'common.windowSizeId': 3,
   'common.fontSize': 16,
-  'common.startInFullscreen': false,
   'common.langId': null,
   'common.apiSource': 'temp',
-  'common.sourceNameType': 'alias',
-  'common.font': '',
-  'common.isShowAnimation': true,
-  'common.randomAnimate': true,
   'common.isAgreePact': false,
-  'common.controlBtnPosition': isMac ? 'left' : 'right',
   'common.playBarProgressStyle': 'full',
-  'common.transparentWindow': !isMac,
+  // 资源缓存自动清理阈值（MB），0 表示关闭自动清理
+  'common.resourceCacheAutoCleanSize': RESOURCE_CACHE_AUTO_CLEAN_SIZE_OFF_MB,
+  // common.transparentWindow 已移除，行为固定为 true（TRANSPARENT_WINDOW）
 
-  'player.startupAutoPlay': false,
   'player.togglePlayMethod': 'listLoop',
   'player.playQuality': '128k',
-  'player.isShowTaskProgess': true,
   'player.isShowStatusBarLyric': false,
   'player.volume': 1,
-  'player.powerSaveBlocker': true,
   'player.isMute': false,
   'player.playbackRate': 1,
   'player.preservesPitch': true,
-  'player.isMaxOutputChannelCount': false,
   'player.mediaDeviceId': 'default',
-  'player.isMediaDeviceRemovedStopPlay': false,
-  'player.isShowLyricTranslation': false,
-  'player.isShowLyricRoma': false,
-  'player.isSwapLyricTranslationAndRoma': false,
-  'player.isS2t': false,
-  'player.isPlayRainlrc': !isMac,
-  'player.isSavePlayTime': false,
   'player.audioVisualization': false,
   'player.waitPlayEndStop': true,
   'player.waitPlayEndStopTime': '',
-  'player.autoSkipOnError': true,
-  'player.isAutoCleanPlayedList': false,
   'player.soundEffect.convolution.fileName': '',
   'player.soundEffect.convolution.mainGain': 10,
   'player.soundEffect.convolution.sendGain': 0,
@@ -66,20 +48,16 @@ const defaultSetting: Rain.AppSetting = {
   'player.soundEffect.panner.speed': 25,
   'player.soundEffect.pitchShifter.playbackRate': 1,
 
-  'playDetail.isZoomActiveLrc': false,
-  'playDetail.isShowLyricProgressSetting': false,
   'playDetail.style.fontSize': 140,
-  'playDetail.style.align': 'center',
-  'playDetail.isDelayScroll': true,
 
   'desktopLyric.enable': false,
   'desktopLyric.isLock': false,
-  'desktopLyric.isAlwaysOnTop': true,
+  // desktopLyric.isAlwaysOnTop 已移除，行为固定为 true（DESKTOP_LYRIC_ALWAYS_ON_TOP）
   'desktopLyric.isAlwaysOnTopLoop': false,
   'desktopLyric.isShowTaskbar': false,
   'desktopLyric.audioVisualization': false,
   'desktopLyric.fullscreenHide': false,
-  'desktopLyric.pauseHide': true,
+  // desktopLyric.pauseHide 已移除，行为固定为 true（DESKTOP_LYRIC_PAUSE_HIDE）
   'desktopLyric.width': 460,
   'desktopLyric.height': 116,
   'desktopLyric.x': null,
@@ -104,64 +82,20 @@ const defaultSetting: Rain.AppSetting = {
   'desktopLyric.style.isFontWeightLine': true,
   'desktopLyric.style.isFontWeightExtended': true,
 
-  'list.isClickPlayList': false,
-  'list.isShowSource': true,
-  'list.isSaveScrollLocation': true,
-  'list.addMusicLocationType': 'top',
-  'list.actionButtonsVisible': false,
+  // 列表设置项已全部移除，行为固定在 src/common/constants.ts 的 ADD_MUSIC_LOCATION_TYPE 等常量里
 
+  // 下载设置只保留「启用下载功能」与下载路径，
+  // 其余行为（同时下载任务数、文件名格式、歌词编码、歌词下载、嵌入内容等）
+  // 固定在 src/common/constants.ts 的常量里
   'download.enable': false,
-  'download.isSavePathGroupByListName': false,
   'download.savePath': path.join(os.homedir(), 'Desktop'),
-  'download.fileName': '歌名 - 歌手',
-  'download.maxDownloadNum': 3,
-  'download.skipExistFile': true,
-  'download.isDownloadLrc': false,
-  'download.isDownloadRainLrc': true,
-  'download.isDownloadTLrc': false,
-  'download.isDownloadRLrc': false,
-  'download.lrcFormat': 'utf8',
-  'download.isEmbedPic': true,
-  'download.isEmbedLyric': false,
-  'download.isEmbedLyricRain': true,
-  'download.isEmbedLyricT': false,
-  'download.isEmbedLyricR': false,
-  'download.isUseOtherSource': false,
 
-  'search.isShowHotSearch': false,
-  'search.isShowHistorySearch': false,
-  'search.isFocusSearchBox': false,
-
-  'network.proxy.enable': false,
-  'network.proxy.host': '',
-  'network.proxy.port': '',
-
-  'tray.enable': false,
-  // 'tray.isToTray': false,
-  // 默认跟随系统深色模式自动切换托盘字形（TRAY_AUTO_ID = -1）。
-  // 此前默认值是 0（native，白字形），在浅色任务栏上会看不见。
-  'tray.themeId': TRAY_AUTO_ID,
-
-  'sync.mode': 'server',
-  'sync.enable': false,
-  'sync.server.port': '23332',
-  'sync.server.maxSsnapshotNum': 5,
-  'sync.client.host': '',
-
-  'openAPI.enable': false,
-  'openAPI.port': '23330',
-  'openAPI.bindLan': false,
-
-  // 'theme.id': 'blue_plus',
+  // 主题id
   // 默认跟随系统：浅色用黑白 mono，深色用黑白 mono_dark
   // （'theme.id' 还可取 'auto'，取值常量集中在 constants.ts）
   'theme.id': DEFAULT_THEME_ID,
   'theme.lightId': THEME_LIGHT_ID,
   'theme.darkId': THEME_DARK_ID,
-
-  'odc.isAutoClearSearchInput': false,
-  'odc.isAutoClearSearchList': false,
-
 }
 
 

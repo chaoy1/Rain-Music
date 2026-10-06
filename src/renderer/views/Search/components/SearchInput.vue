@@ -11,9 +11,7 @@ import {
   nextTick,
 } from '@common/utils/vueTools'
 import { useRouter, useRoute } from '@common/utils/vueRouter'
-import { appSetting } from '@renderer/store/setting'
 import { searchText as _searchText } from '@renderer/store/search/state'
-import { setSearchText } from '@renderer/store/search/action'
 import { getSearchSetting } from '@renderer/utils/data'
 
 export default {
@@ -26,15 +24,6 @@ export default {
 
     const route = useRoute()
     const router = useRouter()
-
-    watch(() => route.name, (newValue, oldValue) => {
-      if (oldValue == 'Search' && newValue != 'SongListDetail') {
-        setTimeout(() => {
-          if (appSetting['odc.isAutoClearSearchInput'] && searchText.value) searchText.value = ''
-          if (appSetting['odc.isAutoClearSearchList']) setSearchText('')
-        })
-      }
-    })
 
     watch(_searchText, (newValue) => {
       searchText.value = newValue

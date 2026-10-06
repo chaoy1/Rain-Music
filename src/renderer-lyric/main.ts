@@ -6,12 +6,10 @@ import mountComponents from './components'
 
 import App from './App.vue'
 
-import '@root/common/error'
+import './utils/error'
 import { getSetting, onMainWindowInited, onSettingChanged, sendConnectMainWindowEvent } from './utils/ipc'
 import { initSetting, mergeSetting } from './store/action'
 import { init as initMainWindowChannel } from './core/mainWindowChannel'
-
-window.ELECTRON_DISABLE_SECURITY_WARNINGS = process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
 
 void getSetting().then((setting) => {
   // window.rain.appSetting = setting

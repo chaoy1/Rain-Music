@@ -2,7 +2,6 @@ import { onBeforeUnmount, watch } from '@common/utils/vueTools'
 import { setVolume as setPlayerVolume, setMute as setPlayerMute } from '@renderer/plugins/player'
 
 import { debounce } from '@common/utils'
-import { HOTKEY_PLAYER } from '@common/hotKey'
 // import { player as eventPlayerNames } from '@renderer/event/names'
 import { volume, isMute, setMute, setVolume } from '@renderer/store/player/volume'
 import { appSetting, saveVolume, saveVolumeIsMute } from '@renderer/store/setting'
@@ -26,23 +25,6 @@ export default () => {
     setVolume(_volume)
   }
 
-  const handleSetVolumeUp = (step = 0.04) => {
-    handleSetVolume(volume.value + step)
-  }
-  const handleSetVolumeDown = (step = 0.04) => {
-    handleSetVolume(volume.value - step)
-  }
-
-  const hotkeyVolumeUp = () => {
-    handleSetVolumeUp()
-  }
-  const hotkeyVolumeDown = () => {
-    handleSetVolumeDown()
-  }
-  const hotkeyVolumeMute = () => {
-    handleToggleVolumeMute()
-  }
-
   watch(volume, _volume => {
     handleSaveVolume(_volume)
     setPlayerVolume(_volume)
@@ -59,16 +41,10 @@ export default () => {
   })
 
 
-  window.key_event.on(HOTKEY_PLAYER.volume_up.action, hotkeyVolumeUp)
-  window.key_event.on(HOTKEY_PLAYER.volume_down.action, hotkeyVolumeDown)
-  window.key_event.on(HOTKEY_PLAYER.volume_mute.action, hotkeyVolumeMute)
   window.app_event.on('setVolume', handleSetVolume)
   window.app_event.on('setVolumeIsMute', handleToggleVolumeMute)
 
   onBeforeUnmount(() => {
-    window.key_event.off(HOTKEY_PLAYER.volume_up.action, hotkeyVolumeUp)
-    window.key_event.off(HOTKEY_PLAYER.volume_down.action, hotkeyVolumeDown)
-    window.key_event.off(HOTKEY_PLAYER.volume_mute.action, hotkeyVolumeMute)
     window.app_event.off('setVolume', handleSetVolume)
     window.app_event.off('setVolumeIsMute', handleToggleVolumeMute)
   })

@@ -1,4 +1,6 @@
 // 设置窗口位置、大小
+import { DESKTOP_LYRIC_ALWAYS_ON_TOP, DESKTOP_LYRIC_PAUSE_HIDE } from '@common/constants'
+
 export const minWidth = 360
 export const minHeight = 116
 
@@ -50,10 +52,8 @@ export const getLyricWindowBounds = (bounds: Electron.Rectangle, { x, y, w, h }:
 export const watchConfigKeys = [
   'desktopLyric.enable',
   'desktopLyric.isLock',
-  'desktopLyric.isAlwaysOnTop',
   'desktopLyric.isAlwaysOnTopLoop',
   'desktopLyric.isShowTaskbar',
-  'desktopLyric.pauseHide',
   'desktopLyric.audioVisualization',
   'desktopLyric.width',
   'desktopLyric.height',
@@ -79,15 +79,20 @@ export const watchConfigKeys = [
   'desktopLyric.style.isFontWeightExtended',
   'desktopLyric.style.isZoomActiveLrc',
   'common.langId',
-  'player.isShowLyricTranslation',
-  'player.isShowLyricRoma',
-  'player.isSwapLyricTranslationAndRoma',
-  'player.isPlayRainlrc',
   'player.playbackRate',
 ] satisfies Array<keyof Rain.AppSetting>
 
+// 已从设置页移除、行为固定的键：
+// 用户配置里 `desktopLyric.isAlwaysOnTop` / `desktopLyric.pauseHide` 已不存在，
+// 但歌词窗口仍然需要这两个值，因此这里在打包配置时直接补上固定常量
+// （键的位置保持不变，避免改变 IPC 消息里键的顺序）。
+const fixedLyricConfig: Partial<Rain.DesktopLyric.Config> = {
+  'desktopLyric.isAlwaysOnTop': DESKTOP_LYRIC_ALWAYS_ON_TOP,
+  'desktopLyric.pauseHide': DESKTOP_LYRIC_PAUSE_HIDE,
+}
+
 export const buildLyricConfig = (appSetting: Partial<Rain.AppSetting>): Partial<Rain.DesktopLyric.Config> => {
-  const setting: Partial<Rain.DesktopLyric.Config> = {}
+  const setting: Partial<Rain.DesktopLyric.Config> = { ...fixedLyricConfig }
   for (const key of watchConfigKeys) {
     // @ts-expect-error
     if (key in appSetting) setting[key] = appSetting[key]

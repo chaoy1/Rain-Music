@@ -5,8 +5,6 @@ const names = {
   response: '',
   openDevTools: '',
   showUpdateAlert: '',
-  getProxy: '',
-  proxyUpdate: '',
 }
 
 

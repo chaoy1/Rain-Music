@@ -11,12 +11,10 @@
  *   实测报错 `bad option: --no-deeplink`，进程直接退出。
  *   若确实需要运行时开关，必须先调用 app.commandLine.appendSwitch() 注册。
  *
- * 注意 2：生产构建的 DefinePlugin 会把整个 `process.env` 静态替换为字面量对象，
- *   因此这里只能按固定键名读取，不可做动态取值。
- *
- * 风格与 `index.ts` 中读取 `process.env.BUILD_WIN7` 保持一致。
+ * PREVIEW_NO_PROTOCOL 是构建期标志；RAIN_NO_PROTOCOL_REGISTRATION 是运行期标志，
+ * 用于隔离验证，避免测试程序改写系统协议关联。
  */
 
 export const isPreviewNoProtocol = (): boolean => {
-  return process.env.PREVIEW_NO_PROTOCOL === '1'
+  return process.env.PREVIEW_NO_PROTOCOL === '1' || process.env.RAIN_NO_PROTOCOL_REGISTRATION === '1'
 }

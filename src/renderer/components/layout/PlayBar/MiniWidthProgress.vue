@@ -2,7 +2,7 @@
   <div :class="$style.player">
     <button type="button" :class="$style.picContent" data-player-cover ignore-tip :title="$t('player__detail_title')" :aria-label="$t('player__pic_tip')" :aria-expanded="isShowPlayerDetail" aria-controls="song-detail" @click="setShowPlayerDetail(!isShowPlayerDetail)" @contextmenu="handleToMusicLocation">
       <img v-if="musicInfo.pic" :src="musicInfo.pic" decoding="async" @error="imgError">
-      <span v-else :class="$style.emptyPic">L<span>X</span></span>
+      <span v-else :class="$style.emptyPic" aria-hidden="true">R<span>M</span></span>
     </button>
     <div :class="$style.infoContent">
       <div :class="$style.title" :aria-label="title + $t('copy_tip')" @click="handleCopy(title)">
@@ -45,8 +45,7 @@ import {
   setMusicInfo,
   setShowPlayerDetail,
 } from '@renderer/store/player/action'
-import { appSetting } from '@renderer/store/setting'
-import { LIST_IDS } from '@common/constants'
+import { LIST_IDS, MUSIC_FILE_NAME_FORMAT } from '@common/constants'
 import { formatMusicName } from '@renderer/utils'
 
 export default {
@@ -90,7 +89,7 @@ export default {
 
     const title = computed(() => {
       return musicInfo.name
-        ? formatMusicName(appSetting['download.fileName'], musicInfo.name, musicInfo.singer)
+        ? formatMusicName(MUSIC_FILE_NAME_FORMAT, musicInfo.name, musicInfo.singer)
         : ''
     })
 

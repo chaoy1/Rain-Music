@@ -1,15 +1,6 @@
 import Event from './Event'
 
 
-// {
-//   // sync: {
-//   //   send_action_list: 'send_action_list',
-//   //   handle_action_list: 'handle_action_list',
-//   //   send_sync_list: 'send_sync_list',
-//   //   handle_sync_list: 'handle_sync_list',
-//   // },
-// }
-
 export class AppEvent extends Event {
   configUpdate(setting: Partial<Rain.AppSetting>) {
     this.emit('configUpdate', setting)

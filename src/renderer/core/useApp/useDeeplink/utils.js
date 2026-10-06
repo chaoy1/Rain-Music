@@ -13,7 +13,8 @@ export const useDialog = () => {
   return errorDialog
 }
 
-export const sources = ['kw', 'kg', 'tx', 'wy', 'mg']
+// 内置音源顺序：QQ音乐(tx) → 酷狗音乐(kg) → 网易云音乐(wy)
+export const sources = ['tx', 'kg', 'wy']
 export const sourceVerify = source => {
   if (!sources.includes(source)) throw new Error('Source no match')
 }

@@ -1,22 +1,24 @@
 <template>
   <div :class="$style.player">
-    <div :class="$style.progress" data-footer-progress role="slider" tabindex="0" :aria-label="$t('player__detail_progress')" aria-valuemin="0" :aria-valuemax="maxPlayTime" :aria-valuenow="nowPlayTime" @keydown="handleSeekKey">
-      <common-progress-bar :class-name="$style.progressBar" :progress="progress" :handle-transition-end="handleTransitionEnd" :is-active-transition="isActiveTransition" />
-    </div>
     <button type="button" :class="$style.picContent" data-player-cover ignore-tip :title="$t('player__detail_title')" :aria-label="$t('player__pic_tip')" :aria-expanded="isShowPlayerDetail" aria-controls="song-detail" @click="setShowPlayerDetail(!isShowPlayerDetail)" @contextmenu="handleToMusicLocation">
       <img v-if="musicInfo.pic" :src="musicInfo.pic" decoding="async" @error="imgError">
-      <span v-else :class="$style.emptyPic">L<span>X</span></span>
+      <span v-else :class="$style.emptyPic" aria-hidden="true">R<span>M</span></span>
     </button>
-    <div :class="$style.infoContent">
+    <div :class="[$style.trackContent, { [$style.timelineVisible]: hasTimeline }]">
+    <div :class="$style.infoContent" data-footer-song>
       <div :class="$style.title" :aria-label="title + $t('copy_tip')" @click="handleCopy(title)">
         {{ title }}
       </div>
-      <div :class="$style.status">{{ statusText }}</div>
+      <div v-if="statusText" :class="$style.status">{{ statusText }}</div>
     </div>
-    <div :class="$style.timeContent">
+    <div v-if="hasTimeline" :class="$style.progress" data-footer-progress role="slider" :tabindex="canSeek ? 0 : -1" :aria-disabled="!canSeek" :aria-label="$t('player__detail_progress')" aria-valuemin="0" :aria-valuemax="maxPlayTime" :aria-valuenow="nowPlayTime" @keydown="handleSeekKey">
+      <common-progress-bar :class-name="$style.progressBar" :progress="progress" :handle-transition-end="handleTransitionEnd" :is-active-transition="isActiveTransition" />
+    </div>
+    <div v-if="hasTimeline" :class="$style.timeContent" data-footer-time>
       <span>{{ nowPlayTimeStr }}</span>
       <span style="margin: 0 1px;">/</span>
       <span>{{ maxPlayTimeStr }}</span>
+    </div>
     </div>
     <!-- <play-progress data-player-progress /> -->
     <control-btns />
@@ -43,8 +45,7 @@ import {
   setMusicInfo,
   setShowPlayerDetail,
 } from '@renderer/store/player/action'
-import { appSetting } from '@renderer/store/setting'
-import { LIST_IDS } from '@common/constants'
+import { LIST_IDS, MUSIC_FILE_NAME_FORMAT } from '@common/constants'
 import { formatMusicName } from '@renderer/utils'
 
 export default {
@@ -64,9 +65,12 @@ export default {
       handleTransitionEnd,
       maxPlayTime,
       nowPlayTime,
+      hasTimeline,
+      canSeek,
     } = usePlayProgress()
 
     const handleSeekKey = (event) => {
+      if (!canSeek.value) return
       let time
       if (event.key === 'ArrowRight') time = nowPlayTime.value + 5
       else if (event.key === 'ArrowLeft') time = nowPlayTime.value - 5
@@ -101,7 +105,7 @@ export default {
 
     const title = computed(() => {
       return musicInfo.name
-        ? formatMusicName(appSetting['download.fileName'], musicInfo.name, musicInfo.singer)
+        ? formatMusicName(MUSIC_FILE_NAME_FORMAT, musicInfo.name, musicInfo.singer)
         : ''
     })
 
@@ -111,6 +115,8 @@ export default {
 
     return {
       musicInfo,
+      hasTimeline,
+      canSeek,
       nowPlayTimeStr,
       maxPlayTimeStr,
       progress,
@@ -152,18 +158,19 @@ export default {
   }
 }
 .progress {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
   width: 100%;
-  height: 4px;
+  height: 24px;
   z-index: 3;
   outline: none;
   &:focus-visible { box-shadow: 0 0 0 2px var(--control-outline); }
   // height: 15px;
   .progressBar {
     height: 3px;
-    border-radius: 0;
+    border-radius: 3px;
   }
 }
 
@@ -227,9 +234,17 @@ export default {
   }
 }
 
-.infoContent {
-  padding-left: 10px;
+.trackContent {
   flex: auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-left: 12px;
+  &.timelineVisible { grid-template-columns: minmax(64px, .55fr) minmax(88px, 1.45fr) auto; }
+}
+.infoContent {
   display: flex;
   flex-flow: column nowrap;
   justify-content: center;
@@ -256,8 +271,9 @@ export default {
 .timeContent {
   flex: none;
   color: var(--color-550);
-  font-size: 13px;
-  padding-left: 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 

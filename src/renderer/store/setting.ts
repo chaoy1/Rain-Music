@@ -4,9 +4,9 @@ import { updateSetting as saveSetting } from '@renderer/utils/ipc'
 
 export const appSetting = window.rainData.appSetting = reactive<Rain.AppSetting>({ ...defaultSetting })
 
-export const isShowAnimation = computed(() => {
-  return appSetting['common.isShowAnimation']
-})
+// common.isShowAnimation 设置项已移除，行为固定为「始终显示动画」。
+// 保留这个导出是为了不动各处已有的引用点。
+export const isShowAnimation = computed(() => true)
 
 
 export const initSetting = (newSetting: Rain.AppSetting) => {
@@ -104,14 +104,6 @@ export const setApiSource = (sourceId: string) => {
  */
 export const setPlayDetailLyricFont = (size: number) => {
   updateSetting({ 'playDetail.style.fontSize': size })
-}
-
-/**
- * 设置播放详情页歌词对齐方式
- * @param align 对齐方式
- */
-export const setPlayDetailLyricAlign = (align: Rain.AppSetting['playDetail.style.align']) => {
-  updateSetting({ 'playDetail.style.align': align })
 }
 
 /**

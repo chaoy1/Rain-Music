@@ -5,7 +5,6 @@ import {
   getSearchHistoryList,
   saveSearchHistoryList,
 } from '@renderer/utils/ipc'
-import { appSetting } from '../setting'
 import { searchText, historyList } from './state'
 
 
@@ -25,7 +24,8 @@ export const getHistoryList = async() => {
   isInitedSearchHistory ||= true
 }
 export const addHistoryWord = async(word: string) => {
-  if (!appSetting['search.isShowHistorySearch']) return
+  // search.isShowHistorySearch 设置项已移除，行为固定为「显示搜索历史」，
+  // 因此不再有「未显示历史时不记录」的提前返回。
   if (!isInitedSearchHistory) await getHistoryList()
   let index = historyList.indexOf(word)
   if (index == 0) return

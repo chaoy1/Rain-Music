@@ -6,7 +6,7 @@ import { onTimeupdate, getCurrentTime, getDuration, setCurrentTime, onVisibility
 import { playProgress, setNowPlayTime, setMaxplayTime } from '@renderer/store/player/playProgress'
 import { musicInfo, playMusicInfo, playInfo } from '@renderer/store/player/state'
 // import { getList } from '@renderer/store/utils'
-import { appSetting } from '@renderer/store/setting'
+import { AUTO_SKIP_ON_ERROR, SAVE_PLAY_TIME } from '@common/constants'
 import { playNext } from '@renderer/core/player'
 import { updateListMusics } from '@renderer/store/list/action'
 
@@ -37,7 +37,7 @@ export default () => {
       if (skipTime > playProgress.maxPlayTime) skipTime = (playProgress.maxPlayTime - currentTime) / 2
       if (skipTime - mediaBuffer.playTime < 1 || playProgress.maxPlayTime - skipTime < 1) {
         mediaBuffer.playTime = 0
-        if (appSetting['player.autoSkipOnError']) {
+        if (AUTO_SKIP_ON_ERROR) {
           console.warn('buffering end')
           void playNext(true)
         }
@@ -143,7 +143,7 @@ export default () => {
 
   watch(() => playProgress.nowPlayTime, (newValue, oldValue) => {
     if (Math.abs(newValue - oldValue) > 2) window.app_event.activePlayProgressTransition()
-    if (appSetting['player.isSavePlayTime'] && !playMusicInfo.isTempPlay) {
+    if (SAVE_PLAY_TIME && !playMusicInfo.isTempPlay) {
       delaySavePlayInfo({
         time: newValue,
         maxTime: playProgress.maxPlayTime,

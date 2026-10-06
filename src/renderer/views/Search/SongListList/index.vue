@@ -1,6 +1,6 @@
 <template>
   <div :class="$style.container">
-    <SongList ref="listRef" :list-info="listInfo" :visible-source="sourceId == 'all'" @toggle-page="togglePage" />
+    <SongList ref="listRef" :list-info="listInfo" @toggle-page="togglePage" />
   </div>
 </template>
 

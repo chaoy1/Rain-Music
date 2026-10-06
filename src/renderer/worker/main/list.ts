@@ -1,8 +1,7 @@
 // import { throttle } from '@common/utils'
 
 import { SPLIT_CHAR } from '@common/constants'
-import { filterFileName, sortInsert, similar, arrPushByPosition, arrShuffle } from '@common/utils/common'
-import { joinPath, saveStrToFile } from '@common/utils/nodejs'
+import { sortInsert, similar, arrPushByPosition, arrShuffle } from '@common/utils/common'
 import { createLocalMusicInfo } from '@renderer/utils/music'
 
 
@@ -315,53 +314,4 @@ export const createLocalMusicInfos = async(filePaths: string[]): Promise<Rain.Mu
   }
 
   return list
-}
-
-/**
- * 导出列表到txt文件
- * @param savePath 保存路径
- * @param lists 列表数据
- * @param isMerge 是否合并
- */
-export const exportPlayListToText = async(savePath: string, lists: Array<Rain.List.MyDefaultListInfoFull | Rain.List.MyLoveListInfoFull | Rain.List.UserListInfoFull>, isMerge: boolean) => {
-  const iconv = (await import('iconv-lite')).default
-
-  if (isMerge) {
-    await saveStrToFile(savePath,
-      iconv.encode(lists.map(l => l.list.map(m => `${m.name}  ${m.singer}  ${m.meta.albumName ?? ''}`).join('\n')).join('\n\n'), 'utf8', { addBOM: true }))
-  } else {
-    for await (const list of lists) {
-      await saveStrToFile(joinPath(savePath, `rain_list_${filterFileName(list.name)}.txt`),
-        iconv.encode(list.list.map(m => `${m.name}  ${m.singer}  ${m.meta.albumName ?? ''}`).join('\n'), 'utf8', { addBOM: true }))
-    }
-  }
-}
-
-/**
- * 导出列表到csv文件
- * @param savePath 保存路径
- * @param lists 列表数据
- * @param isMerge 是否合并
- * @param header 表头名称
- */
-export const exportPlayListToCSV = async(savePath: string,
-  lists: Array<Rain.List.MyDefaultListInfoFull | Rain.List.MyLoveListInfoFull | Rain.List.UserListInfoFull>,
-  isMerge: boolean,
-  header: string) => {
-  const iconv = (await import('iconv-lite')).default
-
-  const filterStr = (str: string) => {
-    if (!str) return ''
-    str = str.replace(/"/g, '""')
-    if (str.includes(',')) str = `"${str}"`
-    return str
-  }
-
-  if (isMerge) {
-    await saveStrToFile(savePath, iconv.encode(header + lists.map(l => l.list.map(m => `${filterStr(m.name)},${filterStr(m.singer)},${filterStr(m.meta.albumName ?? '')}`).join('\n')).join('\n'), 'utf8', { addBOM: true }))
-  } else {
-    for await (const list of lists) {
-      await saveStrToFile(joinPath(savePath, `rain_list_${filterFileName(list.name)}.csv`), iconv.encode(header + list.list.map(m => `${filterStr(m.name)},${filterStr(m.singer)},${filterStr(m.meta.albumName ?? '')}`).join('\n'), 'utf8', { addBOM: true }))
-    }
-  }
 }

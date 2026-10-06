@@ -1,5 +1,4 @@
 const path = require('path')
-const ESLintPlugin = require('eslint-webpack-plugin')
 
 module.exports = {
   target: 'electron-renderer',
@@ -43,11 +42,5 @@ module.exports = {
       },
     ],
   },
-  plugins: [
-    new ESLintPlugin({
-      extensions: ['js'],
-      exclude: ['node_modules', 'vendor'],
-      formatter: require('eslint-formatter-friendly'),
-    }),
-  ],
+  plugins: [],
 }

@@ -3,14 +3,23 @@
 const builder = require('electron-builder')
 const beforePack = require('./build-before-pack')
 const afterPack = require('./build-after-pack')
+const pkg = require('../package.json')
+const repository = new URL(pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, ''))
+const [repositoryOwner, repositoryName] = repository.pathname.slice(1).split('/')
 
 /**
 * @type {import('electron-builder').Configuration}
 * @see https://www.electron.build/configuration/configuration
 */
 const options = {
+  ...(process.env.RAIN_ELECTRON_DIST ? { electronDist: require('node:path').resolve(process.env.RAIN_ELECTRON_DIST) } : {}),
   appId: 'com.rainmusic.desktop',
   productName: 'rain-music-desktop',
+  // 原生模块（better-sqlite3 / bufferutil / utf-8-validate / font_manager）随包提供
+  // 与当前 Electron 兼容的预编译二进制，不用 node-gyp 就地重编译：
+  // 本机没有 Visual Studio C++ 工具链，且项目路径含空格（node-gyp 已知限制）。
+  // 若后续在具备 VS 工具链的机器上需要重编译，可临时改为 true。
+  npmRebuild: false,
   beforePack,
   afterPack,
   protocols: {
@@ -21,7 +30,7 @@ const options = {
   },
   directories: {
     buildResources: './resources',
-    output: './build',
+    output: process.env.RAIN_PACKAGE_OUTPUT || './build',
   },
   files: [
     '!node_modules/**/*',
@@ -46,8 +55,8 @@ const options = {
   publish: [
     {
       provider: 'github',
-      owner: 'chaoy1',
-      repo: 'rain-music-desktop',
+      owner: repositoryOwner,
+      repo: repositoryName,
     },
   ],
 }
@@ -270,6 +279,7 @@ const build = async(target, arch, packageType, publishType) => {
   if (target == 'dir') {
     await builder.build({
       dir: true,
+      publish: 'never',
       config: { ...options, ...winOptions, ...linuxOptions, ...macOptions },
     })
     return
@@ -335,4 +345,7 @@ if (params.target != 'dir' && params.target != 'register-dir' && params.arch == 
 if (params.target != 'dir' && params.target != 'register-dir' && params.type == null) throw new Error('Missing type')
 
 console.log(params.target, params.arch, params.type, params.publish ?? '')
-build(params.target, params.arch, params.type, params.publish)
+build(params.target, params.arch, params.type, params.publish).catch(error => {
+  console.error(error)
+  process.exitCode = 1
+})

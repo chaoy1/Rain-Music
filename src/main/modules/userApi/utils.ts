@@ -134,7 +134,6 @@ export const removeApi = (ids: string[]) => {
     if (ids.includes(userApis[index].id)) {
       scripts.delete(userApis[index].id)
       userApis.splice(index, 1)
-      ids.splice(index, 1)
     }
   }
   saveData()

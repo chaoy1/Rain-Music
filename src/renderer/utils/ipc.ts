@@ -3,7 +3,7 @@ import { ipcRenderer } from 'electron'
 import { HOTKEY_RENDERER_EVENT_NAME, WIN_MAIN_RENDERER_EVENT_NAME, CMMON_EVENT_NAME } from '@common/ipcNames'
 import { markRaw } from '@common/utils/vueTools'
 import * as hotKeys from '@common/hotKey'
-import { APP_EVENT_NAMES, DATA_KEYS, DEFAULT_SETTING } from '@common/constants'
+import { APP_EVENT_NAMES, DATA_KEYS, DEFAULT_SETTING, SAVE_EDITED_LYRIC } from '@common/constants'
 
 type RemoveListener = () => void
 
@@ -130,10 +130,6 @@ export const sendPlayerStatus = (status: Partial<Rain.Player.Status>) => {
 }
 
 
-export const sendOpenAPIAction = async(action: Rain.OpenAPI.Actions) => {
-  return rendererInvoke<Rain.OpenAPI.Actions, Rain.OpenAPI.Status>(WIN_MAIN_RENDERER_EVENT_NAME.open_api_action, action)
-}
-
 export const savePlayInfo = (playInfo: Rain.Player.SavedPlayInfo) => {
   rendererSend(WIN_MAIN_RENDERER_EVENT_NAME.save_data, {
     path: DATA_KEYS.playInfo,
@@ -257,6 +253,8 @@ export const saveUserSoundEffectConvolutionPresetList = (list: Rain.SoundEffect.
 //   rendererSend<Rain.SoundEffect.PitchShifterPreset[]>(WIN_MAIN_RENDERER_EVENT_NAME.save_sound_effect_pitch_shifter_preset, list)
 // }
 
+// 可配置的快捷键动作已收窄为四个（见 src/common/hotKey.ts）：
+// 播放/暂停、上一曲、下一曲、显示/隐藏程序
 export const allHotKeys = markRaw({
   local: [
     {
@@ -275,52 +273,12 @@ export const allHotKeys = markRaw({
       type: APP_EVENT_NAMES.winMainName,
     },
     {
-      name: hotKeys.HOTKEY_PLAYER.seekbackward.name,
-      action: hotKeys.HOTKEY_PLAYER.seekbackward.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.seekforward.name,
-      action: hotKeys.HOTKEY_PLAYER.seekforward.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.music_dislike.name,
-      action: hotKeys.HOTKEY_PLAYER.music_dislike.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_COMMON.focusSearchInput.name,
-      action: hotKeys.HOTKEY_COMMON.focusSearchInput.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_COMMON.min.name,
-      action: hotKeys.HOTKEY_COMMON.min.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_COMMON.close.name,
-      action: hotKeys.HOTKEY_COMMON.close.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-  ],
-  global: [
-    {
-      name: hotKeys.HOTKEY_COMMON.min_toggle.name,
-      action: hotKeys.HOTKEY_COMMON.min_toggle.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
       name: hotKeys.HOTKEY_COMMON.hide_toggle.name,
       action: hotKeys.HOTKEY_COMMON.hide_toggle.action,
       type: APP_EVENT_NAMES.winMainName,
     },
-    {
-      name: hotKeys.HOTKEY_COMMON.close.name,
-      action: hotKeys.HOTKEY_COMMON.close.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
+  ],
+  global: [
     {
       name: hotKeys.HOTKEY_PLAYER.toggle_play.name,
       action: hotKeys.HOTKEY_PLAYER.toggle_play.action,
@@ -337,59 +295,9 @@ export const allHotKeys = markRaw({
       type: APP_EVENT_NAMES.winMainName,
     },
     {
-      name: hotKeys.HOTKEY_PLAYER.seekbackward.name,
-      action: hotKeys.HOTKEY_PLAYER.seekbackward.action,
+      name: hotKeys.HOTKEY_COMMON.hide_toggle.name,
+      action: hotKeys.HOTKEY_COMMON.hide_toggle.action,
       type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.seekforward.name,
-      action: hotKeys.HOTKEY_PLAYER.seekforward.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.volume_up.name,
-      action: hotKeys.HOTKEY_PLAYER.volume_up.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.volume_down.name,
-      action: hotKeys.HOTKEY_PLAYER.volume_down.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.volume_mute.name,
-      action: hotKeys.HOTKEY_PLAYER.volume_mute.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.music_love.name,
-      action: hotKeys.HOTKEY_PLAYER.music_love.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.music_unlove.name,
-      action: hotKeys.HOTKEY_PLAYER.music_unlove.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_PLAYER.music_dislike.name,
-      action: hotKeys.HOTKEY_PLAYER.music_dislike.action,
-      type: APP_EVENT_NAMES.winMainName,
-    },
-    {
-      name: hotKeys.HOTKEY_DESKTOP_LYRIC.toggle_visible.name,
-      action: hotKeys.HOTKEY_DESKTOP_LYRIC.toggle_visible.action,
-      type: APP_EVENT_NAMES.winLyricName,
-    },
-    {
-      name: hotKeys.HOTKEY_DESKTOP_LYRIC.toggle_lock.name,
-      action: hotKeys.HOTKEY_DESKTOP_LYRIC.toggle_lock.action,
-      type: APP_EVENT_NAMES.winLyricName,
-    },
-    {
-      name: hotKeys.HOTKEY_DESKTOP_LYRIC.toggle_always_top.name,
-      action: hotKeys.HOTKEY_DESKTOP_LYRIC.toggle_always_top.action,
-      type: APP_EVENT_NAMES.winLyricName,
     },
   ],
 })
@@ -404,6 +312,15 @@ export const hotKeySetConfig = async(config: Rain.HotKeyActions) => {
 
 export const hotKeyGetStatus = async() => {
   return rendererInvoke<Rain.HotKeyState>(HOTKEY_RENDERER_EVENT_NAME.status)
+}
+
+/**
+ * 应用快捷键配置并重新注册全局快捷键（导入设置时使用）
+ * @param config 快捷键配置
+ * @returns 注册失败的快捷键列表
+ */
+export const hotKeyApplyConfig = async(config: Rain.HotKeyConfigAll) => {
+  return rendererInvoke<Rain.HotKeyConfigAll, Rain.HotKeyRegisterFailInfo[]>(HOTKEY_RENDERER_EVENT_NAME.apply_config, config)
 }
 
 // 主进程操作播放器状态
@@ -505,40 +422,26 @@ export const getLyricRawCount = async() => {
 export const getLyricEdited = async(musicInfo: Rain.Music.MusicInfo): Promise<Rain.Music.LyricInfo> => {
   return rendererInvoke<string, Rain.Music.LyricInfo>(WIN_MAIN_RENDERER_EVENT_NAME.get_lyric_edited, musicInfo.id)
 }
-
 export const saveLyric = async(musicInfo: Rain.Music.MusicInfo, lyricInfo: Rain.Music.LyricInfo | Rain.Player.LyricInfo) => {
   // console.log(musicInfo)
   if ('rawlrcInfo' in lyricInfo) {
-    const { rawlrcInfo, ...info } = lyricInfo
-    const tasks = [
-      rendererInvoke<Rain.Music.LyricInfoSave>(WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_raw, {
-        id: musicInfo.id,
-        lyrics: rawlrcInfo,
-      }),
-    ]
-    if (info.lyric != rawlrcInfo.lyric) {
-      tasks.push(rendererInvoke<Rain.Music.LyricInfoSave>(WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_edited, {
-        id: musicInfo.id,
-        lyrics: info,
-      }))
-    }
-    console.log(tasks)
-    await Promise.all(tasks)
+    const { rawlrcInfo } = lyricInfo
+    // 这里原本还会在歌词与原始歌词不一致时写入「已编辑歌词」
+    // （WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_edited）。
+    // 「已调整过偏移时间的歌词管理」已停用：歌词偏移时间的调整不再持久化，
+    // 该写入通道与 saveLyricEdited() 一并删除，只保存原始歌词。
+    // 若日后需要恢复，判断条件为 SAVE_EDITED_LYRIC（见 src/common/constants.ts）。
+    if (SAVE_EDITED_LYRIC) console.warn('SAVE_EDITED_LYRIC is enabled but the save_lyric_edited channel has been removed')
+    await rendererInvoke<Rain.Music.LyricInfoSave>(WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_raw, {
+      id: musicInfo.id,
+      lyrics: rawlrcInfo,
+    })
   } else {
     await rendererInvoke<Rain.Music.LyricInfoSave>(WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_raw, {
       id: musicInfo.id,
       lyrics: lyricInfo,
     })
   }
-}
-export const saveLyricEdited = async(musicInfo: Rain.Music.MusicInfo, lyricInfo: Rain.Music.LyricInfo) => {
-  await rendererInvoke<Rain.Music.LyricInfoSave>(WIN_MAIN_RENDERER_EVENT_NAME.save_lyric_edited, {
-    id: musicInfo.id,
-    lyrics: lyricInfo,
-  })
-}
-export const removeLyricEdited = async(musicInfo: Rain.Music.MusicInfo) => {
-  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.remove_lyric_edited, musicInfo.id)
 }
 
 export const clearLyric = async() => {
@@ -712,56 +615,6 @@ export const onFullscreenChanged = (listener: (isFullscreen: boolean) => void): 
 export const openDevTools = () => {
   rendererSend(WIN_MAIN_RENDERER_EVENT_NAME.open_dev_tools)
 }
-
-/**
- * 接收同步事件
- * @param listener
- * @returns
- */
-export const onSyncAction = (listener: Rain.IpcRendererEventListenerParams<Rain.Sync.SyncMainWindowActions>): RemoveListener => {
-  rendererOn(WIN_MAIN_RENDERER_EVENT_NAME.sync_action, listener)
-  return () => {
-    rendererOff(WIN_MAIN_RENDERER_EVENT_NAME.sync_action, listener)
-  }
-}
-
-/**
- * 发送同步事件
- * @param action
- * @returns
- */
-export const sendSyncAction = async(action: Rain.Sync.SyncServiceActions) => {
-  return rendererInvoke<Rain.Sync.SyncServiceActions>(WIN_MAIN_RENDERER_EVENT_NAME.sync_action, action)
-}
-
-/**
- * 获取同步服务端连接设备历史列表
- * @returns
- */
-export const getSyncServerDevices = () => {
-  return rendererInvoke<Rain.Sync.ServerDevices>(WIN_MAIN_RENDERER_EVENT_NAME.sync_get_server_devices)
-}
-
-/**
- * 移除同步服务端连接设备
- * @returns
- */
-export const removeSyncServerDevice = (clientId: string) => {
-  return rendererInvoke<string>(WIN_MAIN_RENDERER_EVENT_NAME.sync_remove_server_device, clientId)
-}
-
-
-// export const refreshSyncCode = async(): Promise<string> => {
-//   return rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.sync_generate_code)
-// }
-
-// export const onSyncStatus = (listener: Rain.IpcRendererEventListenerParams<Rain.Sync.Status>): RemoveListener => {
-//   rendererOn(WIN_MAIN_RENDERER_EVENT_NAME.sync_status, listener)
-
-//   return () => {
-//     rendererOff(WIN_MAIN_RENDERER_EVENT_NAME.sync_status, listener)
-//   }
-// }
 
 /**
  * 桌面歌词进程创建事件

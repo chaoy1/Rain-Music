@@ -38,19 +38,14 @@ export const setLrcConfig = (keys: Array<keyof Rain.AppSetting>, setting: Partia
         }
       }
     }
-    if (keys.includes('desktopLyric.isAlwaysOnTop')) {
-      alwaysOnTopTools.setAlwaysOnTop(global.rain.appSetting['desktopLyric.isAlwaysOnTopLoop'])
-      if (global.rain.appSetting['desktopLyric.isAlwaysOnTop'] && global.rain.appSetting['desktopLyric.isAlwaysOnTopLoop']) {
-        alwaysOnTopTools.startLoop()
-      } else alwaysOnTopTools.clearLoop()
-    }
+    // 「使歌词总是在其他窗口之上」（desktopLyric.isAlwaysOnTop）已固定为 true，
+    // 因此这里不再有该键的变更分支；子项「自动刷新歌词置顶」的开关由下面的分支处理。
     if (keys.includes('desktopLyric.isShowTaskbar') && isShowTaskbar != global.rain.appSetting['desktopLyric.isShowTaskbar']) {
       isShowTaskbar = global.rain.appSetting['desktopLyric.isShowTaskbar']
       setSkipTaskbar(!global.rain.appSetting['desktopLyric.isShowTaskbar'])
     }
     if (keys.includes('desktopLyric.isAlwaysOnTopLoop') && isAlwaysOnTopLoop != global.rain.appSetting['desktopLyric.isAlwaysOnTopLoop']) {
       isAlwaysOnTopLoop = global.rain.appSetting['desktopLyric.isAlwaysOnTopLoop']
-      if (!global.rain.appSetting['desktopLyric.isAlwaysOnTop']) return
       if (isAlwaysOnTopLoop) {
         alwaysOnTopTools.startLoop()
       } else {

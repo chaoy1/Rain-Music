@@ -3,10 +3,13 @@ import { ref, shallowReactive } from '@common/utils/vueTools'
 export const setting = shallowReactive<Rain.DesktopLyric.Config>({
   'desktopLyric.enable': false,
   'desktopLyric.isLock': false,
-  'desktopLyric.isAlwaysOnTop': false,
+  // 这两项已从设置页移除、行为固定为 true（见 src/common/constants.ts 的
+  // DESKTOP_LYRIC_ALWAYS_ON_TOP / DESKTOP_LYRIC_PAUSE_HIDE），
+  // 主进程 buildLyricConfig 在读取配置时会下发同样的固定值。
+  'desktopLyric.isAlwaysOnTop': true,
   'desktopLyric.isAlwaysOnTopLoop': false,
   'desktopLyric.isShowTaskbar': true,
-  'desktopLyric.pauseHide': false,
+  'desktopLyric.pauseHide': true,
   'desktopLyric.audioVisualization': false,
   'desktopLyric.width': 450,
   'desktopLyric.height': 300,
@@ -32,10 +35,6 @@ export const setting = shallowReactive<Rain.DesktopLyric.Config>({
   'desktopLyric.style.isFontWeightExtended': false,
   'desktopLyric.style.isZoomActiveLrc': true,
   'common.langId': 'zh-cn',
-  'player.isShowLyricTranslation': false,
-  'player.isShowLyricRoma': false,
-  'player.isSwapLyricTranslationAndRoma': false,
-  'player.isPlayRainlrc': false,
   'player.playbackRate': 1,
 })
 

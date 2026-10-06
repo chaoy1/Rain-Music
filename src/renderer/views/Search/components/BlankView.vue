@@ -1,12 +1,14 @@
 <template>
   <transition enter-active-class="animated-fast fadeIn" leave-active-class="animated-fast fadeOut">
     <div v-show="props.visible" :class="$style.noitem">
-      <div v-if="appSetting['search.isShowHotSearch'] || (appSetting['search.isShowHistorySearch'] && historyList.length)" class="scroll" :class="$style.noitemListContainer">
-        <dl v-if="appSetting['search.isShowHotSearch']" :class="[$style.noitemList, $style.noitemHotSearchList]">
+      <!-- search.isShowHotSearch / search.isShowHistorySearch 设置项已移除，
+           两个行为都固定为 true，因此这里的分支判断直接去掉。 -->
+      <div class="scroll" :class="$style.noitemListContainer">
+        <dl :class="[$style.noitemList, $style.noitemHotSearchList]">
           <dt :class="$style.noitemListTitle">{{ $t('search__hot_search') }}</dt>
           <dd v-for="(item, index) in hotSearchList" :key="index" :class="$style.noitemListItem" @click="handleSearch(item)">{{ item }}</dd>
         </dl>
-        <dl v-if="appSetting['search.isShowHistorySearch'] && historyList.length" :class="$style.noitemList">
+        <dl v-if="historyList.length" :class="$style.noitemList">
           <dt :class="$style.noitemListTitle">
             <span>{{ $t('history_search') }}</span><span :class="$style.historyClearBtn" :aria-label="$t('history_clear')" @click="clearHistoryList">
               <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xlink="http://www.w3.org/1999/xlink" height="100%" viewBox="0 0 512 512" space="preserve">
@@ -15,9 +17,6 @@
           </dt>
           <dd v-for="(item, index) in historyList" :key="index + item" :class="$style.noitemListItem" :aria-label="$t('history_remove')" @contextmenu="removeHistoryWord(index)" @click="handleSearch(item)">{{ item }}</dd>
         </dl>
-      </div>
-      <div v-else :class="$style.noitem_label">
-        <p>{{ $t('search__welcome') }}</p>
       </div>
     </div>
   </transition>
@@ -28,7 +27,6 @@ import { watch, shallowRef } from '@common/utils/vueTools'
 import { historyList } from '@renderer/store/search/state'
 import { getHistoryList, removeHistoryWord, clearHistoryList } from '@renderer/store/search/action'
 import { getList } from '@renderer/store/hotSearch'
-import { appSetting } from '@renderer/store/setting'
 import { useRouter } from '@common/utils/vueRouter'
 
 const props = defineProps({
@@ -41,28 +39,26 @@ const props = defineProps({
 
 const hotSearchList = shallowRef([])
 
-if (appSetting['search.isShowHotSearch']) {
-  watch(() => props.visible, (visible) => {
-    if (!visible) return
-    void getList(props.source).then(list => {
-      hotSearchList.value = list
-    })
-  }, {
-    immediate: true,
+// search.isShowHotSearch 设置项已移除，行为固定为 true，所以直接注册监听。
+watch(() => props.visible, (visible) => {
+  if (!visible) return
+  void getList(props.source).then(list => {
+    hotSearchList.value = list
   })
+}, {
+  immediate: true,
+})
 
-  watch(() => props.source, (source) => {
-    if (!props.visible) return
-    void getList(source).then(list => {
-      if (source != props.source) return
-      hotSearchList.value = list
-    })
+watch(() => props.source, (source) => {
+  if (!props.visible) return
+  void getList(source).then(list => {
+    if (source != props.source) return
+    hotSearchList.value = list
   })
-}
+})
 
-if (appSetting['search.isShowHistorySearch']) {
-  void getHistoryList()
-}
+// search.isShowHistorySearch 设置项已移除，行为固定为 true，所以直接拉取历史。
+void getHistoryList()
 
 const router = useRouter()
 const handleSearch = (text) => {
@@ -152,18 +148,6 @@ const handleSearch = (text) => {
   svg {
     vertical-align: middle;
     width: 15px;
-  }
-}
-
-.noitem_label {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  p {
-    font-size: 17px;
-    color: var(--color-font-label);
-    text-align: center;
   }
 }
 </style>

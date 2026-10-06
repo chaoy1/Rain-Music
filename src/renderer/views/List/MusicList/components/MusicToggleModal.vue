@@ -66,7 +66,6 @@
 import { LIST_IDS } from '@common/constants'
 import { openUrl } from '@common/utils/electron'
 import { playNext } from '@renderer/core/player'
-import { getSourceI18nPrefix } from '@renderer/store'
 import { addTempPlayList } from '@renderer/store/player/action'
 import { playMusicInfo } from '@renderer/store/player/state'
 import { toNewMusicInfo, toOldMusicInfo } from '@renderer/utils'
@@ -124,7 +123,7 @@ export default {
           interval: musicInfo.interval ?? '',
         }).then((lists) => {
           if (this.searchKey != searchKey) return
-          const prefix = getSourceI18nPrefix()
+          const prefix = 'source_'
           this.tabs = lists.map(item => {
             return {
               id: item.source,

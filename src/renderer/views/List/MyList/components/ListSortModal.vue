@@ -124,8 +124,6 @@ export default {
       switch (props.listInfo.id) {
         case LIST_IDS.DEFAULT:
           return t(props.listInfo.name)
-        case LIST_IDS.LOVE:
-          return t(props.listInfo.name)
         default:
           return props.listInfo.name
       }

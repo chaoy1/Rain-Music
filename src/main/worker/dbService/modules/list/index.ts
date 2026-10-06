@@ -373,7 +373,6 @@ export const listDataOverwrite = (myListData: MakeOptional<Rain.List.ListDataFul
 
   const dbMusicInfos: Rain.DBService.MusicInfo[] = [
     ...toDBMusicInfo(listData.defaultList, LIST_IDS.DEFAULT),
-    ...toDBMusicInfo(listData.loveList, LIST_IDS.LOVE),
     ...toDBMusicInfo(listData.tempList, LIST_IDS.TEMP),
   ]
   listData.userList.forEach(({ list, ...listInfo }, index) => {
@@ -389,7 +388,6 @@ export const listDataOverwrite = (myListData: MakeOptional<Rain.List.ListDataFul
   for (const list of userLists) rawPoss.set(list.id, list.position)
   musicLists.clear()
   musicLists.set(LIST_IDS.DEFAULT, listData.defaultList)
-  musicLists.set(LIST_IDS.LOVE, listData.loveList)
   musicLists.set(LIST_IDS.TEMP, listData.tempList)
   for (const list of listData.userList) musicLists.set(list.id, list.list)
 }

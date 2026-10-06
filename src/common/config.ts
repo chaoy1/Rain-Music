@@ -5,48 +5,37 @@ export interface WindowSize {
   height: number
 }
 
+// 注意：id 保持原值不重编号，否则用户已保存的 common.windowSizeId 会错位。
+// 已删除 id 0（更小）、id 1（小）、id 6（巨大）三档。
+// 数组按窗口尺寸升序排列，与设置页里的描述（小→中→大→超大）顺序一致。
 export const windowSizeList: WindowSize[] = [
-  {
-    id: 0,
-    name: 'smaller',
-    width: 828,
-    height: 540,
-  },
-  {
-    id: 1,
-    name: 'small',
-    width: 920,
-    height: 600,
-  },
+  // 小
   {
     id: 2,
     name: 'medium',
     width: 1020,
     height: 660,
   },
+  // 中
   {
     id: 3,
     name: 'big',
     width: 1114,
     height: 718,
   },
+  // 大
   {
     id: 4,
     name: 'larger',
     width: 1202,
     height: 776,
   },
+  // 超大
   {
     id: 5,
     name: 'oversized',
     width: 1385,
     height: 896,
-  },
-  {
-    id: 6,
-    name: 'huge',
-    width: 1700,
-    height: 1070,
   },
 ]
 

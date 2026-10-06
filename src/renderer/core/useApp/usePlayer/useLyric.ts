@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch } from '@common/utils/vueTools'
+import { onBeforeUnmount } from '@common/utils/vueTools'
 import { debounce } from '@common/utils/common'
 // import { setDesktopLyricInfo, onGetDesktopLyricInfo } from '@renderer/utils/ipc'
 // import { musicInfo } from '@renderer/store/player/state'
@@ -11,7 +11,6 @@ import {
   sendInfo,
   setPlaybackRate,
 } from '@renderer/core/lyric'
-import { appSetting } from '@renderer/store/setting'
 
 const handleApplyPlaybackRate = debounce(setPlaybackRate, 300)
 
@@ -23,10 +22,8 @@ export default () => {
     sendInfo()
   }
 
-  watch(() => appSetting['player.isShowLyricTranslation'], setLyric)
-  watch(() => appSetting['player.isShowLyricRoma'], setLyric)
-  watch(() => appSetting['player.isSwapLyricTranslationAndRoma'], setLyric)
-  watch(() => appSetting['player.isPlayRainlrc'], setLyric)
+  // 「显示歌词翻译」「显示罗马音」「调换翻译与罗马音位置」「使用卡拉OK歌词」四个设置项已移除，
+  // setLyric() 内部直接引用固定常量（见 src/common/constants.ts），不再需要监听设置变化。
 
   window.app_event.on('play', play)
   window.app_event.on('pause', pause)

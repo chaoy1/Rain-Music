@@ -21,7 +21,7 @@ const index = computed(() => Math.max(0, Math.min(lyric.line, lyric.lines.length
 const currentRow = ref(null)
 const isWordLyric = computed(() => lyric.lines[index.value]?.dom_line.classList.contains('font-mode'))
 watchEffect(() => {
-  const line = lyric.lines[index.value]?.dom_line.querySelector('.line')
+  const line = lyric.lines[index.value]?.dom_line
   if (currentRow.value && line) currentRow.value.replaceChildren(line)
 }, { flush: 'post' })
 const next = computed(() => lyric.lines.slice(index.value + 1).find(line => line.text.trim())?.text ?? '')

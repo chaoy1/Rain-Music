@@ -58,6 +58,7 @@ import { onMounted, onBeforeUnmount, computed, reactive, ref, nextTick, watch } 
 import useLyric from '@renderer/utils/compositions/useLyric'
 import LyricMenu from './components/LyricMenu.vue'
 import { appSetting } from '@renderer/store/setting'
+import { PLAY_DETAIL_LYRIC_ALIGN } from '@common/constants'
 import { setLyricOffset } from '@renderer/core/lyric'
 import useSelectAllLrc from './useSelectAllLrc'
 
@@ -66,8 +67,10 @@ export default {
     LyricMenu,
   },
   setup() {
-    const isZoomActiveLrc = computed(() => appSetting['playDetail.isZoomActiveLrc'])
-    const isShowLyricProgressSetting = computed(() => appSetting['playDetail.isShowLyricProgressSetting'])
+    // playDetail.isZoomActiveLrc / playDetail.isShowLyricProgressSetting 设置项已移除，
+    // 行为都固定为 true。
+    const isZoomActiveLrc = computed(() => true)
+    const isShowLyricProgressSetting = computed(() => true)
 
     const {
       dom_lyric,
@@ -134,7 +137,8 @@ export default {
 
     const lrcStyles = computed(() => {
       return {
-        textAlign: appSetting['playDetail.style.align'],
+        // playDetail.style.align 设置项已移除，行为固定为「居中」
+        textAlign: PLAY_DETAIL_LYRIC_ALIGN,
       }
     })
     const lrcFontSize = computed(() => {

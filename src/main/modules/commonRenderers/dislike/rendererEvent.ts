@@ -7,12 +7,12 @@ export default () => {
     return global.rain.worker.dbService.getDislikeListInfo()
   })
   mainHandle<Rain.Dislike.DislikeMusicInfo[]>(DISLIKE_EVENT_NAME.add_dislike_music_infos, async({ params: listData }) => {
-    await global.rain.event_dislike.dislike_music_add(listData, false)
+    await global.rain.event_dislike.dislike_music_add(listData)
   })
   mainHandle<Rain.Dislike.DislikeRules>(DISLIKE_EVENT_NAME.overwrite_dislike_music_infos, async({ params: rules }) => {
-    await global.rain.event_dislike.dislike_data_overwrite(rules, false)
+    await global.rain.event_dislike.dislike_data_overwrite(rules)
   })
   mainHandle(DISLIKE_EVENT_NAME.clear_dislike_music_infos, async() => {
-    await global.rain.event_dislike.dislike_music_clear(false)
+    await global.rain.event_dislike.dislike_music_clear()
   })
 }

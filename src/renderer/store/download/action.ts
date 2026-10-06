@@ -10,12 +10,10 @@ import {
 } from './state'
 import { markRaw, toRaw } from '@common/utils/vueTools'
 import { getMusicUrl, getPicUrl, getLyricInfo } from '@renderer/core/music/online'
-import { appSetting } from '../setting'
 import { qualityList } from '..'
 import { proxyCallback } from '@renderer/worker/utils'
 import { arrPush, arrUnshift, joinPath } from '@renderer/utils'
-import { DOWNLOAD_STATUS } from '@common/constants'
-import { proxy } from '../index'
+import { DOWNLOAD_STATUS, MAX_DOWNLOAD_NUM, SKIP_EXIST_FILE, MUSIC_FILE_NAME_FORMAT, LRC_FORMAT, ADD_MUSIC_LOCATION_TYPE, EMBED_LYRIC_ROMA, DOWNLOAD_LYRIC_ROMA } from '@common/constants'
 import { buildSavePath } from './utils'
 
 const waitingUpdateTasks = new Map<string, Rain.Download.ListItem>()
@@ -56,7 +54,7 @@ export const getDownloadList = async(): Promise<Rain.Download.ListItem[]> => {
 }
 
 const addTasks = async(list: Rain.Download.ListItem[]) => {
-  const addMusicLocationType = appSetting['list.addMusicLocationType']
+  const addMusicLocationType = ADD_MUSIC_LOCATION_TYPE
 
   await downloadTasksCreate(list.map(i => toRaw(i)), addMusicLocationType)
 
@@ -133,50 +131,41 @@ const setStatus = (downloadInfo: Rain.Download.ListItem, status: Rain.Download.D
 // 修复 1.1.x版本 酷狗源歌词格式
 const fixKgLyric = (lrc: string) => /\[00:\d\d:\d\d.\d+\]/.test(lrc) ? lrc.replace(/(?:\[00:(\d\d:\d\d.\d+\]))/gm, '[$1') : lrc
 
-const getProxy = () => {
-  return proxy.enable && proxy.host ? {
-    host: proxy.host,
-    port: parseInt(proxy.port || '80'),
-  } : proxy.envProxy ? {
-    host: proxy.envProxy.host,
-    port: parseInt(proxy.envProxy.port || '80'),
-  } : undefined
-}
 /**
  * 设置歌曲meta信息
  * @param downloadInfo 下载任务信息
  */
 const saveMeta = (downloadInfo: Rain.Download.ListItem) => {
   if (downloadInfo.metadata.quality === 'ape') return
-  const isUseOtherSource = appSetting['download.isUseOtherSource']
   const tasks: [Promise<string | null>, Promise<Rain.Player.LyricInfo | null>] = [
-    appSetting['download.isEmbedPic']
-      ? downloadInfo.metadata.musicInfo.meta.picUrl
-        ? Promise.resolve(downloadInfo.metadata.musicInfo.meta.picUrl)
-        : getPicUrl({ musicInfo: downloadInfo.metadata.musicInfo, isRefresh: false, allowToggleSource: isUseOtherSource }).catch(err => {
-          console.log(err)
-          return null
-        })
-      : Promise.resolve(null),
-    appSetting['download.isEmbedLyric']
-      ? getLyricInfo({ musicInfo: downloadInfo.metadata.musicInfo, isRefresh: false, allowToggleSource: isUseOtherSource }).catch(err => {
+    // 嵌入封面已固定为「启用」（download.isEmbedPic -> true）
+    downloadInfo.metadata.musicInfo.meta.picUrl
+      ? Promise.resolve(downloadInfo.metadata.musicInfo.meta.picUrl)
+      // 自动换源下载已固定为「不启用」（download.isUseOtherSource -> false）
+      : getPicUrl({ musicInfo: downloadInfo.metadata.musicInfo, isRefresh: false, allowToggleSource: false }).catch(err => {
         console.log(err)
         return null
-      })
-      : Promise.resolve(null),
+      }),
+    // 嵌入歌词已固定为「启用」（download.isEmbedLyric -> true）
+    getLyricInfo({ musicInfo: downloadInfo.metadata.musicInfo, isRefresh: false, allowToggleSource: false }).catch(err => {
+      console.log(err)
+      return null
+    }),
   ]
   void Promise.all(tasks).then(([imgUrl, lyrics]) => {
     const info = {
       filePath: downloadInfo.metadata.filePath,
-      isEmbedLyricRain: appSetting['download.isEmbedLyricRain'],
-      isEmbedLyricT: appSetting['download.isEmbedLyricT'],
-      isEmbedLyricR: appSetting['download.isEmbedLyricR'],
+      // 嵌入 Rain 歌词 / 翻译已固定为「启用」；
+      // 罗马音已固定为「不启用」（download.isEmbedLyricR -> EMBED_LYRIC_ROMA）
+      isEmbedLyricRain: true,
+      isEmbedLyricT: true,
+      isEmbedLyricR: EMBED_LYRIC_ROMA,
       title: downloadInfo.metadata.musicInfo.name,
       artist: downloadInfo.metadata.musicInfo.singer?.replaceAll('、', ';'),
       album: downloadInfo.metadata.musicInfo.meta.albumName,
       APIC: imgUrl,
     }
-    void window.rain.worker.download.writeMeta(info, lyrics ?? { lyric: '' }, getProxy())
+    void window.rain.worker.download.writeMeta(info, lyrics ?? { lyric: '' })
   })
 }
 
@@ -185,20 +174,24 @@ const saveMeta = (downloadInfo: Rain.Download.ListItem) => {
  * @param downloadInfo 下载任务信息
  */
 const downloadLyric = (downloadInfo: Rain.Download.ListItem) => {
-  if (!appSetting['download.isDownloadLrc']) return
+  // 下载歌词文件已固定为「启用」（download.isDownloadLrc -> true）
   void getLyricInfo({
     musicInfo: downloadInfo.metadata.musicInfo,
     isRefresh: false,
-    allowToggleSource: appSetting['download.isUseOtherSource'],
+    // 自动换源下载已固定为「不启用」（download.isUseOtherSource -> false）
+    allowToggleSource: false,
   }).then(lrcs => {
     if (lrcs.lyric) {
       lrcs.lyric = fixKgLyric(lrcs.lyric)
       const info = {
         filePath: downloadInfo.metadata.filePath.substring(0, downloadInfo.metadata.filePath.lastIndexOf('.')) + '.lrc',
-        format: appSetting['download.lrcFormat'],
-        downloadRainlrc: appSetting['download.isDownloadRainLrc'],
-        downloadTlrc: appSetting['download.isDownloadTLrc'],
-        downloadRlrc: appSetting['download.isDownloadRLrc'],
+        // 歌词编码已固定为 utf8（download.lrcFormat -> LRC_FORMAT）
+        format: LRC_FORMAT,
+        // 下载 Rain 歌词 / 翻译歌词已固定为「启用」；
+        // 罗马音歌词已固定为「不启用」（download.isDownloadRLrc -> DOWNLOAD_LYRIC_ROMA）
+        downloadRainlrc: true,
+        downloadTlrc: true,
+        downloadRlrc: DOWNLOAD_LYRIC_ROMA,
       }
       void window.rain.worker.download.saveLrc(lrcs, info)
     }
@@ -217,7 +210,8 @@ const getUrl = async(downloadInfo: Rain.Download.ListItem, isRefresh: boolean = 
       musicInfo: downloadInfo.metadata.musicInfo,
       isRefresh: false,
       quality: downloadInfo.metadata.quality,
-      allowToggleSource: appSetting['download.isUseOtherSource'],
+      // 自动换源下载已固定为「不启用」（download.isUseOtherSource -> false）
+      allowToggleSource: false,
     })
   }).catch(() => '')
 }
@@ -234,7 +228,8 @@ const handleRefreshUrl = (downloadInfo: Rain.Download.ListItem) => {
       musicInfo: downloadInfo.metadata.musicInfo,
       isRefresh: true,
       quality: downloadInfo.metadata.quality,
-      allowToggleSource: appSetting['download.isUseOtherSource'],
+      // 自动换源下载已固定为「不启用」（download.isUseOtherSource -> false）
+      allowToggleSource: false,
     })
   })
     .catch(() => '')
@@ -273,7 +268,7 @@ const handleStartTask = async(downloadInfo: Rain.Download.ListItem) => {
 
   setStatusText(downloadInfo, window.i18n.t('download_status_start'))
 
-  await window.rain.worker.download.startTask(toRaw(downloadInfo), savePath, appSetting['download.skipExistFile'], proxyCallback((event: Rain.Download.DownloadTaskActions) => {
+  await window.rain.worker.download.startTask(toRaw(downloadInfo), savePath, SKIP_EXIST_FILE, proxyCallback((event: Rain.Download.DownloadTaskActions) => {
     // console.log(event)
     switch (event.action) {
       case 'start':
@@ -306,7 +301,7 @@ const handleStartTask = async(downloadInfo: Rain.Download.ListItem) => {
       default:
         break
     }
-  }), getProxy())
+  }))
 }
 const startTask = async(downloadInfo: Rain.Download.ListItem) => {
   setStatus(downloadInfo, DOWNLOAD_STATUS.RUN)
@@ -322,11 +317,11 @@ const getStartTask = (list: Rain.Download.ListItem[]): Rain.Download.ListItem | 
     return false
   })
   // console.log(downloadCount, waitList)
-  return downloadCount < appSetting['download.maxDownloadNum'] ? waitList.shift() ?? null : null
+  return downloadCount < MAX_DOWNLOAD_NUM ? waitList.shift() ?? null : null
 }
 
 const checkStartTask = async() => {
-  if (runingTask.size >= appSetting['download.maxDownloadNum']) return
+  if (runingTask.size >= MAX_DOWNLOAD_NUM) return
   let result = getStartTask(downloadList)
   // console.log(result)
   while (result) {
@@ -357,7 +352,7 @@ const filterTask = (list: Rain.Download.ListItem[]) => {
 export const createDownloadTasks = async(list: Rain.Music.MusicInfoOnline[], quality: Rain.Quality, listId?: string) => {
   if (!list.length) return
   const tasks = filterTask(await window.rain.worker.download.createDownloadTasks(list, quality,
-    appSetting['download.fileName'],
+    MUSIC_FILE_NAME_FORMAT,
     toRaw(qualityList.value), listId),
   )
 
@@ -374,7 +369,7 @@ export const startDownloadTasks = async(list: Rain.Download.ListItem[]) => {
     switch (downloadInfo.status) {
       case DOWNLOAD_STATUS.PAUSE:
       case DOWNLOAD_STATUS.ERROR:
-        if (runingTask.size < appSetting['download.maxDownloadNum']) void startTask(downloadInfo)
+        if (runingTask.size < MAX_DOWNLOAD_NUM) void startTask(downloadInfo)
         else setStatus(downloadInfo, DOWNLOAD_STATUS.WAITING)
       default:
         break

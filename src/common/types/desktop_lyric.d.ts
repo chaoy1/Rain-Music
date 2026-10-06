@@ -3,10 +3,20 @@ declare namespace Rain {
     interface Config {
       'desktopLyric.enable': Rain.AppSetting['desktopLyric.enable']
       'desktopLyric.isLock': Rain.AppSetting['desktopLyric.isLock']
-      'desktopLyric.isAlwaysOnTop': Rain.AppSetting['desktopLyric.isAlwaysOnTop']
+      /**
+       * 歌词窗口总是置顶。
+       * 原设置项 `desktopLyric.isAlwaysOnTop` 已移除，行为固定为 true
+       * （见 src/common/constants.ts 的 DESKTOP_LYRIC_ALWAYS_ON_TOP）。
+       */
+      'desktopLyric.isAlwaysOnTop': true
       'desktopLyric.isAlwaysOnTopLoop': Rain.AppSetting['desktopLyric.isAlwaysOnTopLoop']
       'desktopLyric.isShowTaskbar': Rain.AppSetting['desktopLyric.isShowTaskbar']
-      'desktopLyric.pauseHide': Rain.AppSetting['desktopLyric.pauseHide']
+      /**
+       * 暂停时提高歌词透明度。
+       * 原设置项 `desktopLyric.pauseHide` 已移除，行为固定为 true
+       * （见 src/common/constants.ts 的 DESKTOP_LYRIC_PAUSE_HIDE）。
+       */
+      'desktopLyric.pauseHide': true
       'desktopLyric.audioVisualization': Rain.AppSetting['desktopLyric.audioVisualization']
       'desktopLyric.width': Rain.AppSetting['desktopLyric.width']
       'desktopLyric.height': Rain.AppSetting['desktopLyric.height']
@@ -32,10 +42,6 @@ declare namespace Rain {
       'desktopLyric.style.isFontWeightExtended': Rain.AppSetting['desktopLyric.style.isFontWeightExtended']
       'desktopLyric.style.isZoomActiveLrc': Rain.AppSetting['desktopLyric.style.isZoomActiveLrc']
       'common.langId': Rain.AppSetting['common.langId']
-      'player.isShowLyricTranslation': Rain.AppSetting['player.isShowLyricTranslation']
-      'player.isShowLyricRoma': Rain.AppSetting['player.isShowLyricRoma']
-      'player.isSwapLyricTranslationAndRoma': Rain.AppSetting['player.isSwapLyricTranslationAndRoma']
-      'player.isPlayRainlrc': Rain.AppSetting['player.isPlayRainlrc']
       'player.playbackRate': Rain.AppSetting['player.playbackRate']
     }
 

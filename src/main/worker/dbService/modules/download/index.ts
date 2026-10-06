@@ -39,7 +39,7 @@ const initDownloadList = () => {
       statusText: item.statusText,
       downloaded: item.progress_downloaded,
       total: item.progress_total,
-      progress: item.progress_total ? parseInt((item.progress_downloaded / item.progress_total).toFixed(2)) * 100 : 0,
+      progress: item.progress_total ? Math.round(item.progress_downloaded / item.progress_total * 100) : 0,
       speed: '',
       writeQueue: 0,
       metadata: {
@@ -72,8 +72,8 @@ export const downloadInfoSave = (downloadInfos: Rain.Download.ListItem[], addMus
   if (addMusicLocationType == 'top') {
     let newList = [...list]
     arrUnshift(newList, downloadInfos)
-    insertDownloadList(toDBDownloadInfo(downloadInfos), newList.slice(downloadInfos.length - 1).map((info, index) => {
-      return { id: info.id, position: index }
+    insertDownloadList(toDBDownloadInfo(downloadInfos), list.map((info, index) => {
+      return { id: info.id, position: downloadInfos.length + index }
     }))
     list = newList
   } else {
@@ -115,5 +115,6 @@ export const downloadInfoRemove = (ids: string[]) => {
  */
 export const downloadInfoClear = () => {
   clearDownloadList()
+  list = []
 }
 

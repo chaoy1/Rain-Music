@@ -2,10 +2,7 @@ import { onBeforeUnmount, watch } from '@common/utils/vueTools'
 import { sendPlayerStatus, onPlayerAction } from '@renderer/utils/ipc'
 // import store from '@renderer/store'
 
-import { loveList } from '@renderer/store/list/state'
-import { addListMusics, removeListMusics, checkListExistMusic } from '@renderer/store/list/action'
 import { playMusicInfo, musicInfo } from '@renderer/store/player/state'
-import { throttle } from '@common/utils'
 import { pause, play, playNext, playPrev } from '@renderer/core/player'
 import { playProgress } from '@renderer/store/player/playProgress'
 import { appSetting } from '@renderer/store/setting'
@@ -14,14 +11,6 @@ import { lyric } from '@renderer/store/player/lyric'
 export default () => {
   // const setVisibleDesktopLyric = useCommit('setVisibleDesktopLyric')
   // const setLockDesktopLyric = useCommit('setLockDesktopLyric')
-  let collect = false
-
-  const updateCollectStatus = async() => {
-    let status = !!playMusicInfo.musicInfo && await checkListExistMusic(loveList.id, playMusicInfo.musicInfo.id)
-    if (collect == status) return false
-    collect = status
-    return true
-  }
 
   const handlePlay = () => {
     sendPlayerStatus({ status: 'playing' })
@@ -37,9 +26,7 @@ export default () => {
     sendPlayerStatus({ status: 'error' })
   }
   const handleSetPlayInfo = async() => {
-    await updateCollectStatus()
     sendPlayerStatus({
-      collect,
       name: musicInfo.name,
       singer: musicInfo.singer,
       albumName: musicInfo.album,
@@ -74,10 +61,6 @@ export default () => {
   // const handleSetTaskbarThumbnailClip = (clip) => {
   //   setTaskbarThumbnailClip(clip)
   // }
-  const throttleListChange = throttle(async listIds => {
-    if (!listIds.includes(loveList.id)) return
-    if (await updateCollectStatus()) sendPlayerStatus({ collect })
-  })
   // const updateSetting = () => {
   //   const setting = store.getters.setting
   //   buttons.lrc = setting.desktopLyric.enable
@@ -97,16 +80,6 @@ export default () => {
         break
       case 'next':
         void playNext()
-        break
-      case 'collect':
-        if (!playMusicInfo.musicInfo) return
-        void addListMusics(loveList.id, ['progress' in playMusicInfo.musicInfo ? playMusicInfo.musicInfo.metadata.musicInfo : playMusicInfo.musicInfo])
-        if (await updateCollectStatus()) sendPlayerStatus({ collect })
-        break
-      case 'unCollect':
-        if (!playMusicInfo.musicInfo) return
-        void removeListMusics({ listId: loveList.id, ids: ['progress' in playMusicInfo.musicInfo ? playMusicInfo.musicInfo.metadata.musicInfo.id : playMusicInfo.musicInfo.id] })
-        if (await updateCollectStatus()) sendPlayerStatus({ collect })
         break
       case 'seek': {
         let progress = data as number
@@ -161,7 +134,6 @@ export default () => {
   window.app_event.on('picUpdated', handleSetPic)
   window.app_event.on('lyricLinePlay', handleSetLyricLine)
   // window.app_event.on(eventTaskbarNames.setTaskbarThumbnailClip, handleSetTaskbarThumbnailClip)
-  window.app_event.on('myListUpdate', throttleListChange)
 
   onBeforeUnmount(() => {
     rTaskbarThumbarClick()
@@ -174,17 +146,14 @@ export default () => {
     window.app_event.off('picUpdated', handleSetPic)
     window.app_event.off('lyricLinePlay', handleSetLyricLine)
     // window.app_event.off(eventTaskbarNames.setTaskbarThumbnailClip, handleSetTaskbarThumbnailClip)
-    window.app_event.off('myListUpdate', throttleListChange)
   })
 
   return async() => {
     // const setting = store.getters.setting
     // buttons.lrc = setting.desktopLyric.enable
     // buttons.lockLrc = setting.desktopLyric.isLock
-    await updateCollectStatus()
     if (playMusicInfo.musicInfo == null) return
     sendPlayerStatus({
-      collect,
       name: musicInfo.name,
       singer: musicInfo.singer,
       albumName: musicInfo.album,

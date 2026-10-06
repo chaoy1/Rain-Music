@@ -5,28 +5,6 @@ const sources: Array<{
   name: string
   disabled: boolean
   supportQualitys: Partial<Record<Rain.OnlineSource, Rain.Quality[]>>
-}> = [
-  // {
-  //   id: 'test',
-  //   name: '测试接口',
-  //   disabled: false,
-  //   supportQualitys: {
-  //     kw: ['128k'],
-  //     kg: ['128k'],
-  //     tx: ['128k'],
-  //     wy: ['128k'],
-  //     mg: ['128k'],
-  //     // bd: ['128k'],
-  //   },
-  // },
-  // {
-  //   id: 'temp',
-  //   name: '临时接口',
-  //   disabled: false,
-  //   supportQualitys: {
-  //     kw: ['128k'],
-  //   },
-  // },
-]
+}> = []
 
 export default sources

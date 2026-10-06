@@ -1,9 +1,8 @@
 import initRendererEvent, { handleKeyDown, hotKeyConfigUpdate } from './rendererEvent'
 
 import { APP_EVENT_NAMES } from '@common/constants'
-import { createWindow, minimize, setProgressBar, setProxy, setThumbarButtons, toggleHide, toggleMinimize } from './main'
+import { createWindow, autoCleanResourceCache, setThumbarButtons, toggleHide } from './main'
 import { HOTKEY_COMMON } from '@common/hotKey'
-import { quitApp } from '@main/app'
 
 export default () => {
   initRendererEvent()
@@ -12,17 +11,9 @@ export default () => {
     let info = global.rain.hotKey.config.global.keys[key]
     if (info?.type != APP_EVENT_NAMES.winMainName) return
     switch (info.action) {
-      case HOTKEY_COMMON.close.action:
-        quitApp()
-        break
+      // 可配置的动作只剩四项，这里只处理需要在主进程本地响应的「显示/隐藏程序」
       case HOTKEY_COMMON.hide_toggle.action:
         toggleHide()
-        break
-      case HOTKEY_COMMON.min.action:
-        minimize()
-        break
-      case HOTKEY_COMMON.min_toggle.action:
-        toggleMinimize()
         break
       default:
         handleKeyDown(type, key)
@@ -35,79 +26,42 @@ export default () => {
 
   global.rain.event_app.on('app_inited', () => {
     createWindow()
+    // 资源缓存自动清理（common.resourceCacheAutoCleanSize，0 表示关闭）：
+    // 启动时检查一次缓存大小，超过阈值就执行与设置页「清理资源缓存」相同的清理。
+    void autoCleanResourceCache().catch(err => { console.error(err) })
   })
 
-  const keys = (['status', 'collect'] as const) satisfies Array<keyof Rain.Player.Status>
   const taskBarButtonFlags: Rain.TaskBarButtonFlags = {
     empty: true,
-    collect: false,
     play: false,
     next: true,
     prev: true,
   }
-  const progressStatus = {
-    progress: -1,
-    status: 'none' as Electron.ProgressBarOptions['mode'],
-  }
-  let showProgress = global.rain.appSetting['player.isShowTaskProgess']
+  // 「在任务栏上显示当前歌曲播放进度」设置项已移除，行为固定为不显示（SHOW_TASK_PROGRESS = false），
+  // 因此这里不再调用 setProgressBar，也不再监听配置变更。
   global.rain.event_app.on('player_status', (status) => {
     if (status.status) {
       switch (status.status) {
         case 'paused':
           taskBarButtonFlags.play = false
           taskBarButtonFlags.empty &&= false
-          progressStatus.status = 'paused'
           break
         case 'error':
           taskBarButtonFlags.play = false
           taskBarButtonFlags.empty &&= false
-          progressStatus.status = 'error'
           break
         case 'playing':
           taskBarButtonFlags.play = true
           taskBarButtonFlags.empty &&= false
-          progressStatus.status = 'normal'
           break
         case 'stoped':
           taskBarButtonFlags.play &&= false
           taskBarButtonFlags.empty = true
-          progressStatus.status = 'none'
-          progressStatus.progress = 0
           break
       }
-      if (showProgress) {
-        setProgressBar(progressStatus.progress, {
-          mode: progressStatus.status,
-        })
-      }
     }
-    if (keys.some(k => status[k] != null)) {
-      if (status.collect != null) taskBarButtonFlags.collect = status.collect
+    if (status.status != null) {
       setThumbarButtons(taskBarButtonFlags)
-    }
-    if (showProgress && status.progress != null) {
-      const progress = global.rain.player_status.duration ? status.progress / global.rain.player_status.duration : 0
-      if (progress.toFixed(2) != progressStatus.progress.toFixed(2)) {
-        progressStatus.progress = progress < 0.01 ? 0.01 : progress
-        setProgressBar(progressStatus.progress, {
-          mode: progressStatus.status,
-        })
-      }
-    }
-  })
-  global.rain.event_app.on('updated_config', (keys, setting) => {
-    if (keys.includes('player.isShowTaskProgess')) {
-      showProgress = setting['player.isShowTaskProgess']!
-      if (showProgress) {
-        setProgressBar(progressStatus.progress, {
-          mode: progressStatus.status,
-        })
-      } else {
-        setProgressBar(-1, { mode: 'none' })
-      }
-    }
-    if (keys.includes('network.proxy.enable') || (global.rain.appSetting['network.proxy.enable'] && keys.some(k => k.includes('network.proxy.')))) {
-      setProxy()
     }
   })
 }

@@ -4,6 +4,7 @@ import { debounce, getPlatform, isLinux, isWin } from '@common/utils'
 import { initWindowSize, minHeight, minWidth } from './utils'
 import { mainSend } from '@common/mainIpc'
 import { encodePath } from '@common/utils/electron'
+import { DESKTOP_LYRIC_ALWAYS_ON_TOP } from '@common/constants'
 
 // require('./event')
 // require('./rendererEvent')
@@ -79,10 +80,8 @@ const winEvent = () => {
       browserWindow!.setIgnoreMouseEvents(true, { forward: !isLinux && global.rain.appSetting['desktopLyric.isHoverHide'] })
     }
     // linux下每次重开时貌似要重新设置置顶
-    // if (isLinux && global.rain.appSetting['desktopLyric.isAlwaysOnTop']) {
-    //   browserWindow!.setAlwaysOnTop(global.rain.appSetting['desktopLyric.isAlwaysOnTop'], 'screen-saver')
-    // }
-    if (global.rain.appSetting['desktopLyric.isAlwaysOnTop'] && global.rain.appSetting['desktopLyric.isAlwaysOnTopLoop']) alwaysOnTopTools.startLoop()
+    // 「使歌词总是在其他窗口之上」已固定为 true（DESKTOP_LYRIC_ALWAYS_ON_TOP）
+    if (DESKTOP_LYRIC_ALWAYS_ON_TOP && global.rain.appSetting['desktopLyric.isAlwaysOnTopLoop']) alwaysOnTopTools.startLoop()
     browserWindow!.blur()
   })
 }
@@ -104,7 +103,6 @@ export const createWindow = () => {
     'desktopLyric.y': winSize.y,
     'desktopLyric.width': winSize.width,
     'desktopLyric.height': winSize.height,
-    'desktopLyric.isAlwaysOnTop': true,
     'desktopLyric.fullscreenHide': false,
   })
 
@@ -136,10 +134,12 @@ export const createWindow = () => {
     alwaysOnTop: isAlwaysOnTop,
     skipTaskbar: !isShowTaskbar,
     webPreferences: {
-      contextIsolation: false,
-      webSecurity: false,
-      sandbox: false,
-      nodeIntegration: true,
+      preload: path.join(__dirname, 'preload-lyric.js'),
+      contextIsolation: true,
+      webSecurity: true,
+      sandbox: true,
+      nodeIntegration: false,
+      nodeIntegrationInWorker: false,
       enableWebSQL: false,
       webgl: false,
       spellcheck: false, // 禁用拼写检查器
@@ -167,7 +167,7 @@ export const showWindow = () => {
 }
 
 export const raiseWindow = () => {
-  if (!browserWindow || !browserWindow.isVisible() || !global.rain.appSetting['desktopLyric.isAlwaysOnTop']) return
+  if (!browserWindow || !browserWindow.isVisible() || !DESKTOP_LYRIC_ALWAYS_ON_TOP) return
   browserWindow.setAlwaysOnTop(true, 'screen-saver')
   browserWindow.moveTop()
 }
@@ -224,7 +224,7 @@ export const alwaysOnTopTools: AlwaysOnTopTools = {
   timeout: null,
   setAlwaysOnTop(isLoop) {
     this.clearLoop()
-    setAlwaysOnTop(global.rain.appSetting['desktopLyric.isAlwaysOnTop'], 'screen-saver')
+    setAlwaysOnTop(DESKTOP_LYRIC_ALWAYS_ON_TOP, 'screen-saver')
     // console.log(isLoop)
     if (isLoop) this.startLoop()
   },

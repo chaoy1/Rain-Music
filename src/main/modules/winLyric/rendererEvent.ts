@@ -7,6 +7,10 @@ import { getBounds, getMainFrame, sendEvent, setBounds, setResizeable } from './
 import { MessageChannelMain } from 'electron'
 import { mouseCheckTools } from './mouseCheckTools'
 
+const isLyricMainFrame = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean => {
+  const frame = getMainFrame()
+  return frame != null && event.senderFrame === frame
+}
 
 export default () => {
   // mainOn(WIN_LYRIC_RENDERER_EVENT_NAME.get_lyric_info, ({ params: action }) => {
@@ -18,24 +22,31 @@ export default () => {
   // })
   common(sendEvent)
 
-  mainHandle<Partial<Rain.AppSetting>>(WIN_LYRIC_RENDERER_EVENT_NAME.set_config, async({ params: config }) => {
+  mainHandle<Partial<Rain.AppSetting>>(WIN_LYRIC_RENDERER_EVENT_NAME.set_config, async({ event, params: config }) => {
+    if (!isLyricMainFrame(event)) return
     global.rain.event_app.update_config(config)
   })
 
-  mainHandle<Rain.DesktopLyric.Config>(WIN_LYRIC_RENDERER_EVENT_NAME.get_config, async() => {
+  // 非本窗口主 frame 的调用一律返回 undefined（见 tests/unit/lyric-ipc-trust.test.cjs），
+  // 因此取值类型必须带上 undefined；参数需显式标注，否则会被第一个重载
+  // 上下文推断成带 params 的形式而无法匹配返回值的重载。
+  mainHandle<Rain.DesktopLyric.Config | undefined>(WIN_LYRIC_RENDERER_EVENT_NAME.get_config, async({ event }: Rain.IpcMainInvokeEvent) => {
+    if (!isLyricMainFrame(event)) return
     return buildLyricConfig(global.rain.appSetting) as Rain.DesktopLyric.Config
   })
 
-  mainOn<Rain.DesktopLyric.NewBounds>(WIN_LYRIC_RENDERER_EVENT_NAME.set_win_bounds, ({ params: options }) => {
+  mainOn<Rain.DesktopLyric.NewBounds>(WIN_LYRIC_RENDERER_EVENT_NAME.set_win_bounds, ({ event, params: options }) => {
+    if (!isLyricMainFrame(event)) return
     setBounds(getLyricWindowBounds(getBounds()!, options))
   })
 
-  mainOn<boolean>(WIN_LYRIC_RENDERER_EVENT_NAME.set_win_resizeable, ({ params: resizable }) => {
+  mainOn<boolean>(WIN_LYRIC_RENDERER_EVENT_NAME.set_win_resizeable, ({ event, params: resizable }) => {
+    if (!isLyricMainFrame(event)) return
     setResizeable(resizable)
   })
 
   mainOn(WIN_LYRIC_RENDERER_EVENT_NAME.request_main_window_channel, ({ event }) => {
-    if (event.senderFrame !== getMainFrame()) return
+    if (!isLyricMainFrame(event)) return
     // Create a new channel ...
     const { port1, port2 } = new MessageChannelMain()
     // ... send one end to the worker ...
@@ -47,7 +58,8 @@ export default () => {
     console.log('request_main_window_channel')
   })
 
-  mainOn<boolean>(WIN_LYRIC_RENDERER_EVENT_NAME.mouse_enter_leave, ({ params: isEnter }) => {
+  mainOn<boolean>(WIN_LYRIC_RENDERER_EVENT_NAME.mouse_enter_leave, ({ event, params: isEnter }) => {
+    if (!isLyricMainFrame(event)) return
     if (isEnter) {
       mouseCheckTools.setMouseInWindow(true)
       mouseCheckTools.runCheck(sendMouseLeave)

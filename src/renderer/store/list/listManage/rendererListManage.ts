@@ -18,6 +18,7 @@ import {
   listMusicClear,
 } from './action'
 import { allMusicList } from './state'
+import { ADD_MUSIC_LOCATION_TYPE } from '@common/constants'
 
 /**
  * 获取用户列表
@@ -135,7 +136,6 @@ export const clearListMusics = async(ids: Rain.List.ListActionMusicClear) => {
  */
 export const overwriteListFull = async(data: Rain.List.ListActionDataOverwrite) => {
   data.defaultList = toRaw(data.defaultList)
-  data.loveList = toRaw(data.loveList)
   if (data.tempList) {
     data.tempList = toRaw(data.tempList)
   }
@@ -170,7 +170,9 @@ export const getMusicExistListIds = async(musicInfoId: string): Promise<string[]
 const noop = () => {}
 
 
-export const registerListAction = (appSetting: Rain.AppSetting, onListChanged: (listIds: string[]) => void = noop) => {
+// 注：第一个参数（appSetting）保留是为了不改变调用方签名，
+// 「添加歌曲位置」设置项移除后这里已不再读取它
+export const registerListAction = (_appSetting: Rain.AppSetting, onListChanged: (listIds: string[]) => void = noop) => {
   const list_data_overwrite = ({ params: datas }: Rain.IpcRendererEventParams<Rain.List.ListActionDataOverwrite>) => {
     const updatedListIds = listDataOverwrite(datas)
     if (updatedListIds.length) onListChanged(updatedListIds)
@@ -191,12 +193,12 @@ export const registerListAction = (appSetting: Rain.AppSetting, onListChanged: (
     userListsUpdatePosition(position, ids)
   }
   const list_music_add = ({ params: { id, musicInfos, addMusicLocationType } }: Rain.IpcRendererEventParams<Rain.List.ListActionMusicAdd>) => {
-    addMusicLocationType ??= appSetting['list.addMusicLocationType']
+    addMusicLocationType ??= ADD_MUSIC_LOCATION_TYPE
     const updatedListIds = listMusicAdd(id, musicInfos, addMusicLocationType)
     if (updatedListIds.length) onListChanged(updatedListIds)
   }
   const list_music_move = ({ params: { fromId, toId, musicInfos, addMusicLocationType } }: Rain.IpcRendererEventParams<Rain.List.ListActionMusicMove>) => {
-    addMusicLocationType ??= appSetting['list.addMusicLocationType']
+    addMusicLocationType ??= ADD_MUSIC_LOCATION_TYPE
     const updatedListIds = listMusicMove(fromId, toId, musicInfos, addMusicLocationType)
     if (updatedListIds.length) onListChanged(updatedListIds)
   }

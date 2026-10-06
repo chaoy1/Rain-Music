@@ -1,7 +1,5 @@
 import keyBind from '../utils/keyBind'
-import { HOTKEY_COMMON } from '@common/hotKey'
 import Event from './Event'
-import { appSetting } from '@renderer/store/setting'
 
 declare class keyEventTypes extends Event {
   on(event: string, listener: (event: Rain.KeyDownEevent) => any): void
@@ -29,12 +27,8 @@ export const registerKeyEvent = () => {
       event.preventDefault()
       if (type == 'up') return
 
-      // 软件内快捷键的最小化触发时
-      // 如果已启用托盘，则隐藏程序，否则最小化程序 上游 issue #603
-      if (window.rain.appHotKeyConfig.local.keys[key].action == HOTKEY_COMMON.min.action && appSetting['tray.enable']) {
-        window.key_event.emit(HOTKEY_COMMON.hide_toggle.action)
-        return
-      }
+      // 注：原先「软件内快捷键的最小化触发时改为隐藏程序」的特判已随
+      // common_min 动作一并移除（可配置动作只剩四项，见 src/common/hotKey.ts）
 
       window.key_event.emit(window.rain.appHotKeyConfig.local.keys[key].action)
       return

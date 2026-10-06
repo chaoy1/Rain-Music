@@ -7,7 +7,6 @@
       :total="listInfo.total"
       :list="listInfo.list"
       :no-item="listInfo.noItemLabel"
-      :source-tag="sourceId == 'all'"
       check-api-source
       @toggle-page="handleTogglePage"
       @play-list="handlePlayList"

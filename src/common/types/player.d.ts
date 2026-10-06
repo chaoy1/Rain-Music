@@ -5,9 +5,7 @@ declare namespace Rain {
       mode?: Electron.ProgressBarOptions['mode']
     }
 
-    type StatusButtonActions = 'unCollect'
-    | 'collect'
-    | 'prev'
+    type StatusButtonActions = 'prev'
     | 'pause'
     | 'play'
     | 'next'
@@ -34,7 +32,6 @@ declare namespace Rain {
       tlyric: string
       rlyric: string
       rainlyric: string
-      collect: boolean
       volume: number
       mute: boolean
     }

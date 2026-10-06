@@ -122,7 +122,6 @@ import useMusicActions from './useMusicActions'
 import useSearch from './useSearch'
 import useListScroll from './useListScroll'
 import useMusicToggle from './useMusicToggle'
-import { appSetting } from '@renderer/store/setting'
 export default {
   name: 'MusicList',
   components: {
@@ -138,7 +137,8 @@ export default {
   },
   emits: ['show-menu'],
   setup(props, { emit }) {
-    const actionButtonsVisible = appSetting['list.actionButtonsVisible']
+    // 列表操作按钮列已固定为「不显示」（list.actionButtonsVisible -> false）
+    const actionButtonsVisible = false
 
     let scrollIndex = null
     let isAnimation = false

@@ -4,9 +4,7 @@
     <header :class="$style.header">
       <TrafficLights data-detail-window-controls />
       <span :class="$style.heading">{{ $t('player__detail_now_playing') }}</span>
-      <button type="button" :class="$style.back" data-detail-back ignore-tip :aria-label="$t('back')" @click="hide">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-      </button>
+      <DetailDismissButton data-detail-back @click="hide" />
     </header>
     <div :class="$style.body">
       <section :class="$style.album">
@@ -47,6 +45,7 @@ import { setShowPlayerDetail, setShowPlayComment, setShowPlayLrcSelectContentLrc
 import LyricPlayer from './LyricPlayer.vue'
 import PlayerDock from './PlayBar.vue'
 import TrafficLights from '../Toolbar/TrafficLights.vue'
+import DetailDismissButton from '@renderer/components/common/DetailDismissButton.vue'
 
 defineOptions({ name: 'CorePlayDetail' })
 
@@ -113,25 +112,6 @@ onBeforeUnmount(() => {
   padding: 0 22px 0 0;
   box-sizing: border-box;
   -webkit-app-region: drag;
-}
-.back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--color-font);
-  font-size: 12px;
-  font-weight: 400;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  &:hover { background: var(--control-hover); }
-  &:focus-visible { outline: 2px solid var(--control-outline); outline-offset: 2px; }
-  svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 }
 .heading { flex: auto; min-width: 0; font-size: 11px; opacity: .4; text-align: center; padding-right: 54px; letter-spacing: 1px; }
 .body {
