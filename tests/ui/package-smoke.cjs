@@ -81,6 +81,7 @@ async function run() {
       return false
     }
     check('packaged renderer initializes', await until(`!!window.rainData?.updateSetting && !!document.querySelector('[data-favorite-btn]')`))
+    await require('./dismiss-audio-notice.cjs')(evaluate)
     await evaluate(`location.hash='#/setting';true`)
     check('packaged settings contain all seven continuous sections', await until(`document.querySelectorAll('[data-settings-section]').length === 7`))
     check('empty packaged player hides the timeline', await evaluate(`!document.querySelector('[data-footer-progress],[data-footer-time]')`))

@@ -22,6 +22,7 @@ app.on('browser-window-created', (_, win) => {
     const until = async code => { for (let i = 0; i < 40; i++) { if (await evaluate(code)) return true; await wait(50) } return false }
     try {
       await initialized; await wait(300)
+      await require('./dismiss-audio-notice.cjs')(evaluate)
       win.webContents.debugger.attach('1.3')
       await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
       await evaluate(`window.findVue=function find(v,p){if(!v)return;if(v.component&&p(v.component))return v.component;const s=find(v.component?.subTree,p);if(s)return s;for(const child of Array.isArray(v.children)?v.children:[]){const c=find(child,p);if(c)return c;}};window.qaIPC=require('electron').ipcRenderer;void 0`)

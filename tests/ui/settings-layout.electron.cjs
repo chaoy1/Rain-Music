@@ -24,6 +24,7 @@ app.on('browser-window-created', (_, win) => {
     }
     try {
       await initialized
+      await require('./dismiss-audio-notice.cjs')(evaluate)
       await evaluate(`location.hash='#/setting';void 0`); await wait(450)
       check('all settings are available in one continuous page', await evaluate(`['basic','play','desktop_lyric','download','hot_key','backup','other'].every(id=>!!document.getElementById(id))`))
       if (!await evaluate(`!!document.querySelector('[data-settings-scroll]')`)) throw new Error('Settings still swap one category at a time')

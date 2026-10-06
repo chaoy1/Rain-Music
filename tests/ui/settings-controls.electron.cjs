@@ -28,6 +28,10 @@ app.on('browser-window-created', (_, win) => {
     const until = async code => { for (let i = 0; i < 50; i++) { if (await evaluate(code)) return true; await wait(50) } return false }
     try {
       await initialized
+      if (process.env.RAIN_TEST_EMPTY_AUDIO === '1') {
+        await evaluate(`navigator.mediaDevices.enumerateDevices=async()=>[];navigator.mediaDevices.dispatchEvent(new Event('devicechange'));void 0`)
+      }
+      await require('./dismiss-audio-notice.cjs')(evaluate)
       await evaluate(`location.hash='#/setting';void 0`); await wait(450)
       check('window labels ascend from small to extra large without renumbering', await evaluate(`(()=>{const opts=[...document.querySelector('#setting_window_size').options];return opts.map(o=>o.textContent.trim()).join(',')==='小,中,大,超大'&&opts.map(o=>o.value).join(',')==='2,3,4,5'})()`))
       check('fixed favorite playlist setting is removed', await evaluate(`!document.querySelector('#play_favorite_list')&&!document.querySelector('[data-settings-scroll]').textContent.includes('红心歌单')`))
@@ -52,7 +56,7 @@ app.on('browser-window-created', (_, win) => {
       check('opening the picker does not add the song implicitly', await evaluate(`(async()=>!(await qaIPC.invoke('player_list_music_check_exist',{listId:'qa-choice-one',musicInfoId:qaSong.id})))()`))
       await screenshot('playlist-picker-dark')
       await evaluate(`[...document.querySelectorAll('#root button')].find(b=>b.textContent.trim()==='通勤').click();void 0`)
-      check('selecting a playlist persists the song and fills the heart', await until(`(async()=>{const ids=await qaIPC.invoke('player_list_music_get_list_ids',qaSong.id);return ids.includes('qa-choice-one')&&!document.querySelector('#root.show-modal')&&document.querySelector('#player [data-favorite-btn]').getAttribute('aria-pressed')==='true'})()`), await evaluate(`(async()=>({ids:await qaIPC.invoke('player_list_music_get_list_ids',qaSong.id),root:document.querySelector('#root').className,heart:document.querySelector('#player [data-favorite-btn]').getAttribute('aria-pressed'),openModals:[...document.querySelectorAll('#root > div')].filter(e=>e.querySelector('h2')).map(e=>({text:e.textContent.slice(0,160),visible:getComputedStyle(e).display,html:e.outerHTML.slice(0,250)}))}))()`))
+      check('selecting a playlist persists the song and fills the heart', await until(`(async()=>{const ids=await qaIPC.invoke('player_list_music_get_list_ids',qaSong.id);return ids.includes('qa-choice-one')&&!document.querySelector('#root.show-modal')&&document.querySelector('#player [data-favorite-btn]').getAttribute('aria-pressed')==='true'})()`), await evaluate(`(async()=>({ids:await qaIPC.invoke('player_list_music_get_list_ids',qaSong.id),root:document.querySelector('#root').className,heart:document.querySelector('#player [data-favorite-btn]').getAttribute('aria-pressed'),openModals:[...document.querySelectorAll('#root > div')].filter(e=>e.querySelector('main')).map(e=>({text:e.textContent.slice(0,200),visible:getComputedStyle(e).display}))}))()`))
       await evaluate(`document.querySelector('#player [data-favorite-btn]').click();void 0`); await wait(200)
       check('subsequent favorite clicks reopen the picker and preserve existing songs', await evaluate(`(async()=>{const ids=await qaIPC.invoke('player_list_music_get_list_ids',qaSong.id);return !!document.querySelector('#root.show-modal')&&ids.includes('qa-choice-one')&&[...document.querySelectorAll('#root button')].find(b=>b.textContent.trim()==='通勤')?.disabled})()`))
       await evaluate(`[...document.querySelectorAll('#root button')].find(b=>b.textContent.trim()==='夜晚').click();void 0`)
