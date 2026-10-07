@@ -125,6 +125,16 @@ export const electronConfigFiles: IFileAdapter = {
  * 本文件（桌面）保持 Node `fs` 语义，Android 版本见 `android.ts`。
  */
 export const electronThemeFiles: IThemeFileAdapter = {
+  /**
+   * 桌面：**identity**。
+   *
+   * 渲染层拿到这个值后，因为 `isUrl()`（`src/common/utils/common.ts:75`，只认 `http(s)://`）
+   * 判定它不是 URL，会**继续走改动前那一行** `encodePath(joinPath(dataPath, name))`。
+   * 因此桌面端 `--background-image` 的 CSS 输出逐字不变（阶段 3 / 线 C 的硬约束）。
+   */
+  toUrlBase(absPath) {
+    return absPath
+  },
   async exists(absPath) {
     return fs.existsSync(absPath)
   },

@@ -28,6 +28,11 @@ const settingUtils = () => load('src/main/utils/index.ts', {
   '@common/defaultSetting': { version: '2.12.8', 'common.fontSize': 16, 'theme.id': 'auto' },
   '@common/defaultHotKey': {}, './migrate': {},
   electron: {}, '@common/utils/nodejs': {}, '@common/theme/index.json': [],
+  // 阶段 3 / 线 C 新增的两个依赖：只服务主题图片的 URL 拼接与文件操作，
+  // 与本文件断言的「设置合并」无关。`load-ts.cjs` 只拦截被加载文件的顶层 require，
+  // 因此这两个必须显式注入（同 `./migrate`）。
+  '@common/utils/themeImageUrl': { buildThemeImageCssUrl: () => '' },
+  './themeImages': { getThemeImagesDir: () => '', getThemeImagesUrlBase: () => '' },
 }, { envParams: { cmdParams: { hidden: true } } })
 
 test('startup merges stored settings over the defaults', () => {

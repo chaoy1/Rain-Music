@@ -133,6 +133,12 @@ const modules = {
     get_themes: 'get_themes',
     save_theme: 'save_theme',
     remove_theme: 'remove_theme',
+    // 阶段 3 / 线 C：主题图片的文件操作从渲染层收敛到主进程
+    // （渲染层 `src/renderer/platform/themeFiles.js` → 主进程 `src/main/utils/themeImages.ts`）
+    theme_file_import: 'theme_file_import',
+    theme_file_copy: 'theme_file_copy',
+    theme_file_move: 'theme_file_move',
+    theme_file_remove: 'theme_file_remove',
 
     download_list_get: 'download_list_get',
     download_list_add: 'download_list_add',

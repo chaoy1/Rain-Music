@@ -118,3 +118,13 @@
 5. **验收产物**：一张「端点 × 请求方式 × 成败 × 错误码」表，据此定 `AndroidManifest.xml` / `network_security_config.xml` 的最终配置。
 
 > 这一步**不需要**先改渲染层网络代码：第 1–3 条可以在最小 Capacitor 工程（或本工程的 `dist-web` 空壳页）里用一次性脚本完成，属于纯真机行为验证。
+
+> 📄 **本节已落地成可照做清单**（Android 移植 · 阶段 3 / 线 B）：
+> **`docs/android/cleartext-verification.md`** —— 里有完整的前置条件、`npx cap` 步骤、
+> 7 个 `http://` 端点 × 4 种请求方式的矩阵脚本（可直接粘进 `chrome://inspect` 控制台）、
+> 三种失败（明文策略 / 混合内容 / CORS）的**错误指纹表**、
+> 头透传探针（验 `User-Agent` / `Referer` / `Cookie` 到底有没有到服务端）、
+> 白名单式 `network_security_config.xml` 的**完整内容**、以及 §5.2 那 28 处 URL 的**逐文件/逐 host 复核表**。
+> 同时纠正了本文 §5.1 引用的一条上游结论：Capacitor 8 的 `server.androidScheme` 默认是 **`https`**，
+> 页面 origin 是 `https://localhost`，所以 `http://` 子请求**也会**撞混合内容拦截
+> （上游 `native-bridge-needs.md` §2.6.4 末段的"不构成混合内容拦截"已同步标注纠正）。

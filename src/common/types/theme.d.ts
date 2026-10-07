@@ -301,6 +301,15 @@ declare namespace Rain {
     themes: Rain.Theme[]
     userThemes: Rain.Theme[]
     dataPath: string
+    /**
+     * 阶段 3 / 线 C：渲染层能直接加载的 URL 基址（主进程 `getAllThemes()` 返回）。
+     *
+     * - 桌面 = `dataPath`（identity，`electronThemeFiles.toUrlBase`）；
+     * - Android = `Capacitor.convertFileSrc(dataPath)`（`androidThemeFiles.toUrlBase`，骨架未验证）。
+     *
+     * 可选：老版本主进程/缓存里没有这个字段时，渲染层回退到 `dataPath`。
+     */
+    imageUrlBase?: string
   }
 
   interface ThemeSetting {

@@ -375,6 +375,13 @@ iconv-lite  gbk  bytes   : d6d0cec4b8e8b4ca           (GBK)
 
 **混合内容（mixed content）**：Android 端 Capacitor 默认以 `http://localhost` 提供页面（[Ionic Forum](https://forum.ionicframework.com/t/how-works-cors-in-capasitor-on-real-devices/230474)），源不是 HTTPS，所以 `http://` 子请求**不构成混合内容拦截**；真正的门槛是上面的**明文流量策略**。
 
+> ⚠️ **阶段 3 / 线 B 的纠正（已在真机验证前登记）**：上面这一段的前提**对本仓库的 Capacitor 8.5.2 不成立**。
+> `@capacitor/cli` 的 `declarations.ts` 里 `server.androidScheme` 的默认值是 **`https`**（不是 `http`），
+> 也就是说页面 origin 是 `https://localhost`；此时 `http://` 子请求会**同时**撞上
+> **混合内容**（`android.allowMixedContent` 默认 `false`）与**明文流量策略**两堵墙，两者的报错不同。
+> 这条纠正的证据、以及"怎么把两堵墙分开"的完整真机步骤，见
+> **`docs/android/cleartext-verification.md`**（§1.3 结论纠正 1、§4.4 错误指纹表）。
+
 ---
 
 ### 2.7 `better-sqlite3` 同步 API → Capacitor SQLite 异步 API → ✅ 用插件 + 内部异步化，**不必自写原生桥**

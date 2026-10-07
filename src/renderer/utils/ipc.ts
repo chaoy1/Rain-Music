@@ -464,7 +464,29 @@ export const removeTheme = async(id: string) => {
   return rendererInvoke<string>(WIN_MAIN_RENDERER_EVENT_NAME.remove_theme, id)
 }
 export const getThemes = async() => {
-  return rendererInvoke<{ themes: Rain.Theme[], userThemes: Rain.Theme[], dataPath: string }>(WIN_MAIN_RENDERER_EVENT_NAME.get_themes)
+  return rendererInvoke<{ themes: Rain.Theme[], userThemes: Rain.Theme[], dataPath: string, imageUrlBase?: string }>(WIN_MAIN_RENDERER_EVENT_NAME.get_themes)
+}
+
+/**
+ * 主题图片的文件操作（Android 移植 · 阶段 3 / 线 C）。
+ *
+ * 参数一律是**主题图片目录内的相对名**（`probe_bg.png` / `temp/probe_bg.png`），
+ * 唯一例外是 `importThemeImage` 的 `sourcePath` —— 用户在文件选择器里选中的外部文件路径。
+ * 真实落点由主进程 `src/main/utils/themeImages.ts` 决定，渲染层不需要也不应该知道。
+ *
+ * 调用方：`src/renderer/platform/themeFiles.js`（不要在这些通道之上再造分支）。
+ */
+export const themeFileImport = async(sourcePath: string, toName: string) => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_import, { sourcePath, toName })
+}
+export const themeFileCopy = async(fromName: string, toName: string) => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_copy, { fromName, toName })
+}
+export const themeFileMove = async(fromName: string, toName: string) => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_move, { fromName, toName })
+}
+export const themeFileRemove = async(name: string) => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_remove, { name })
 }
 
 /**

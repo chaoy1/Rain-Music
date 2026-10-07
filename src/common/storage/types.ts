@@ -173,6 +173,20 @@ export interface IFileAdapter {
  * 两者在 Android 上的落点也不同（Preferences vs Filesystem External/Data）。
  */
 export interface IThemeFileAdapter extends IFileAdapter {
+  /**
+   * 把一个**路径**转成渲染层（`<img src>` / CSS `url()`）能直接加载的 URL 基址。
+   *
+   * 阶段 3 / 线 C 新增。存在的理由：桌面渲染层用 `encodePath()`（= `pathToFileURL()`）
+   * 把绝对路径转成 `file:///…`；WebView 里这条路走不通（也拿不到真实路径），
+   * Android 必须用 `Capacitor.convertFileSrc()` 得到 `http://localhost/_capacitor_file_/…`。
+   * 两者都是"把这个目录变成可加载的 URL 基址"，正好是本接口的边界。
+   *
+   * - 桌面（`electron.ts`）：**identity** —— 原样返回，渲染层仍按老代码走
+   *   `encodePath(joinPath(dataPath, name))`，CSS 输出逐字不变（这是硬约束）。
+   * - Android（`adapter.android.ts`）：`Capacitor.convertFileSrc(absPath)`（骨架，未验证）。
+   */
+  toUrlBase: (absPath: string) => string
+
   /** 递归创建目录（对应 `ThemeEditModal/index.vue:389` 的 `createDir`） */
   mkdir: (absPath: string) => Promise<void>
 

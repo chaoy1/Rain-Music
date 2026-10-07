@@ -79,8 +79,11 @@ export default {
       },
     ])
     let dataPath = ''
+    // 阶段 3 / 线 C：主进程新增的可加载 URL 基址（桌面 = dataPath，Android = convertFileSrc URL）
+    let imageUrlBase = ''
     getThemes((info) => {
       dataPath = info.dataPath
+      imageUrlBase = info.imageUrlBase ?? info.dataPath
       presetStyles.splice(0, presetStyles.length, ...presetIds.flatMap(id => {
         const theme = info.themes.find(theme => theme.id == id)
         if (!theme) return []
@@ -99,12 +102,12 @@ export default {
         // Follow system uses a predictable light/dark pair without another setup dialog.
         updateSetting({ 'theme.id': 'auto', 'theme.lightId': 'mono', 'theme.darkId': 'mono_dark' })
         themeId.value = 'auto'
-        applyTheme('auto', 'mono', 'mono_dark', dataPath)
+        applyTheme('auto', 'mono', 'mono_dark', dataPath, imageUrlBase)
         return
       }
       if (themeId.value == theme.id) return
       themeId.value = theme.id
-      applyTheme(theme.id, appSetting['theme.lightId'], appSetting['theme.darkId'], dataPath)
+      applyTheme(theme.id, appSetting['theme.lightId'], appSetting['theme.darkId'], dataPath, imageUrlBase)
       updateSetting({ 'theme.id': theme.id })
     }
 

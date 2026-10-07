@@ -1,4 +1,4 @@
-import { encodePath, isUrl, throttle, isMac } from '@common/utils'
+import { throttle, isMac } from '@common/utils'
 import migrateSetting from '@common/utils/migrateSetting'
 import getStore from '@main/platform/storage/adapter'
 import { STORE_NAMES, URL_SCHEME_RXP } from '@common/constants'
@@ -6,7 +6,8 @@ import defaultSetting from '@common/defaultSetting'
 import defaultHotKey from '@common/defaultHotKey'
 import { migrateDataJson, migrateHotKey, migrateUserApi, parseDataFile } from './migrate'
 import { nativeTheme, powerSaveBlocker } from 'electron'
-import { joinPath } from '@common/utils/nodejs'
+import { buildThemeImageCssUrl } from '@common/utils/themeImageUrl'
+import { getThemeImagesDir, getThemeImagesUrlBase } from './themeImages'
 import builtinThemes from '@common/theme/index.json'
 
 // index.json 由 `npm run build:theme` 生成。
@@ -216,7 +217,20 @@ export const getAllThemes = () => {
   return {
     themes,
     userThemes,
-    dataPath: joinPath(global.rainDataPath, 'theme_images'),
+    dataPath: getThemeImagesDir(),
+    /**
+     * 阶段 3 / 线 C 新增：渲染层可以直接拼出可加载 URL 的基址。
+     *
+     * - **桌面**：`electronThemeFiles.toUrlBase` 是 identity，所以这里与 `dataPath` **逐字相同**，
+     *   且因为 `isUrl()` 不认 Windows 路径，渲染层仍走改动前那一行
+     *   `encodePath(joinPath(dataPath, name))` → `--background-image` 的 CSS 输出逐字不变。
+     * - **Android**：`androidThemeFiles.toUrlBase` = `Capacitor.convertFileSrc(...)`，
+     *   渲染层走新增的 URL 分支（不再 `pathToFileURL()`，避免把 `http://` 拼坏）。
+     *
+     * `dataPath` **原样保留**：它仍然是主题图片的落点，也是渲染层传给
+     * `winMain_theme_file_*` 系列之外一切逻辑的既有字段。
+     */
+    imageUrlBase: getThemeImagesUrlBase(),
   }
 }
 
@@ -262,10 +276,16 @@ export const getTheme = () => {
     if (theme) {
       if (theme.config.extInfo['--background-image'] != 'none') {
         theme = copyTheme(theme)
+        // 阶段 3 / 线 C：改为共用 `@common/utils/themeImageUrl` 的那一份实现。
+        // 桌面下 `imageUrlBase` 与 `dataPath` 逐字相同且不是 URL，所以这里落到
+        // "`url(encodePath(joinPath(dataPath, name)))`" 这一分支 —— 与原式等价（原式也没有
+        // `.replaceAll('\\','/')`，`pathToFileURL()` 自己会归一化分隔符）。
         theme.config.extInfo['--background-image'] =
-          isUrl(theme.config.extInfo['--background-image'])
-            ? `url(${theme.config.extInfo['--background-image']})`
-            : `url(${encodePath(joinPath(global.rainDataPath, 'theme_images', theme.config.extInfo['--background-image']))})`
+          buildThemeImageCssUrl(
+            theme.config.extInfo['--background-image'],
+            getThemeImagesDir(),
+            getThemeImagesUrlBase(),
+          )
       }
     } else {
       themeId = global.rain.appSetting['theme.id'] == 'auto' && shouldUseDarkColors ? 'black' : 'green'

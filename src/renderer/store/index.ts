@@ -64,6 +64,10 @@ export const themeInfo: Rain.ThemeInfo = {
   themes: [],
   userThemes: [],
   dataPath: '',
+  // 阶段 3 / 线 C：主进程 `getAllThemes()` 新增的"可加载 URL 基址"。
+  // 桌面 = dataPath（identity），Android = `Capacitor.convertFileSrc(...)`；
+  // 在 `getThemes()` 的 IPC 回来之前保持空串，渲染层因此走旧的 dataPath 分支。
+  imageUrlBase: '',
 }
 
 /**

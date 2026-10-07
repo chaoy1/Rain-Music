@@ -231,17 +231,37 @@ export const androidConfigFiles: IFileAdapter = {
  * 真正拷图/删图的是**渲染层**（`ThemeEditModal/index.vue:126,386-390,437,443,479,497,501`），
  * 因为它有 `nodeIntegration`。
  *
- * Android 上渲染层没有 `fs`，所以这批操作必须挪到主进程/桥接层，即本对象。
- * 另外 **路径本身也必须换**：桌面返回的是绝对路径 + `encodePath()`，
- * Android 必须返回 `Capacitor.convertFileSrc()` 能吃的 URL，否则 `<img>` / CSS `url()` 加载不出来。
+ * Android 上渲染层没有 `fs`，所以这批操作必须挪到主进程/桥接层，即本对象 —— 阶段 3 / 线 C 已经做完：
  *
- * ⚠️ 与契约的差异（需要在阶段 3 决定）：`winMain_get_themes` 的返回结构里
- * `dataPath` 是一个**字符串**。Android 若把它换成 `file://` URL，渲染层
- * `src/renderer/store/utils.ts:18-22` 的 `buildBgUrl()` 会把 URL 再拼一次
- * （`joinPath(dataPath, originUrl)`），会拼坏。**这是一个必须改渲染层的点**
- * ——按本任务"不擅自扩大范围"的要求，这里只登记，不改渲染层。
+ * 1. 渲染层的文件操作已全部改走 `src/renderer/platform/themeFiles.js` → IPC
+ *    `winMain_theme_file_import / _copy / _move / _remove` → `src/main/utils/themeImages.ts`
+ *    → **本对象**（桌面同一个入口走到 `electron.ts` 的 `electronThemeFiles`）。
+ *    渲染层不再 `import '@common/utils/nodejs'`，`node:fs` 从 `ThemeEditModal` 的依赖里消失。
+ * 2. `dataPath` **保持原样不动**（仍是 `joinPath(global.rainDataPath, 'theme_images')`），
+ *    新增 `imageUrlBase` 字段承载"能加载的 URL 基址"，见 `toUrlBase()` 与
+ *    `src/main/utils/index.ts` 的 `getAllThemes()`。渲染层优先用 `imageUrlBase`，
+ *    因此 Android 把 `toUrlBase()` 实现成 `convertFileSrc()` 即可绕开"绝对路径 WebView 加载不了"
+ *    与"`buildBgUrl()` 二次拼接"这两个问题，桌面端则完全不受影响。
  */
 export const androidThemeFiles: IThemeFileAdapter = {
+  /**
+   * 阶段 3：
+   *
+   * ```ts
+   * import { Capacitor } from '@capacitor/core'
+   * toUrlBase: absPath => Capacitor.convertFileSrc(absPath)
+   * ```
+   *
+   * 返回形如 `http://localhost/_capacitor_file_/data/user/0/<app>/files/theme_images` 的地址。
+   * 渲染层 `src/renderer/platform/themeFiles.js` 的 `isUrl()` 判定为 true 后走 URL 分支，
+   * **不再**对它调用 `pathToFileURL()`（那会把 `http:` 拼坏）。
+   *
+   * ⚠️ 未验证：`convertFileSrc` 对目录（而非具体文件）的返回值是否可以安全地再拼文件名，
+   * 以及 WebView 能否加载该 URL —— 本机无 Android 环境，必须真机确认。
+   */
+  toUrlBase(absPath) {
+    throw new Error(`[android storage] androidThemeFiles.toUrlBase 未实现（${absPath}）`)
+  },
   async exists(absPath) {
     throw new Error(`[android storage] androidThemeFiles.exists 未实现（${absPath}）`)
   },
@@ -298,3 +318,11 @@ const getStore = createGetStore(androidStoreAdapter, {
 export default getStore
 export type { Store }
 export { getStore }
+
+/**
+ * 与 `adapter.ts` **同名**的中性导出（阶段 3 / 线 C）。
+ *
+ * `src/main/utils/themeImages.ts` 只 import `themeFiles` 这个名字；构建期把
+ * `@main/platform/storage/adapter` 换成本文件后，类型检查才能立刻发现导出面不一致。
+ */
+export { androidThemeFiles as themeFiles }

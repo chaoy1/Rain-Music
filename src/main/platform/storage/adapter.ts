@@ -50,3 +50,12 @@
 
 export { default, getStore, type Store } from './electron'
 export { electronStoreAdapter, electronConfigFiles, electronThemeFiles } from './electron'
+
+/**
+ * 与平台无关的名字（阶段 3 / 线 C 新增）。
+ *
+ * 业务层（`src/main/utils/themeImages.ts`）只会 import 这个中性名，于是
+ * `adapter.android.ts` **必须**导出同名成员，构建期换 alias 后类型检查立刻能指出缺口。
+ * 之前只有 `electron*` / `android*` 两套不同名导出，alias 一换就会 "no exported member"。
+ */
+export { electronThemeFiles as themeFiles } from './electron'

@@ -123,10 +123,10 @@
 </template>
 
 <script>
-import { joinPath, extname, copyFile, checkPath, createDir, removeFile, moveFile, basename } from '@common/utils/nodejs'
 import { nextTick, ref, watch } from '@common/utils/vueTools'
 import { applyTheme, buildThemeColors, getThemes, copyTheme } from '@renderer/store/utils'
-import { isUrl, encodePath } from '@common/utils/common'
+import { themeFiles } from '@renderer/platform/themeFiles'
+import { isUrl } from '@common/utils/common'
 // import { appSetting, updateSetting } from '@renderer/store/setting'
 // import { applyTheme, getThemes } from '@renderer/store/utils'
 import { createThemeColors } from '@common/theme/utils'
@@ -168,7 +168,17 @@ export default {
     const bgImg = ref('')
     let bgImgRaw = ''
     let originBgName = ''
-    let currentBgPath = ''
+    /**
+     * 当前“临时背景”在主题图片目录里的**相对名**（`temp/<文件名>`）。
+     *
+     * 阶段 3 / 线 C 的语义变更：改动前这里是绝对路径（`currentBgPath`），因为文件操作在渲染层
+     * 直接走 `node:fs`。现在文件操作全部由主进程代劳（`themeFiles.*`），渲染层只需要相对名，
+     * 于是它同时也是 Android 上唯一说得通的表示法。
+     *
+     * ⚠️ 保存/另存为之后**不要**把它改成最终文件名：`watch(modelValue)` 的收尾逻辑会
+     * `removeImage(currentBgName)`，若指向最终文件就会把刚保存的主题图删掉（改动前同理）。
+     */
+    let currentBgName = ''
 
     let theme
 
@@ -180,7 +190,7 @@ export default {
 
     const createPreview = () => {
       if (!preview.value) return
-      window.setTheme(buildThemeColors(theme, themeInfo.dataPath))
+      window.setTheme(buildThemeColors(theme, themeInfo.dataPath, themeInfo.imageUrlBase))
     }
 
     // '--color-app-background': string
@@ -251,16 +261,16 @@ export default {
       themeName.value = theme.name
       isDark.value = theme.isDark
       isDarkFont.value = theme.isDarkFont ?? false
-      currentBgPath = ''
+      currentBgName = ''
       if (theme.config.extInfo['--background-image'] == 'none') {
         bgImg.value = ''
         bgImgRaw = ''
         originBgName = ''
       } else {
-        bgImgRaw = isUrl(theme.config.extInfo['--background-image'])
-          ? theme.config.extInfo['--background-image']
-          : joinPath(themeInfo.dataPath, theme.config.extInfo['--background-image'])
-        bgImg.value = encodePath(bgImgRaw)
+        // `bgImgRaw` 的语义已从「绝对路径」改为「主题图片目录内的相对名 / 外链 URL」，
+        // 桌面渲染出的 <img src> 与改动前逐字相同（见 themeFiles.imageSrc）。
+        bgImgRaw = theme.config.extInfo['--background-image']
+        bgImg.value = themeFiles.imageSrc(bgImgRaw, themeInfo.dataPath, themeInfo.imageUrlBase)
         originBgName = theme.config.extInfo['--background-image']
       }
       appBgColorOrigin = theme.config.extInfo['--color-app-background']
@@ -360,8 +370,8 @@ export default {
             initColors(theme)
           } else {
             destroyColors()
-            // 移除临时保存的背景
-            if (currentBgPath) removeFile(currentBgPath).catch(_ => _)
+            // 移除临时保存的背景（相对名 → 主进程解析成 `<theme_images>/temp/...`）
+            if (currentBgName) themeFiles.removeImage(currentBgName).catch(_ => _)
           }
         })
       })
@@ -383,21 +393,22 @@ export default {
       })
       if (result.canceled) return
       const path = result.filePaths[0]
-      const fileName = `${theme.id}_${Date.now()}${extname(path)}`
-      const tempDir = joinPath(themeInfo.dataPath, 'temp')
-      const bgPath = joinPath(tempDir, fileName)
-      if (!await checkPath(tempDir)) await createDir(tempDir)
-      await copyFile(path, bgPath)
-      currentBgPath = bgImgRaw = bgPath
-      bgImg.value = encodePath(bgImgRaw)
-      theme.config.extInfo['--background-image'] = 'temp/' + fileName
+      const fileName = `${theme.id}_${Date.now()}${themeFiles.extname(path)}`
+      // 与改动前逐字相同的落点：`<theme_images>/temp/<fileName>`（相对名 'temp/<fileName>'）
+      const relativeName = 'temp/' + fileName
+      // 改动前是渲染层的 `checkPath(tempDir)` + `createDir(tempDir)` + `copyFile(path, bgPath)`，
+      // 三步都在主进程侧一次完成（`src/main/utils/themeImages.ts: importThemeImage`）。
+      await themeFiles.importImage(path, relativeName)
+      currentBgName = bgImgRaw = relativeName
+      bgImg.value = themeFiles.imageSrc(bgImgRaw, themeInfo.dataPath, themeInfo.imageUrlBase)
+      theme.config.extInfo['--background-image'] = relativeName
 
       createPreview()
     }
     const removeBgImg = async() => {
-      if (currentBgPath) {
-        void removeFile(currentBgPath)
-        currentBgPath = ''
+      if (currentBgName) {
+        void themeFiles.removeImage(currentBgName)
+        currentBgName = ''
       }
       bgImg.value = ''
       bgImgRaw = ''
@@ -420,7 +431,7 @@ export default {
       if (val) {
         createPreview()
       } else {
-        applyTheme(appSetting['theme.id'], appSetting['theme.lightId'], appSetting['theme.darkId'], themeInfo.dataPath)
+        applyTheme(appSetting['theme.id'], appSetting['theme.lightId'], appSetting['theme.darkId'], themeInfo.dataPath, themeInfo.imageUrlBase)
       }
     }
     const handleCancel = () => {
@@ -432,15 +443,15 @@ export default {
       if (!themeName.value) return
       theme.name = themeName.value.substring(0, 20)
       // 保存新背景
-      if (currentBgPath && !isUrl(currentBgPath)) {
-        const name = basename(currentBgPath)
-        await moveFile(currentBgPath, joinPath(themeInfo.dataPath, name))
+      if (currentBgName && !isUrl(currentBgName)) {
+        const name = themeFiles.basename(currentBgName)
+        await themeFiles.moveImage(currentBgName, name)
         theme.config.extInfo['--background-image'] = name
       }
       // 移除旧背景
       if (originBgName &&
         theme.config.extInfo['--background-image'] != originBgName &&
-        !isUrl(theme.config.extInfo['--background-image'])) void removeFile(joinPath(themeInfo.dataPath, originBgName))
+        !isUrl(theme.config.extInfo['--background-image'])) void themeFiles.removeImage(originBgName)
       if (props.themeId) {
         const index = themeInfo.userThemes.findIndex(t => t.id == theme.id)
         if (index > -1) themeInfo.userThemes.splice(index, 1, theme)
@@ -476,7 +487,7 @@ export default {
         }
       }
       if (isRequireUpdateSetting) updateSetting(newSetting)
-      if (originBgName) void removeFile(joinPath(themeInfo.dataPath, originBgName))
+      if (originBgName) void themeFiles.removeImage(originBgName)
       await removeTheme(props.themeId)
       const index = themeInfo.userThemes.findIndex(t => t.id == theme.id)
       console.log(index)
@@ -491,14 +502,14 @@ export default {
       theme.name = themeName.value.substring(0, 20)
       theme.id = 'user_theme_' + Date.now()
       // 保存新背景
-      if (!isUrl(currentBgPath)) {
-        if (currentBgPath) {
-          const name = basename(currentBgPath)
-          await moveFile(currentBgPath, joinPath(themeInfo.dataPath, name))
+      if (!isUrl(currentBgName)) {
+        if (currentBgName) {
+          const name = themeFiles.basename(currentBgName)
+          await themeFiles.moveImage(currentBgName, name)
           theme.config.extInfo['--background-image'] = name
         } else if (bgImgRaw) {
-          const fileName = `${theme.id}_${Date.now()}${extname(bgImgRaw)}`
-          await copyFile(bgImgRaw, joinPath(themeInfo.dataPath, fileName))
+          const fileName = `${theme.id}_${Date.now()}${themeFiles.extname(bgImgRaw)}`
+          await themeFiles.copyImage(bgImgRaw, fileName)
           theme.config.extInfo['--background-image'] = fileName
         }
       }

@@ -25,6 +25,7 @@ import {
 } from '@main/modules/winMain'
 import { quitApp } from '@main/app'
 import { getAllThemes, removeTheme, saveTheme, setPowerSaveBlocker } from '@main/utils'
+import { copyThemeImage, importThemeImage, moveThemeImage, removeThemeImage } from '@main/utils/themeImages'
 import { openDirInExplorer } from '@common/utils/electron'
 
 export default () => {
@@ -131,6 +132,23 @@ export default () => {
   })
   mainHandle<string>(WIN_MAIN_RENDERER_EVENT_NAME.remove_theme, async({ params: id }) => {
     removeTheme(id)
+  })
+
+  // 主题图片的文件操作（阶段 3 / 线 C）。
+  // 渲染层 `src/renderer/platform/themeFiles.js` 只传**主题目录内的相对名**，
+  // 真实落点由 `@main/utils/themeImages` 决定（桌面 = `<RainDatas>/theme_images`）。
+  // 这 4 条通道取代了渲染层原先直接调用的 `node:fs`（`copyFile` / `moveFile` / `removeFile` / `createDir`）。
+  mainHandle<{ sourcePath: string, toName: string }>(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_import, async({ params }) => {
+    await importThemeImage(params.sourcePath, params.toName)
+  })
+  mainHandle<{ fromName: string, toName: string }>(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_copy, async({ params }) => {
+    await copyThemeImage(params.fromName, params.toName)
+  })
+  mainHandle<{ fromName: string, toName: string }>(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_move, async({ params }) => {
+    await moveThemeImage(params.fromName, params.toName)
+  })
+  mainHandle<{ name: string }>(WIN_MAIN_RENDERER_EVENT_NAME.theme_file_remove, async({ params }) => {
+    await removeThemeImage(params.name)
   })
 }
 

@@ -57,6 +57,8 @@ export default {
       themeDarks: [],
     })
     let dataPath = ''
+    // 阶段 3 / 线 C：主进程新增的可加载 URL 基址（桌面 = dataPath，Android = convertFileSrc URL）
+    let imageUrlBase = ''
 
     watch(() => props.modelValue, (val) => {
       if (!val) return
@@ -70,6 +72,7 @@ export default {
           return false
         })
         dataPath = info.dataPath
+        imageUrlBase = info.imageUrlBase ?? info.dataPath
         themeInfo.themeLights = lights.map(t => {
           return {
             id: t.id,
@@ -80,7 +83,7 @@ export default {
               '--background-image-theme': t.isCustom
                 ? t.config.extInfo['--background-image'] == 'none'
                   ? 'none'
-                  : buildBgUrl(t.config.extInfo['--background-image'], info.dataPath)
+                  : buildBgUrl(t.config.extInfo['--background-image'], info.dataPath, info.imageUrlBase)
                 : t.config.extInfo['--background-image'],
             },
           }
@@ -95,7 +98,7 @@ export default {
               '--background-image-theme': t.isCustom
                 ? t.config.extInfo['--background-image'] == 'none'
                   ? 'none'
-                  : buildBgUrl(t.config.extInfo['--background-image'], info.dataPath)
+                  : buildBgUrl(t.config.extInfo['--background-image'], info.dataPath, info.imageUrlBase)
                 : t.config.extInfo['--background-image'],
             },
           }
@@ -106,12 +109,12 @@ export default {
     const setLightId = (id) => {
       if (appSetting['theme.lightId'] == id) return
       updateSetting({ 'theme.lightId': id })
-      if (appSetting['theme.id'] == 'auto') applyTheme('auto', id, appSetting['theme.darkId'], dataPath)
+      if (appSetting['theme.id'] == 'auto') applyTheme('auto', id, appSetting['theme.darkId'], dataPath, imageUrlBase)
     }
     const setDarkId = (id) => {
       if (appSetting['theme.darkId'] == id) return
       updateSetting({ 'theme.darkId': id })
-      if (appSetting['theme.id'] == 'auto') applyTheme('auto', appSetting['theme.lightId'], id, dataPath)
+      if (appSetting['theme.id'] == 'auto') applyTheme('auto', appSetting['theme.lightId'], id, dataPath, imageUrlBase)
     }
     return {
       appSetting,
