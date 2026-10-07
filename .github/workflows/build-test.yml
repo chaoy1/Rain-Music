@@ -21,10 +21,77 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
-      - run: npm run test:ui
+
+      # UI suites run as separate steps so a failure names the culprit.
+      # continue-on-error keeps the rest running and builds a full matrix.
+      - id: ui-settings-controls
+        name: UI / settings controls
+        continue-on-error: true
+        run: npm run test:settings-controls
+      - id: ui-settings-layout
+        name: UI / settings layout
+        continue-on-error: true
+        run: npm run test:settings-layout
+      - id: ui-player
+        name: UI / player
+        continue-on-error: true
+        run: npm run test:player
+      - id: ui-compact-lyrics
+        name: UI / compact lyrics
+        continue-on-error: true
+        run: npm run test:compact-lyrics
+      - id: ui-lyric-security
+        name: UI / lyric security
+        continue-on-error: true
+        run: npm run test:lyric-security
+      - id: ui-responsive-layout
+        name: UI / responsive layout
+        continue-on-error: true
+        run: npm run test:responsive-layout
+
+      - name: UI matrix
+        if: always()
+        shell: pwsh
+        run: |
+          $rows = [ordered]@{
+            'settings-controls' = '${{ steps.ui-settings-controls.outcome }}'
+            'settings-layout'   = '${{ steps.ui-settings-layout.outcome }}'
+            'player'            = '${{ steps.ui-player.outcome }}'
+            'compact-lyrics'    = '${{ steps.ui-compact-lyrics.outcome }}'
+            'lyric-security'    = '${{ steps.ui-lyric-security.outcome }}'
+            'responsive-layout' = '${{ steps.ui-responsive-layout.outcome }}'
+          }
+          New-Item -ItemType Directory -Force -Path .design | Out-Null
+          $lines = $rows.GetEnumerator() | ForEach-Object { "{0,-20} {1}" -f $_.Key, $_.Value }
+          $lines | ForEach-Object { Write-Host $_ }
+          $lines | Set-Content -Path .design/ui-matrix.txt -Encoding UTF8
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: verification-results
-          path: .design/**/results.json
+          path: |
+            .design/**/results.json
+            .design/ui-matrix.txt
+            .design/**/*.log
           include-hidden-files: true
+
+      - name: fail if any UI suite failed
+        if: always()
+        shell: pwsh
+        run: |
+          $outcomes = @(
+            '${{ steps.ui-settings-controls.outcome }}'
+            '${{ steps.ui-settings-layout.outcome }}'
+            '${{ steps.ui-player.outcome }}'
+            '${{ steps.ui-compact-lyrics.outcome }}'
+            '${{ steps.ui-lyric-security.outcome }}'
+            '${{ steps.ui-responsive-layout.outcome }}'
+          )
+          $bad = $outcomes | Where-Object { $_ -ne 'success' }
+          if ($bad.Count -gt 0) {
+            Write-Host "failed UI suites: $($bad -join ', ')"
+            exit 1
+          }
+          Write-Host 'all UI suites passed'
