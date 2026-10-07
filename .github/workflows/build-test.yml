@@ -94,8 +94,11 @@ jobs:
           $bad = $rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key }
           $all = ($rows.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
           Write-Host "result: $all"
+          # Emit workflow commands so the matrix also lands in check annotations,
+          # which are readable without a token.
+          Write-Host "::error title=UI matrix::$all"
           if ($bad) {
-            Write-Error "failing UI suites: $($bad -join ', ')"
+            Write-Host "::error title=Failing UI suites::$($bad -join ', ')"
             exit 1
           }
           Write-Host 'all UI suites passed'
