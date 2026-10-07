@@ -24,27 +24,27 @@ jobs:
 
       # UI suites run as separate steps so a failure names the culprit.
       # continue-on-error keeps the rest running and builds a full matrix.
-      - id: ui-settings-controls
+      - id: ui_settings_controls
         name: UI / settings controls
         continue-on-error: true
         run: npm run test:settings-controls
-      - id: ui-settings-layout
+      - id: ui_settings_layout
         name: UI / settings layout
         continue-on-error: true
         run: npm run test:settings-layout
-      - id: ui-player
+      - id: ui_player
         name: UI / player
         continue-on-error: true
         run: npm run test:player
-      - id: ui-compact-lyrics
+      - id: ui_compact_lyrics
         name: UI / compact lyrics
         continue-on-error: true
         run: npm run test:compact-lyrics
-      - id: ui-lyric-security
+      - id: ui_lyric_security
         name: UI / lyric security
         continue-on-error: true
         run: npm run test:lyric-security
-      - id: ui-responsive-layout
+      - id: ui_responsive_layout
         name: UI / responsive layout
         continue-on-error: true
         run: npm run test:responsive-layout
@@ -54,12 +54,12 @@ jobs:
         shell: pwsh
         run: |
           $rows = [ordered]@{
-            'settings-controls' = '${{ steps.ui-settings-controls.outcome }}'
-            'settings-layout'   = '${{ steps.ui-settings-layout.outcome }}'
-            'player'            = '${{ steps.ui-player.outcome }}'
-            'compact-lyrics'    = '${{ steps.ui-compact-lyrics.outcome }}'
-            'lyric-security'    = '${{ steps.ui-lyric-security.outcome }}'
-            'responsive-layout' = '${{ steps.ui-responsive-layout.outcome }}'
+            'settings-controls' = '${{ steps.ui_settings_controls.outcome }}'
+            'settings-layout'   = '${{ steps.ui_settings_layout.outcome }}'
+            'player'            = '${{ steps.ui_player.outcome }}'
+            'compact-lyrics'    = '${{ steps.ui_compact_lyrics.outcome }}'
+            'lyric-security'    = '${{ steps.ui_lyric_security.outcome }}'
+            'responsive-layout' = '${{ steps.ui_responsive_layout.outcome }}'
           }
           New-Item -ItemType Directory -Force -Path .design | Out-Null
           $lines = $rows.GetEnumerator() | ForEach-Object { "{0,-20} {1}" -f $_.Key, $_.Value }
@@ -84,12 +84,12 @@ jobs:
           # steps.<id>.outcome is the result BEFORE continue-on-error is applied,
           # so it is the real signal (conclusion is masked to 'success').
           $rows = [ordered]@{
-            'settings-controls' = '${{ steps.ui-settings-controls.outcome }}'
-            'settings-layout'   = '${{ steps.ui-settings-layout.outcome }}'
-            'player'            = '${{ steps.ui-player.outcome }}'
-            'compact-lyrics'    = '${{ steps.ui-compact-lyrics.outcome }}'
-            'lyric-security'    = '${{ steps.ui-lyric-security.outcome }}'
-            'responsive-layout' = '${{ steps.ui-responsive-layout.outcome }}'
+            'settings-controls' = '${{ steps.ui_settings_controls.outcome }}'
+            'settings-layout'   = '${{ steps.ui_settings_layout.outcome }}'
+            'player'            = '${{ steps.ui_player.outcome }}'
+            'compact-lyrics'    = '${{ steps.ui_compact_lyrics.outcome }}'
+            'lyric-security'    = '${{ steps.ui_lyric_security.outcome }}'
+            'responsive-layout' = '${{ steps.ui_responsive_layout.outcome }}'
           }
           $bad = $rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key }
           $all = ($rows.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
