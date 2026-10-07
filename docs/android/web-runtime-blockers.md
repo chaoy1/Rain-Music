@@ -129,7 +129,19 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | **难度** | 大 |
 | **为什么严重** | `registerEvents()` 是 `main.ts` **顶层 import 即执行**的（`src/renderer/main.ts:6`）。它在渲染进程启动阶段**同步抛错**，于是 `main.ts` 的模块求值中断，`getSetting().then(...)` 与 `app.mount('#root')` **一行都跑不到** ⇒ 页面依旧全白 |
 | **需要什么才能过** | Android 侧至少要有两条通道：`winMain_get_hot_key`（请求/应答）与 `winMain_set_hot_key_config` / `winMain_key_down` / `winMain_focus`（订阅）。快捷键本身在 Android 首版属于"桌面专有"，可以降级为空实现，但**必须先有桥** |
-| **状态** | **未修**（(A) 类，本轮不动） |
+| **状态** | **已修**（阶段 3 / 线 E-2；见 §4.4。注意：修掉它之后**并没有**挂载成功 —— 挡住挂载的是另一件事，见 #7） |
+
+### 阻塞点 #7 —— `getSetting()` 的 rejection 没有人接，`app.mount('#root')` 仍在 `.then` 里
+
+| 列 | 内容 |
+| --- | --- |
+| **具体错误** | `Unhandled (in promise) Error: Rain Music Android: 渲染层 IPC 桥（src/common/platform/ipcBridge/web.js）尚未实现。…被调用的通道：invoke("common_get_app_setting")`。**这是修完 #3 之后渲染层里唯一的一条错误/未处理 rejection**（`window.onerror` 0 条、`console.error` 0 条） |
+| **触发源码位置** | `src/renderer/main.ts:42` 的 `void getSetting().then(setting => { … app.mount('#root') /* :89 */ })` —— `getSetting()`（`src/renderer/utils/ipc.ts:13` → `common_get_app_setting`）**没有 `.catch`，也没有 `else` 分支** |
+| **归类** | **(A) 必须重写**（通道本身；`docs/android/ipc-contract.md` §4.1「设置 / 环境 / 初始化握手」，`common_get_app_setting` 在其中） |
+| **难度** | 中（**接线**）+ 大（真正的原生桥） |
+| **为什么它比 #3 更隐蔽** | #3 是"同步抛错打断模块求值"，改成逐条容错就过去了；这一条是"**挂载依赖的数据拿不到**"—— Promise 正常 reject，`main.ts` 的模块求值**没有中断**（`registerEvents` 之后的 import 与顶层代码全都跑完了），但 `.then` 回调永远不执行 ⇒ `app.mount()` 永远不执行 ⇒ 页面仍然是全白，且**没有任何同步异常**留下痕迹（只有一条未处理 rejection） |
+| **需要什么才能过** | 两条路，**只能选一条**：① `main.ts:42` 在取值点显式降级（"拿不到设置时用渲染层默认设置继续挂载"）；② 原生桥真正实现 `common_get_app_setting`。①是**本轮就已经准备好的东西**：`src/renderer/platform/ipcFallback/web.js` 的头注释整段就是在论证这件事，但 `main.ts` 至今**没有 import 它**（该模块在本轮之前是惰性的） |
+| **状态** | **未修**（(A) 类，任务书明确"下一条 (A) 类不要修"；实测证据见 §4.4） |
 
 ### 阻塞点 #4 —— `@common/utils/electron` 直接 import Electron 的 `shell` / `clipboard`（探针）
 
@@ -217,6 +229,51 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | 桌面产物里没有 web 分支 | 构建后实测：`ipcBridge/desktop.js` 存在于桌面产物、`ipcBridge/web.js` 不存在（反之在 web 产物里相反） |
 | 用真 UI 测试兜底 | `node build-config/pack.js` 重建 `dist/` 后跑真 Electron UI 测试（结果见 §6） |
 
+### 4.4 已修 #3（阶段 3 / 线 E-2）：`ipcFallback` 接线 + 实测
+
+**接线（`src/renderer/event/index.ts`）**：`registerEvents()` 里那 4 条热键/窗口通道全部改走
+`@renderer/platform/ipcFallback`，其中每条都是 **(B) 类 = 桌面专有、Android 直接移除**
+（`docs/android/ipc-contract.md` §4.2「全局快捷键」7 条 +「窗口按钮/全屏/尺寸」组）：
+
+| 通道 | 桌面 | Android（web 桥） | 依据 |
+| --- | --- | --- | --- |
+| `winMain_get_hot_key` | `await invokeSkippable(...)` 拿到真实配置 | `fallback` 生效 ⇒ 返回 `undefined` ⇒ **跳过该取值**，`window.rain.appHotKeyConfig` 保持 `globalData.ts:8-17` 的空配置 | §4.2（B） |
+| `winMain_set_hot_key_config` | `bridge.on` 逐字订阅 | 同步抛错被 `ipcFallback` 归一化为 rejection ⇒ **跳过该注册** | §4.2（B） |
+| `winMain_key_down` | 同上 | 同上 | §4.2（B） |
+| `winMain_focus` | 同上 | 同上（Android 是单窗口 WebView，没有"窗口重新聚焦"语义） | §4.2（B） |
+
+关键实现约定（都写在代码注释里）：
+
+- 三个平台实现**签名必须一致** `invokeWithFallback(invoke, channel, fallback)`；桌面端
+  **不读** `fallback`，但参数必须留在签名里（否则 TS 调用方拿到 `TS2554`）。
+- `ipcFallback/web.js` **归一化**两种失败形状：`bridge.on` 的**同步抛错** 与
+  `rendererInvoke` 的**异步 reject** 走同一条 `.catch`（`Promise.resolve().then(() => invoke(channel))`）。
+- **不假装成功**：`fallback` 返回 `undefined`，调用方 `await` + `if (value)`；**不接链式 `.then`**
+  （否则 web 侧会把 `undefined` 塞进 `setHotkeyConfig` 的析构）。三条订阅通道失败时
+  **不注册假 listener、不动 `window.key_event` / `window.app_event`**。
+- 构建期替换："关键差异 4.10"把 `@renderer/platform/ipcFallback` 换成 `/web`（仅 web 构建）。
+  实测产物：web bundle 含 `[renderer/platform/ipcFallback]` 与 `已使用渲染层默认值继续挂载`，
+  桌面 `dist/renderer.js` **不含**这两串 ⇒ 替换生效且桌面未受影响。
+
+**实测（strict 环境，`nodeIntegration:false / contextIsolation:true / sandbox:true / webSecurity:true`，
+无 preload，`http://127.0.0.1:5299/` 静态服务器，CDP 在页面脚本前注入最小 `window.Capacitor` mock）：**
+
+| 项 | 实测值 |
+| --- | --- |
+| 产物 | `dist-web/renderer.0e3fc0c8.js`，1 113 515 B |
+| `window.onerror`（uncaught） | **0 条** ⇒ **不再有阻断挂载的同步抛错** |
+| `console.error` | **0 条** |
+| `unhandledrejection` | **1 条**，且**只剩** `invoke("common_get_app_setting")`（见 #7） |
+| `console.warn` | 8 条 = 4 条 `ipcFallback` 降级提示 + 4 条 `event/index.ts` 跳过提示（一一对应上表 4 条通道） |
+| `#root` | `childElementCount = 0`、`display: none`、`rect 0x0`、无 `#app-chrome` —— **仍未挂载**（原因是 #7，不是 #3） |
+| `capturePage()` PNG | `597 x 1280`（窗口 412x915，本机 DPR = 1.449），4752 B，画面为空白页 |
+| mock 生效 | `window.Capacitor.getPlatform() === 'android'`、`isNativePlatform() === true` |
+
+> **结论（不要误读）**：#3 **已修**（同步抛错消失了、4 条通道各自降级、模块求值不再中断），
+> 但"页面挂上"这个**更大的验收目标仍未达成**，挡住它的是 #7 —— 一条 **异步、无异常** 的
+> "挂载依赖的数据拿不到"。这正是任务书里 "若仍挂载不上：如实汇报新首错" 的情形；
+> 本轮**没有**为了让它过而加空实现或放宽环境。
+
 ---
 
 ## 5. 探针产物（"宽容桥"下渲染出的移动端骨架）
@@ -232,23 +289,26 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 
 ## 6. 验收门结果
 
-**最终交付状态的实测行为**（`dist-web/renderer.191c7a47.js`，1 112 707 B）：
-加载后**只剩阻塞点 #3 的两条错误**，`#root` 仍为 `childElementCount = 0 / display: none` —— 这正是预期：
-(A) 类的原生桥没写之前，页面不该挂上。改动前的 `__dirname is not defined` 与
-`node_modules/electron` 已**完全消失**（可复现：改动前 1 111 921 B 的 `renderer.fef2a351.js` 里含该包，
-改动后不含）。
+> 本节的表在**阶段 3 / 线 D**（`renderer.191c7a47.js`）跑过一次；下面的数字已在
+> **阶段 3 / 线 E-2**（`renderer.0e3fc0c8.js`，1 113 515 B）重跑并更新，两轮结论一致。
 
-| # | 门 | 结果 |
+**最终交付状态的实测行为**：strict 环境下 `window.onerror` **0 条**、`console.error` **0 条**、
+`unhandledrejection` **1 条**（只剩 `invoke("common_get_app_setting")`，见 #7），
+`#root` 仍为 `childElementCount = 0 / display: none` —— #3 已修，**但页面挂不上，原因换成了 #7**。
+改动前的 `__dirname is not defined` 与 `node_modules/electron` 已**完全消失**
+（可复现：改动前 1 111 921 B 的 `renderer.fef2a351.js` 里含该包，改动后不含）。
+
+| # | 门 | 结果（阶段 3 / 线 E-2 重跑） |
 | --- | --- | --- |
 | 1 | `node node_modules\eslint\bin\eslint.js --ext .ts,.js,.vue src` | **0**（exit 0） |
 | 2 | 四个 `tsc`（`src/main`、`src/renderer`、`src/renderer-lyric`、`src/common`） | **全 0** |
 | 3 | `node --test "tests\unit\*.test.cjs"` | **153 / 153 全绿**（基线一致） |
 | 4 | `node build-config/pack.js` | **exit 0** |
-| 5 | `npm run build:web`（`NODE_ENV=production`） | **exit 0**，3 warnings（都是既有的：`url` polyfill 缺 `pathToFileURL` / `URL`、产物体积超 10 MiB 提示） |
-| 6 | `npm.cmd run test:surfaces` + `npm.cmd run test:window-controls` | **均 exit 0**；`surfaces` 88 PASS / 0 FAIL |
-| 7 | 临时脚本与静态服务器 | **全部在 `%TEMP%\rain-webprobe\`**，仓库内零临时文件（见 §7） |
+| 5 | `npm run build:web`（`NODE_ENV=production`） | **exit 0**，2 warnings（都是既有的：`url` polyfill 缺 `pathToFileURL` / `URL`） |
+| 6 | `npm.cmd run test:surfaces` + `npm.cmd run test:window-controls` | **均 exit 0**；`surfaces` 88 PASS / 0 FAIL；`window-controls` 6/6 PASS |
+| 7 | strict 环境**实测挂载成功** | ⚠️ **未达成**：同步抛错已归零（#3 已修），但 `#root` 仍是空的 —— 挡住它的是新记录在案的 **#7**（(A) 类）。实测细节见 §4.4 |
 
-补充实测（按本轮要求额外跑，用来确认桌面没被改坏）：
+补充实测（阶段 3 / 线 D 时按当时要求额外跑，用来确认桌面没被改坏）：
 
 | 套件 | 结果 |
 | --- | --- |
@@ -277,9 +337,14 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 ## 7. 清理
 
 - 所有临时件都在 `%TEMP%\rain-webprobe\` 下：`app/`（Electron 加载器 + 静态服务器/探针注入）、
-  `probe/`（宽容桥探针配置与替身）、`launch.cjs`、`run*/probe*/baseline/` 输出目录。
+  `probe/`（宽容桥探针配置与替身）、`launch.cjs`、`run*/probe*/baseline/` 输出目录；
+  阶段 3 / 线 E-2 的那一套在 `%TEMP%\rain-webprobe\e2\`（`app/harness.cjs` + `app/server.cjs` +
+  `app/package.json` + `launch.cjs` + `run/`），**跑完已删除**（`app/`、`mini/`、`run/` 是
+  线 D 遗留的探针，本线未复用、未改动）。
 - **仓库内没有留下任何临时加载脚本或服务器**：`git status` 只有 3 个改动文件 + 2 个新增目录
-  （都是正式代码）。
+  （都是正式代码）。（线 E-2 新增的改动：`src/renderer/event/index.ts`、
+  `build-config/renderer/webpack.config.web.js`、`src/renderer/platform/ipcFallback/*`、
+  `.eslintrc.base.cjs`、本文件。）
 - 静态服务器用的是 `127.0.0.1` 高位端口（5199 / 5299），只监听本机；Electron 进程只按
   自己 spawn 出来的 PID 清理（`taskkill /PID <pid> /T /F`），**从未按进程名杀进程**。
 
@@ -289,13 +354,18 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 
 供阶段 3-5 直接照此排期。**P0 不做完，页面永远挂不上（全白）；P1 不做完，页面能出但功能是空的。**
 
+> **阶段 3 / 线 E-2 的更新**：#3 的"注册期同步抛错"已经在**渲染层**解决（逐条容错，见 §4.4），
+> 所以 P0-2 里"热键/窗口聚焦类通道必须存在，否则 `registerEvents()` 同步抛错"这一条
+> **不再是挂载的前提**；真正卡住挂载的现在是 **P0-4**。
+
 ### P0 · 让 `app.mount('#root')` 能执行到
 
 | 序 | 项 | 对应阻塞点 | 落点 | 难度 |
 | --- | --- | --- | --- | --- |
-| P0-1 | **IPC 传输桥的原生实现**：`send / invoke / on / off` 四条语义在 Capacitor 侧落地（原生 ↔ WebView 双向消息 + 请求应答配对 + 取消） | #3 | 替换 `src/common/platform/ipcBridge/web.js` 的占位实现；契约见 `docs/android/ipc-contract.md` | 大 |
-| P0-2 | **启动期必需通道**：`common_get_app_setting`、`common_set_app_setting`、`winMain_get_hot_key`、`winMain_set_hot_key_config`、`winMain_key_down`、`winMain_focus`、`winMain_on_config_change`、`winMain_get_data`、`common_get_env_params`。其中热键/窗口聚焦类在 Android 首版**允许降级为空实现**，但通道本身必须存在（否则 `registerEvents()` 同步抛错） | #3 · #6 | 原生侧 handler，逐条对照 `docs/android/ipc-contract.md` 的"B 可直接移除"标记 | 大 |
-| P0-3 | **存储落点**：设置的同步读 / 异步写（Android 只有异步 API，需要"预热内存快照 + 异步回写"） | #3 · #6 | `src/main/platform/storage/adapter.android.ts` 的骨架已有，需接线 `@capacitor/preferences` | 大 |
+| P0-1 | **IPC 传输桥的原生实现**：`send / invoke / on / off` 四条语义在 Capacitor 侧落地（原生 ↔ WebView 双向消息 + 请求应答配对 + 取消） | #3（注册期已由渲染层容错绕开）· #7 | 替换 `src/common/platform/ipcBridge/web.js` 的占位实现；契约见 `docs/android/ipc-contract.md` | 大 |
+| P0-2 | **启动期必需通道**：`common_get_app_setting`、`common_set_app_setting`、`winMain_get_hot_key`、`winMain_set_hot_key_config`、`winMain_key_down`、`winMain_focus`、`winMain_on_config_change`、`winMain_get_data`、`common_get_env_params`。其中热键与窗口聚焦类在 Android 首版**允许降级为空实现** | #3 · #6 · #7 | 原生侧 handler，逐条对照 `docs/android/ipc-contract.md` 的"B 可直接移除"标记 | 大 |
+| P0-3 | **存储落点**：设置的同步读 / 异步写（Android 只有异步 API，需要"预热内存快照 + 异步回写"） | #7 · #6 | `src/main/platform/storage/adapter.android.ts` 的骨架已有，需接线 `@capacitor/preferences` | 大 |
+| P0-4 | **`getSetting()` 的降级接线**：`src/renderer/main.ts:42` 目前是裸 `void getSetting().then(...)`，**没有 `.catch`**。要么在取值点显式降级（`@renderer/platform/ipcFallback` 就是为它准备的，至今没人 import），要么等 P0-1/P0-2 把 `common_get_app_setting` 接上。**这是当前唯一挡住挂载的点** | #7 | 一行级接线（`main.ts`）—— 但属 (A) 类决策，需单独排期 | 中 |
 
 ### P1 · 让页面不是"空壳"
 
@@ -363,10 +433,16 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 3. 观察 `window.onerror` / `unhandledrejection` 与 `#root` 的 `childElementCount`：
    - `childElementCount === 0 && display === 'none'` ⇒ 仍然卡在 P0；
    - `childElementCount > 0` ⇒ P0 已过，剩下的都是 P1/P2。
+   > ⚠️ **补充判据（阶段 3 / 线 E-2 实测得出）**：`childElementCount === 0` **不足以**判断
+   > "卡在同步抛错"。修完 #3 之后 `window.onerror` 可以是 **0 条**，但页面依然全白 ——
+   > 因为挡住挂载的是**未处理的 promise rejection**（#7）。所以这三样必须一起看：
+   > `window.onerror`、`unhandledrejection`、`#root`。
 
 ---
 
-## 附：本轮改动文件
+## 附：改动文件
+
+### 阶段 3 / 线 D（原表）
 
 | 文件 | 状态 |
 | --- | --- |
@@ -375,3 +451,16 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | `src/renderer/utils/ipc.ts` | 修改（`ipcRenderer` 改为经 `@renderer/platform/ipcRenderer`；只影响 `onFullscreenChanged()`） |
 | `src/common/platform/ipcBridge/{index,desktop,web}.js` | 新增 |
 | `src/renderer/platform/ipcRenderer/{index,web}.js` | 新增 |
+
+### 阶段 3 / 线 E-2（本轮）
+
+| 文件 | 状态 |
+| --- | --- |
+| `src/renderer/event/index.ts` | 修改（4 条热键/窗口通道改走 `ipcFallback`：`invokeSkippable` + `subscribe`；`registerEvents` 变 `async`，末尾 `void registerEvents()`） |
+| `build-config/renderer/webpack.config.web.js` | 修改（新增"关键差异 4.10"：`@renderer/platform/ipcFallback` → `/web`，仅 web 构建） |
+| `src/renderer/platform/ipcFallback/desktop.js` | 修改（**恢复三参签名** `(invoke, channel, fallback)`，`fallback` 桌面端不读 + `no-unused-vars` 局部豁免） |
+| `src/renderer/platform/ipcFallback/web.js` | 修改（同步抛错/异步 reject 归一化：`Promise.resolve().then(() => invoke(channel)).catch(...)`；过期注释更正） |
+| `src/renderer/platform/ipcFallback/index.js` | 修改（说明 `InvokeFallbackInfo` 无法从 `.js` 转发 —— `export type` 在 `.js` 里是 `TS8008`） |
+| `.eslintrc.base.cjs` | 修改（`no-confusing-void-expression` 打开 `ignoreVoidOperator`：官方认可的"故意丢弃 Promise"写法，见文件内注释） |
+| `docs/android/web-runtime-blockers.md` | 修改（#3 标为已修并补 §4.4 实测；新增 #7；更新 §6 / §7 / §8 / §10） |
+| `src/common/platform/electron/web.js`、`src/renderer/platform/http/*` | **未改**（线 E 上半段产物，本轮只引用） |

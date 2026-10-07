@@ -38,6 +38,12 @@ const typescriptRule = {
       },
     },
   ],
+  // `void somePromise()` 是 typescript-eslint 官方认可的"显式表示故意丢弃"写法
+  // （`no-floating-promises` 的文档里就推荐它）。Android 移植（阶段 3 / 线 E-2）里
+  // `src/renderer/event/index.ts` 的 `subscribe()` 需要这种写法：那条降级路径内部
+  // 已经 `.catch` 过，返回的 Promise 故意不接。默认配置会把它判成
+  // `no-confusing-void-expression`，与本条规则自相矛盾，所以打开这个开关。
+  '@typescript-eslint/no-confusing-void-expression': ['error', { ignoreVoidOperator: true }],
   '@typescript-eslint/naming-convention': 'off',
   '@typescript-eslint/return-await': 'off',
   '@typescript-eslint/ban-ts-comment': 'off',

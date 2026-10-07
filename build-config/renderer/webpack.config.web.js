@@ -200,6 +200,47 @@ module.exports = {
         resource.request = '@renderer/platform/ipcRenderer/web'
       },
     ),
+    // 关键差异 4.9（阶段 3 / 线 E）：`@common/utils/electron`（`shell` / `clipboard`）的
+    // 构建期替换 —— 这是阻塞点 #4（`node_modules/electron` 进入 web 产物的**第三个**入口）。
+    //
+    // 为什么本轮必须做：修完 #3 之后实测，它就是**下一个挂载期同步抛错** ——
+    // `src/renderer/core/useApp/useEventListener.ts:26` 的
+    // `import { openUrl } from '@common/utils/electron'` 在 App setup 阶段（`app.mount()` 之前）
+    // 就会走到 npm 包 `node_modules/electron/index.js` 的 `path.join(__dirname, 'path.txt')`
+    // ⇒ `ReferenceError: __dirname is not defined` ⇒ 挂载中断，`#root` 依旧为空。
+    //
+    // 这里是**替换请求**而不是"新增一层 index.js + 改 import"：桌面实现就是
+    // `src/common/utils/electron.ts` 本身（22 个 import 点，本轮一个字都不改），
+    // 替身只有 `src/common/platform/electron/web.js` 一个文件，桌面两个构建完全不知道它存在。
+    new webpack.NormalModuleReplacementPlugin(
+      /(^|[\\/])@?common[\\/]utils[\\/]electron$/,
+      resource => {
+        resource.request = '@common/platform/electron/web'
+      },
+    ),
+    // 关键差异 4.10（阶段 3 / 线 E-2）：渲染层"挂载期必需通道"降级层的**构建期**替换。
+    // `src/renderer/platform/ipcFallback/index.js` 默认是桌面的**逐字透传**实现
+    // （`invokeWithFallback(invoke, channel) === invoke(channel)`，第三个 `fallback` 参数
+    // 在桌面路径上不存在）；web/Android 换成同目录的 `web.js`（带 `fallback` 的容错版本）。
+    //
+    // 为什么必须换：`event/index.ts` 的 `registerEvents()` 是**顶层 import 即执行**的
+    // （`main.ts:6`），而它碰的 `winMain_get_hot_key` / `winMain_set_hot_key_config` /
+    // `winMain_key_down` / `winMain_focus` 在 Android 上**都没有桥**
+    // （`ipcBridge/web.js` 调用即抛错）⇒ 模块求值中断 ⇒ `app.mount('#root')` 跑不到
+    // （阻塞点 #3，见 `docs/android/web-runtime-blockers.md`）。
+    //
+    // 这里**只替换 web 构建**：桌面两个构建（`webpack.config.dev.js` / `prod.js`）
+    // 完全不知道 `ipcFallback/web.js` 存在，桌面语义（reject 仍是 reject、订阅时机逐字一致）
+    // 不受影响。
+    //
+    // 同 4.7 / 4.8：`@renderer/platform/ipcFallback` 是 `resolve.alias` 别名，裸说明符
+    // 不带 `/index.js`，必须用 `beforeResolve` 那次匹配（`afterResolve` 改 request 无效）。
+    new webpack.NormalModuleReplacementPlugin(
+      /(^|[\\/])@?renderer[\\/]platform[\\/]ipcFallback([\\/]index\.js)?$/,
+      resource => {
+        resource.request = '@renderer/platform/ipcFallback/web'
+      },
+    ),
     new webpack.DefinePlugin({
       'process.env': {
         NODE_ENV: isProd ? '"production"' : '"development"',
