@@ -1,5 +1,8 @@
 import { rendererSend, rendererInvoke, rendererOn, rendererOff } from '@common/rendererIpc'
-import { ipcRenderer } from 'electron'
+// ⚠️ 不要 `import { ipcRenderer } from 'electron'`：见 `@renderer/platform/ipcRenderer`。
+// 只有 `onFullscreenChanged()` 需要"原始 Electron 事件对象"，所以走这个专门的
+// 平台入口（构建期替换；web/Android 侧是调用即抛错的占位实现）。
+import { rawIpcRenderer as ipcRenderer } from '@renderer/platform/ipcRenderer'
 import { HOTKEY_RENDERER_EVENT_NAME, WIN_MAIN_RENDERER_EVENT_NAME, CMMON_EVENT_NAME } from '@common/ipcNames'
 import { markRaw } from '@common/utils/vueTools'
 import * as hotKeys from '@common/hotKey'

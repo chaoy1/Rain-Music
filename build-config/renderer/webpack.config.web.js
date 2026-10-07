@@ -162,6 +162,44 @@ module.exports = {
         resource.request = resource.request.replace(/[\\/]index\.js$/, '/web.js')
       },
     ),
+    // 关键差异 4.7（阶段 3 / 线 D）：渲染层 IPC 传输层的**构建期**替换。
+    // `src/common/platform/ipcBridge/index.js` 默认是桌面的 electron `ipcRenderer` 透传；
+    // web/Android 换成同目录的 `web.js`（占位实现，调用即抛错 —— 阶段 3-5 接原生桥）。
+    //
+    // 为什么必须换掉：不换的话 `rendererIpc.ts → electron` 会让 npm 包
+    // `node_modules/electron` 被整包打进产物（它顶层就用 `__dirname`，而 web 目标里
+    // `node.__dirname = false`），`renderer.js` 加载到 `rendererIpc.ts` 那一步就
+    // `ReferenceError: __dirname is not defined`，页面完全空白（实测见
+    // `docs/android/web-runtime-blockers.md` 阻塞点 #1）。
+    //
+    // ⚠️ 与上面 4.6（http）不同，这里**必须**用 `beforeResolve` 那一次匹配（裸说明符
+    // `@common/platform/ipcBridge` 就是全部），不能靠 `afterResolve` 的绝对路径分支：
+    // 本项目里 `@common/*` 是 webpack `resolve.alias` 别名，`rendererIpc.ts` 写的就是
+    // `@common/platform/ipcBridge`，**不带 `/index.js`**，`afterResolve` 正则匹配不到；
+    // 而 `afterResolve` 里改 `resource.request` 对 webpack 已无意义
+    // （`NormalModuleFactory` 用的是早一步定好的 `createData.resource`）。
+    // 实测：只写 4.6 那种绝对路径正则时，产物里仍然是 `index.js` → `desktop.js`。
+    new webpack.NormalModuleReplacementPlugin(
+      /(^|[\\/])@?common[\\/]platform[\\/]ipcBridge([\\/]index\.js)?$/,
+      resource => {
+        resource.request = '@common/platform/ipcBridge/web'
+      },
+    ),
+    // 关键差异 4.8（阶段 3 / 线 D）：渲染层"裸 ipcRenderer"入口的构建期替换。
+    // `src/renderer/platform/ipcRenderer/index.js` 直接 `import { ipcRenderer } from 'electron'`，
+    // 是 `node_modules/electron` 进入 web 产物的**第二个**入口（第一个是 4.7 的
+    // `src/common/rendererIpc.ts`）。当前调用点只有 `src/renderer/utils/ipc.ts` 的
+    // `onFullscreenChanged()`（它需要 Electron 的原始事件对象，不适用 ipcBridge 的
+    // `{ event, params }` 契约）。替换成 `./web.js`（访问属性即抛错）。
+    //
+    // 同 4.7：`@renderer/platform/ipcRenderer` 是 `resolve.alias` 别名，裸说明符不带
+    // `/index.js`，必须用 `beforeResolve` 那次匹配（`afterResolve` 改 request 无效）。
+    new webpack.NormalModuleReplacementPlugin(
+      /(^|[\\/])@?renderer[\\/]platform[\\/]ipcRenderer([\\/]index\.js)?$/,
+      resource => {
+        resource.request = '@renderer/platform/ipcRenderer/web'
+      },
+    ),
     new webpack.DefinePlugin({
       'process.env': {
         NODE_ENV: isProd ? '"production"' : '"development"',
