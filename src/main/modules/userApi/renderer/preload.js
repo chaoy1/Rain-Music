@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import needle from 'needle'
-import zlib from 'zlib'
-import { createCipheriv, publicEncrypt, constants, randomBytes, createHash } from 'crypto'
+import { createCipheriv, randomBytes, createHash } from 'crypto'
+import { rsaPublicEncryptNoPadding } from '@common/utils/crypto/rsaNoPadding'
+import { inflate, deflate } from '@common/utils/zlib'
 import USER_API_RENDERER_EVENT_NAME from '../rendererEvent/name'
 
 
@@ -166,7 +167,7 @@ const onError = (errorMessage) => {
 }
 
 const initEnv = (userApi) => {
-  contextBridge.exposeInMainWorld('rain', {
+  const userApiEnv = {
     EVENT_NAMES,
     request(url, { method = 'get', timeout, headers, body, form, formData }, callback) {
       let options = {
@@ -247,14 +248,22 @@ const initEnv = (userApi) => {
       return Promise.resolve()
     },
     utils: {
+      // ⚠️ `lx.utils.crypto` 是 `docs/custom-source.md` 明确的**对外契约**，签名与返回值
+      // 都不能变。其中 `rsaEncrypt` 已经换成与渲染层 `wy` 共用的**纯 JS** 实现
+      // （`@common/utils/crypto/rsaNoPadding`，BigInt 模幂 + 定长补零），因此
+      // Android 侧写 `lx` 宿主时可以直接复用同一份代码，不需要为它写原生桥。
+      // 另外三个仍是本进程的 Node 实现（桌面端行为不变）；Android 宿主的对应关系见
+      // `docs/android/native-bridge-needs.md` §4.3：
+      //   aesEncrypt → `crypto-js` 的 AES（CBC/ECB 实测与 node:crypto 一致）
+      //   md5        → `crypto-js` 的 MD5
+      //   randomBytes → `globalThis.crypto.getRandomValues`
       crypto: {
         aesEncrypt(buffer, mode, key, iv) {
           const cipher = createCipheriv(mode, key, iv)
           return Buffer.concat([cipher.update(buffer), cipher.final()])
         },
         rsaEncrypt(buffer, key) {
-          buffer = Buffer.concat([Buffer.alloc(128 - buffer.length), buffer])
-          return publicEncrypt({ key, padding: constants.RSA_NO_PADDING }, buffer)
+          return rsaPublicEncryptNoPadding(buffer, key)
         },
         randomBytes(size) {
           return randomBytes(size)
@@ -271,21 +280,25 @@ const initEnv = (userApi) => {
           return Buffer.from(buf, 'binary').toString(format)
         },
       },
+      // 纯 JS 的 pako（阶段 3 提升为显式依赖）：Android 侧可直接复用同一份实现。
+      // 返回值的类型与原来一致（Buffer），自定义源脚本的 `.toString()` 之类调用不受影响。
       zlib: {
         inflate(buf) {
           return new Promise((resolve, reject) => {
-            zlib.inflate(buf, (err, data) => {
-              if (err) reject(new Error(err.message))
-              else resolve(data)
-            })
+            try {
+              resolve(Buffer.from(inflate(buf)))
+            } catch (err) {
+              reject(new Error(err.message))
+            }
           })
         },
         deflate(data) {
           return new Promise((resolve, reject) => {
-            zlib.deflate(data, (err, buf) => {
-              if (err) reject(new Error(err.message))
-              else resolve(buf)
-            })
+            try {
+              resolve(Buffer.from(deflate(data)))
+            } catch (err) {
+              reject(new Error(err.message))
+            }
           })
         },
       },
@@ -320,7 +333,14 @@ const initEnv = (userApi) => {
     //     handlers.splice(0, handlers.length)
     //   }
     // },
-  })
+  }
+
+  // 自定义源脚本的全局对象名是**公开的接口契约**：社区里的第三方脚本都按
+  // 既有约定读取 `globalThis.lx`（含 EVENT_NAMES / request / on / send 等）。
+  // 因此同一个接口对象同时以 `lx` 与 `rain` 暴露，改名不能破坏既有脚本。
+  // （Electron 允许同一对象用不同 key 暴露两次，已实测。）
+  contextBridge.exposeInMainWorld('lx', userApiEnv)
+  contextBridge.exposeInMainWorld('rain', userApiEnv)
 
   contextBridge.exposeInMainWorld('__rain_init_error_handler__', {
     sendError(errorMessage) {

@@ -1,0 +1,71 @@
+name: Android
+
+# 本机没有 Android SDK（见 docs/android-port-plan.md §0），APK 只能由 CI 产出。
+# 这一条工作流从阶段 1 起就持续编译 Android 工程，避免把编译问题拖到阶段 6。
+#
+# ⚠️ 需要推送一次才能在 CI 上真正验证：本工作流只落地了文件，未推送、未运行。
+#
+# 运行器选 windows-latest 是为了与仓库现有两条工作流（build-test.yml / release.yml）
+# 保持一致；同时它也是 `npm ci` 已被验证过的平台（本仓库的 postinstall 在 Linux 上
+# 会走 build-config/deps.js 的 replaceSqliteLib 分支，那条路从未被验证过）。
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-apk:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # 面向 Web/Capacitor 的渲染层构建，产出 dist-web/（Electron 的 dist/ 与它无关）。
+      # capacitor.config.ts 的 webDir 指向 dist-web，必须先有产物再 sync。
+      - name: Build web renderer bundle
+        run: npm run build:web
+
+      # 生成 android/app/capacitor.build.gradle、android/capacitor.settings.gradle
+      # 并把 dist-web 复制到 android/app/src/main/assets/public。
+      # 缺少这一步时 gradlew 会在配置阶段直接失败（settings.gradle 会 apply 一个不存在的文件）。
+      - name: Sync Capacitor android project
+        run: npx cap sync android
+
+      # Capacitor 8 的 Android 工具链：android/build.gradle 锁 AGP 8.13.0，
+      # gradle-wrapper.properties 锁 Gradle 8.14.3，variables.gradle 是 compileSdk/targetSdk 36。
+      # AGP 8.13 要求 JDK 17+，Capacitor 8 的官方要求是 JDK 21；Gradle 8.14.3 支持 17–24。
+      # 本机装的是 JDK 20（非 LTS，AGP 8.13 未正式支持），所以 CI 明确锁 21。
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # 只显式装 platform-tools 与 compileSdk 对应的 platform；
+      # build-tools 交给 AGP 按它自己的默认版本自动下载（该动作默认已接受 SDK 许可）。
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36'
+
+      - name: Build debug APK
+        working-directory: android
+        run: .\gradlew.bat assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rain-music-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

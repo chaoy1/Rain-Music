@@ -57,7 +57,7 @@ export default {
 
   button {
     color: var(--color-button-font);
-    width: 32px;
+    &:not([data-sleep-timer]) { width: 32px; }
     height: 36px;
     border-radius: var(--control-radius);
     transition: background-color .16s ease;

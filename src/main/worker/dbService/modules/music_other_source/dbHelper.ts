@@ -13,20 +13,20 @@ import {
  * @param id 歌曲id
  * @returns 歌曲信息
  */
-export const queryMusicInfo = (id: string) => {
+export const queryMusicInfo = async(id: string) => {
   const musicInfoQueryStatement = createMusicInfoQueryStatement()
-  return musicInfoQueryStatement.all(id) as Rain.DBService.MusicInfoOtherSource[]
+  return await musicInfoQueryStatement.all(id) as Rain.DBService.MusicInfoOtherSource[]
 }
 
 /**
  * 批量插入歌曲信息
  * @param musicInfos 列表
  */
-export const insertMusicInfo = (musicInfos: Rain.DBService.MusicInfoOtherSource[]) => {
+export const insertMusicInfo = async(musicInfos: Rain.DBService.MusicInfoOtherSource[]) => {
   const db = getDB()
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
-  db.transaction((musicInfos: Rain.DBService.MusicInfoOtherSource[]) => {
-    for (const info of musicInfos) musicInfoInsertStatement.run(info)
+  await db.transaction(async(musicInfos: Rain.DBService.MusicInfoOtherSource[]) => {
+    for (const info of musicInfos) await musicInfoInsertStatement.run(info)
   })(musicInfos)
 }
 
@@ -34,26 +34,26 @@ export const insertMusicInfo = (musicInfos: Rain.DBService.MusicInfoOtherSource[
  * 批量删除歌曲信息
  * @param ids 列表
  */
-export const deleteMusicInfo = (ids: string[]) => {
+export const deleteMusicInfo = async(ids: string[]) => {
   const db = getDB()
   const musicInfoDeleteStatement = createMusicInfoDeleteStatement()
-  db.transaction((ids: string[]) => {
-    for (const id of ids) musicInfoDeleteStatement.run(id)
+  await db.transaction(async(ids: string[]) => {
+    for (const id of ids) await musicInfoDeleteStatement.run(id)
   })(ids)
 }
 
 /**
  * 清空歌曲信息
  */
-export const clearMusicInfo = () => {
+export const clearMusicInfo = async() => {
   const musicInfoClearStatement = createMusicInfoClearStatement()
-  musicInfoClearStatement.run()
+  await musicInfoClearStatement.run()
 }
 
 /**
  * 统计歌曲信息数量
  */
-export const countMusicInfo = () => {
+export const countMusicInfo = async() => {
   const countStatement = createCountStatement()
-  return (countStatement.get() as { count: number }).count
+  return ((await countStatement.get()) as { count: number }).count
 }

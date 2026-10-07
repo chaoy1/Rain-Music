@@ -4,7 +4,7 @@
       <path v-if="appSetting['player.togglePlayMethod'] === 'list'" d="M4 7h12M4 12h8M4 17h8M17 10l3 3-3 3M15 13h5" />
       <path v-else-if="appSetting['player.togglePlayMethod'] === 'random'" d="M4 7h2c5 0 7 10 12 10h2M4 17h2c2 0 3.5-2 5-4.5M14 8.5C15 7.5 16.5 7 18 7h2M17 4l3 3-3 3M17 14l3 3-3 3" />
       <template v-else>
-        <path d="M7 7h10a3.5 3.5 0 0 1 3.5 3.5M17 17H7a3.5 3.5 0 0 1-3.5-3.5M7 4 4 7l3 3M17 14l3 3-3 3" />
+        <path d="M4 10V9a3 3 0 0 1 3-3h13M17 3l3 3-3 3M20 14v1a3 3 0 0 1-3 3H4M7 15l-3 3 3 3" />
         <path v-if="appSetting['player.togglePlayMethod'] === 'singleLoop'" d="m11 10 1.5-1v6" />
       </template>
     </svg>

@@ -20,9 +20,9 @@ export default {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36 Edg/107.0.1418.24',
       },
     })
-    const { body, statusCode } = await _requestObj.promise
+    const { body, status } = await _requestObj.promise
     // console.log(body)
-    if (statusCode != 200 || body.err_code !== 0) throw new Error('获取评论失败')
+    if (status != 200 || body.err_code !== 0) throw new Error('获取评论失败')
     const total = body.count ?? 0
     return { source: 'kg', comments: this.filterComment(body.list || []), total, page, limit, maxPage: Math.ceil(total / limit) || 1 }
   },
@@ -37,9 +37,9 @@ export default {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36 Edg/107.0.1418.24',
       },
     })
-    const { body, statusCode } = await _requestObj2.promise
+    const { body, status } = await _requestObj2.promise
     // console.log(body)
-    if (statusCode != 200 || body.err_code !== 0) throw new Error('获取热门评论失败')
+    if (status != 200 || body.err_code !== 0) throw new Error('获取热门评论失败')
     const total = body.count ?? 0
     return { source: 'kg', comments: this.filterComment(body.list || []), total, page, limit, maxPage: Math.ceil(total / limit) || 1 }
   },
@@ -55,9 +55,9 @@ export default {
         'User-Agent': 'Android712-AndroidPhone-8983-18-0-COMMENT-wifi',
       },
     })
-    const { body, statusCode } = await _requestObj2.promise
+    const { body, status } = await _requestObj2.promise
     // console.log(body)
-    if (statusCode != 200 || body.err_code !== 0) throw new Error('获取回复评论失败')
+    if (status != 200 || body.err_code !== 0) throw new Error('获取回复评论失败')
     return { source: 'kg', comments: this.filterComment(body.list || []) }
   },
   replaceAt(raw, atList) {

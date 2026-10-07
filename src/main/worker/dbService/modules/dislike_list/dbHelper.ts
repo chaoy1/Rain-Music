@@ -11,9 +11,9 @@ import {
 /**
  * 查询不喜欢歌曲列表
  */
-export const queryDislikeList = () => {
+export const queryDislikeList = async() => {
   const queryStatement = createQueryStatement()
-  return queryStatement.all() as Rain.DBService.DislikeInfo[]
+  return await queryStatement.all() as Rain.DBService.DislikeInfo[]
 }
 
 /**
@@ -23,8 +23,8 @@ export const queryDislikeList = () => {
 export const insertDislikeList = async(infos: Rain.DBService.DislikeInfo[]) => {
   const db = getDB()
   const insertStatement = createInsertStatement()
-  db.transaction((infos: Rain.DBService.DislikeInfo[]) => {
-    for (const info of infos) insertStatement.run(info)
+  await db.transaction(async(infos: Rain.DBService.DislikeInfo[]) => {
+    for (const info of infos) await insertStatement.run(info)
   })(infos)
 }
 
@@ -36,9 +36,9 @@ export const overwirteDislikeList = async(infos: Rain.DBService.DislikeInfo[]) =
   const db = getDB()
   const clearStatement = createClearStatement()
   const insertStatement = createInsertStatement()
-  db.transaction((infos: Rain.DBService.DislikeInfo[]) => {
-    clearStatement.run()
-    for (const info of infos) insertStatement.run(info)
+  await db.transaction(async(infos: Rain.DBService.DislikeInfo[]) => {
+    await clearStatement.run()
+    for (const info of infos) await insertStatement.run(info)
   })(infos)
 }
 

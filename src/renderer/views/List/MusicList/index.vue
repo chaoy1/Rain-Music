@@ -1,5 +1,5 @@
 <template>
-  <div :class="$style.list">
+  <div :class="[$style.list, { [$style.dragging]: isSongDragging }]">
     <div class="thead">
       <table>
         <thead>
@@ -25,11 +25,12 @@
       <base-virtualized-list
         v-if="actionButtonsVisible" ref="listRef" v-slot="{ item, index }" :list="list" key-name="id"
         :item-height="listItemHeight" container-class="scroll" content-class="list"
-        @scroll="saveListPosition" @contextmenu.capture="handleListRightClick"
+        @scroll="saveListPosition"
       >
         <div
           class="list-item" :class="[{ [$style.active]: playerInfo.isPlayList && playerInfo.playIndex === index }, { selected: selectedIndex == index || rightClickSelectedIndex == index }, { active: selectedList.includes(item) }, { disabled: !assertApiSupport(item.source) }]"
           :data-current-song="playerInfo.isPlayList && playerInfo.playIndex === index ? '' : undefined"
+          :data-song-id="item.id" @pointerdown="handleSongPointerDown($event, index)"
           @click="handleListItemClick($event, index)" @contextmenu="handleListItemRightClick($event, index)"
         >
           <div class="list-item-cell no-select" :class="$style.num" style="flex: 0 0 5%;">
@@ -57,12 +58,13 @@
       <base-virtualized-list
         v-else ref="listRef" v-slot="{ item, index }" :list="list" key-name="id"
         :item-height="listItemHeight" container-class="scroll" content-class="list"
-        @scroll="saveListPosition" @contextmenu.capture="handleListRightClick"
+        @scroll="saveListPosition"
       >
         <div
           class="list-item"
           :data-current-song="playerInfo.isPlayList && playerInfo.playIndex === index ? '' : undefined"
-          :class="[{ [$style.active]: playerInfo.isPlayList && playerInfo.playIndex === index }, { selected: selectedIndex == index || rightClickSelectedIndex == index }, { active: selectedList.includes(item) }, { disabled: !assertApiSupport(item.source) }]"
+          :data-song-id="item.id" :class="[{ [$style.active]: playerInfo.isPlayList && playerInfo.playIndex === index }, { selected: selectedIndex == index || rightClickSelectedIndex == index }, { active: selectedList.includes(item) }, { disabled: !assertApiSupport(item.source) }]"
+          @pointerdown="handleSongPointerDown($event, index)"
           @click="handleListItemClick($event, index)" @contextmenu="handleListItemRightClick($event, index)"
         >
           <div class="list-item-cell no-select" :class="$style.num" style="flex: 0 0 5%;">
@@ -99,35 +101,27 @@
     <common-download-modal v-model:show="isShowDownload" :music-info="selectedDownloadMusicInfo" teleport="#view" :list-id="listId" />
     <common-download-multiple-modal v-model:show="isShowDownloadMultiple" :list="selectedList" teleport="#view" :list-id="listId" @confirm="removeAllSelect" />
     <search-list :list="list" :visible="isShowSearchBar" @action="handleMusicSearchAction" />
-    <music-sort-modal v-model:show="isShowMusicSortModal" :music-info="selectedSortMusicInfo" :selected-num="selectedNum" @confirm="sortMusic" />
-    <music-toggle-modal v-model:show="isShowMusicToggleModal" :music-info="selectedToggleMusicInfo" @toggle="toggleSource" />
     <base-menu v-model="isShowItemMenu" :menus="menus" :xy="menuLocation" item-name="name" @menu-click="handleMenuClick" />
   </div>
 </template>
 
 <script>
-import { clipboardWriteText } from '@common/utils/electron'
 import { assertApiSupport } from '@renderer/store/utils'
 import SearchList from './components/SearchList.vue'
-import MusicSortModal from './components/MusicSortModal.vue'
-import MusicToggleModal from './components/MusicToggleModal.vue'
 import useListInfo from './useListInfo'
 import useList from './useList'
 import useMenu from './useMenu'
 import usePlay from './usePlay'
 import useMusicDownload from './useMusicDownload'
 import useMusicAdd from './useMusicAdd'
-import useSort from './useSort'
 import useMusicActions from './useMusicActions'
 import useSearch from './useSearch'
 import useListScroll from './useListScroll'
-import useMusicToggle from './useMusicToggle'
+import useSongDrag from './useSongDrag'
 export default {
   name: 'MusicList',
   components: {
     SearchList,
-    MusicSortModal,
-    MusicToggleModal,
   },
   props: {
     listId: {
@@ -185,7 +179,6 @@ export default {
       isMoveMultiple,
       selectedAddMusicInfo,
       handleShowMusicAddModal,
-      handleShowMusicMoveModal,
     } = useMusicAdd({ selectedList, list })
 
     const {
@@ -196,24 +189,6 @@ export default {
     } = useMusicDownload({ selectedList, list })
 
     const {
-      isShowMusicSortModal,
-      selectedNum,
-      selectedSortMusicInfo,
-      handleShowSortModal,
-      sortMusic,
-    } = useSort({ props, list, selectedList, removeAllSelect })
-
-    const {
-      handleShowMusicToggleModal,
-      isShowMusicToggleModal,
-      selectedToggleMusicInfo,
-      toggleSource,
-    } = useMusicToggle(props, list)
-
-    const {
-      handleSearch,
-      handleOpenMusicDetail,
-      handleCopyName,
       handleDislikeMusic,
       handleRemoveMusic,
     } = useMusicActions({ props, list, removeAllSelect, selectedList })
@@ -231,13 +206,7 @@ export default {
       handleShowDownloadModal,
       handlePlayMusic,
       handlePlayMusicLater,
-      handleShowMusicToggleModal,
-      handleSearch,
       handleShowMusicAddModal,
-      handleShowMusicMoveModal,
-      handleShowSortModal,
-      handleOpenMusicDetail,
-      handleCopyName,
       handleDislikeMusic,
       handleRemoveMusic,
     })
@@ -253,14 +222,18 @@ export default {
     })
 
     const { saveListPosition, restoreScroll } = useListScroll({ props, listRef, list, handleRestoreScroll })
+    const { isSongDragging, handleSongPointerDown, isDragClick } = useSongDrag({ props, list, listRef, listItemHeight, removeAllSelect })
 
 
     const handleListItemClick = (event, index) => {
+      if (isDragClick()) { event.preventDefault(); event.stopPropagation(); return }
       if (rightClickSelectedIndex.value > -1) return
       handleSelectData(index)
       doubleClickPlay(index)
     }
     const handleListItemRightClick = (event, index) => {
+      event.preventDefault()
+      event.stopPropagation()
       rightClickSelectedIndex.value = index
       showMenu(event, list.value[index], index)
     }
@@ -269,19 +242,6 @@ export default {
       rightClickSelectedIndex.value = -1
       menuClick(action, index)
     }
-    const handleListRightClick = (event) => {
-      if (!event.target.classList.contains('select')) return
-      event.stopImmediatePropagation()
-      let classList = dom_listContent.value.classList
-      classList.add('copying')
-      window.requestAnimationFrame(() => {
-        let str = window.getSelection().toString()
-        classList.remove('copying')
-        str = str.split(/\n\n/).map(s => s.replace(/\n/g, '  ')).join('\n').trim()
-        if (!str.length) return
-        clipboardWriteText(str)
-      })
-    }
     const handleListBtnClick = ({ action, index }) => {
       switch (action) {
         case 'download':
@@ -289,9 +249,6 @@ export default {
           break
         case 'play':
           handlePlayMusic(index, true)
-          break
-        case 'search':
-          handleSearch(index)
           break
         case 'listAdd':
           handleShowMusicAddModal(index, true)
@@ -303,6 +260,8 @@ export default {
     }
 
     return {
+      isSongDragging,
+      handleSongPointerDown,
       listItemHeight,
       handleListItemClick,
       selectedList,
@@ -320,7 +279,6 @@ export default {
       menuLocation,
       handleMenuClick,
 
-      handleListRightClick,
       assertApiSupport,
 
       isShowListAdd,
@@ -329,10 +287,6 @@ export default {
       isMoveMultiple,
       selectedAddMusicInfo,
 
-      isShowMusicSortModal,
-      selectedNum,
-      selectedSortMusicInfo,
-      sortMusic,
 
       isShowDownload,
       isShowDownloadMultiple,
@@ -353,9 +307,6 @@ export default {
 
       actionButtonsVisible,
 
-      isShowMusicToggleModal,
-      selectedToggleMusicInfo,
-      toggleSource,
     }
   },
 }
@@ -366,6 +317,7 @@ export default {
 @import '@renderer/assets/styles/layout.less';
 
 .list {
+  min-width: 0;
   overflow: hidden;
   height: 100%;
   flex: auto;
@@ -387,6 +339,12 @@ export default {
       display: inline-block;
     }
   }
+}
+.dragging {
+  cursor: grabbing;
+  user-select: none;
+  :global(.list-item) { cursor: grabbing; }
+  :global(.select) { user-select: none; }
 }
 .num {
   height: 100%;

@@ -468,13 +468,22 @@ export const getThemes = async() => {
 }
 
 /**
+ * 生成 music_url 缓存条目的 id。
+ * 缓存条目的形状是 `<musicInfo.id>_<quality>`（例如 `tx_000Jiy0M0GoxRh_128k`、`kw_629445_128k`），
+ * 读取 / 写入 / 删除都复用这一个函数，避免三处各拼一次字符串而写歪。
+ * @param musicInfo 歌曲信息
+ * @param type URL音质
+ */
+export const createMusicUrlId = (musicInfo: Rain.Music.MusicInfo, type: Rain.Quality) => `${musicInfo.id}_${type}`
+
+/**
  * 从缓存获取歌曲URL
  * @param musicInfo 歌曲信息
  * @param type URL音质
  * @returns
  */
 export const getMusicUrl = async(musicInfo: Rain.Music.MusicInfo, type: Rain.Quality): Promise<string> => {
-  return rendererInvoke<string, string>(WIN_MAIN_RENDERER_EVENT_NAME.get_music_url, `${musicInfo.id}_${type}`)
+  return rendererInvoke<string, string>(WIN_MAIN_RENDERER_EVENT_NAME.get_music_url, createMusicUrlId(musicInfo, type))
 }
 
 /**
@@ -485,10 +494,20 @@ export const getMusicUrl = async(musicInfo: Rain.Music.MusicInfo, type: Rain.Qua
  */
 export const saveMusicUrl = async(musicInfo: Rain.Music.MusicInfo, type: Rain.Quality, url: string) => {
   await rendererInvoke<Rain.Music.MusicUrlInfo>(WIN_MAIN_RENDERER_EVENT_NAME.save_music_url, {
-    id: `${musicInfo.id}_${type}`,
+    id: createMusicUrlId(musicInfo, type),
     url,
   })
 }
+
+/**
+ * 删除单条缓存的歌曲URL（按 id）
+ * @param musicInfo 歌曲信息
+ * @param type URL音质
+ */
+export const removeMusicUrl = async(musicInfo: Rain.Music.MusicInfo, type: Rain.Quality) => {
+  await rendererInvoke<string>(WIN_MAIN_RENDERER_EVENT_NAME.remove_music_url, createMusicUrlId(musicInfo, type))
+}
+
 /**
  * 清理所有缓存的歌曲URL
  */

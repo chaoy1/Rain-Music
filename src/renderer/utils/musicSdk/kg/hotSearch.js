@@ -18,9 +18,9 @@ export default {
         'kg-rc': 1,
       },
     })
-    const { body, statusCode } = await _requestObj.promise
-    if (statusCode != 200 || body.errcode !== 0) throw new Error('获取热搜词失败')
-    // console.log(body, statusCode)
+    const { body, status } = await _requestObj.promise
+    if (status != 200 || body.errcode !== 0) throw new Error('获取热搜词失败')
+    // console.log(body, status)
     return { source: 'kg', list: this.filterList(body.data.list) }
   },
   filterList(rawList) {

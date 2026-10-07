@@ -37,9 +37,9 @@ export default {
     if (retryNum > 2) throw new Error('link try max num')
 
     const requestObj_listDetailLink = httpFetch(link)
-    const { headers: { location }, statusCode } = await requestObj_listDetailLink.promise
+    const { headers: { location }, status } = await requestObj_listDetailLink.promise
     // console.log(headers)
-    if (statusCode > 400) return this.handleParseId(link, ++retryNum)
+    if (status > 400) return this.handleParseId(link, ++retryNum)
     const url = location == null ? link : location
     return this.regExps.listDetailLink.test(url)
       ? url.replace(this.regExps.listDetailLink, '$1')
@@ -87,8 +87,8 @@ export default {
         },
       }),
     })
-    const { statusCode, body } = await requestObj_listDetail.promise
-    if (statusCode !== 200 || body.code !== this.successCode) return this.getListDetail(id, page, ++tryNum)
+    const { status, body } = await requestObj_listDetail.promise
+    if (status !== 200 || body.code !== this.successCode) return this.getListDetail(id, page, ++tryNum)
     let limit = 1000
     let rangeStart = (page - 1) * limit
     // console.log(body)

@@ -1,7 +1,7 @@
-import { Tray, Menu, nativeImage } from 'electron'
+import { Tray, Menu, nativeTheme } from 'electron'
 import { isMac, isWin } from '@common/utils'
 import path from 'node:path'
-import fs from 'node:fs'
+import { buildTrayImage } from './trayImage'
 import {
   hideWindow as hideMainWindow,
   isExistWindow as isExistMainWindow,
@@ -114,86 +114,16 @@ const i18n = {
   },
 }
 
-// 托盘字形固定为黑色（等价于原来 themeList 里 id 2 = tray_black，也即 TRAY_THEME_ID）。
-// 原来在这里的 themeList 映射表（trayTemplate / tray_origin / tray_black）
-// 以及按任务栏明暗自动切换字形的 TRAY_AUTO_ID 逻辑，都因为只剩一种固定样式而删除。
-const TRAY_IMAGE_NAME = 'tray_black'
-
-const trayImageDir = () => path.join(global.staticPath, 'images/tray')
-
-/** 基图路径：Windows 用 .ico，其它平台用 .png */
-const trayImagePath = (fileName: string) =>
-  path.join(trayImageDir(), fileName + (isWin ? '.ico' : '.png'))
-
-/** PNG 文件头校验：addRepresentation 只接受真正的 PNG 数据。 */
-const isPng = (buffer: Buffer) =>
-  buffer.length > 8 &&
-  buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47
-
-/**
- * 读取某个分辨率变体的 PNG 数据，文件缺失或不是 PNG 时返回 null。
- *
- * tray 目录下基图只有 16×16，另有 @1.25x / @1.5x / @2x 的 PNG 变体。
- * 高分屏上只给基图会被系统放大导致发糊，因此这里逐个探测。
- * 缺图时必须能优雅降级，绝不能让应用因找不到文件而启动失败。
- */
-const readTrayImagePng = (fileName: string): Buffer | null => {
-  try {
-    const buffer = fs.readFileSync(path.join(trayImageDir(), fileName + '.png'))
-    return isPng(buffer) ? buffer : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * 构造带多分辨率表示的托盘图标。
- *
- * 基图（Windows 为 .ico，其它平台为 .png）仍用 createFromPath 加载，
- * 保持原有行为不变；再按 scaleFactor 依次加入 @1.25x / @1.5x / @2x 的
- * PNG 表示，缺失或不是 PNG 的变体直接跳过。
- *
- * Windows 上额外有 @2x.ico（与基图同格式，也是 32×32）：
- * 它不是 PNG，无法作为表示数据，但文件存在时不会影响结果 ——
- * 基图本身就已经是多分辨率 .ico，系统会自行挑选合适尺寸。
- * 因此这里不做任何可能失败的 ICO 解析。
- *
- * 连基图都读不到时返回空 nativeImage，由调用方决定是否创建托盘。
- */
-const buildTrayImage = (): Electron.NativeImage => {
-  const basePath = trayImagePath(TRAY_IMAGE_NAME)
-  let baseExists = false
-  try {
-    baseExists = fs.statSync(basePath).isFile()
-  } catch {
-    baseExists = false
-  }
-  if (!baseExists) return nativeImage.createEmpty()
-
-  const image = nativeImage.createFromPath(basePath)
-  if (image.isEmpty()) return image
-
-  const variants: Array<{ scaleFactor: number, fileName: string }> = [
-    { scaleFactor: 1.25, fileName: `${TRAY_IMAGE_NAME}@1.25x` },
-    { scaleFactor: 1.5, fileName: `${TRAY_IMAGE_NAME}@1.5x` },
-    { scaleFactor: 2, fileName: `${TRAY_IMAGE_NAME}@2x` },
-  ]
-  for (const { scaleFactor, fileName } of variants) {
-    const variantBuffer = readTrayImagePng(fileName)
-    if (!variantBuffer) continue
-    image.addRepresentation({
-      scaleFactor,
-      buffer: variantBuffer,
-    })
-  }
-
-  return image
-}
+const getTrayImage = () => buildTrayImage(
+  path.join(global.staticPath, 'images/tray'),
+  isWin && nativeTheme.shouldUseDarkColorsForSystemIntegratedUI,
+  isWin,
+)
 
 export const createTray = () => {
   if (tray && !tray.isDestroyed()) return
 
-  const image = buildTrayImage()
+  const image = getTrayImage()
   if (image.isEmpty()) {
     // 图标资源缺失：不创建托盘，避免 Tray 构造抛错导致启动失败。
     console.error('[tray] 找不到托盘图标资源，已跳过托盘创建')

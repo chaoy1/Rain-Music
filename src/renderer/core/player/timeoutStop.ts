@@ -1,6 +1,5 @@
 import { ref, computed, type ComputedRef } from '@common/utils/vueTools'
 import { isPlay } from '@renderer/store/player/state'
-import { appSetting } from '@renderer/store/setting'
 // import { interval, intervalCancel } from '@renderer/utils/ipc'
 import { pause } from './action'
 
@@ -24,9 +23,7 @@ const timeoutTools: {
   interval: null,
   exit() {
     window.rain.isPlayedStop = true
-    if (!appSetting['player.waitPlayEndStop'] && isPlay.value) {
-      pause()
-    }
+    if (isPlay.value) pause()
   },
   clearTimeout() {
     if (this.interval) {
@@ -66,12 +63,19 @@ const timeoutTools: {
   },
 }
 
+export const minutesToTimeoutSeconds = (minutes: string | number): number | null => {
+  const value = String(minutes).trim()
+  if (!/^\d+$/.test(value)) return null
+  const duration = Number(value)
+  return duration >= 1 && duration <= 1440 ? duration * 60 : null
+}
+
 export const startTimeoutStop = (time: number) => {
+  if (!Number.isFinite(time) || time <= 0 || time > 86400) return
   window.rain.isPlayedStop &&= false
   timeoutTools.start(time)
 }
 export const stopTimeoutStop = () => {
-  console.warn('stopTimeoutStop')
   window.rain.isPlayedStop &&= false
   timeoutTools.clearTimeout()
 }

@@ -1,5 +1,4 @@
 import { computed, ref, reactive, nextTick } from '@common/utils/vueTools'
-import musicSdk from '@renderer/utils/musicSdk'
 import { useI18n } from '@renderer/plugins/i18n'
 import { hasDislike } from '@renderer/core/dislikeList'
 
@@ -11,9 +10,7 @@ export default ({
   handleShowDownloadModal,
   handlePlayMusic,
   handlePlayMusicLater,
-  handleSearch,
   handleShowMusicAddModal,
-  handleOpenMusicDetail,
   handleDislikeMusic,
 }) => {
   const itemMenuControl = reactive({
@@ -21,8 +18,6 @@ export default ({
     addTo: true,
     playLater: true,
     download: true,
-    search: true,
-    sourceDetail: true,
     dislike: true,
   })
   const t = useI18n()
@@ -47,19 +42,9 @@ export default ({
         disabled: !itemMenuControl.playLater,
       },
       {
-        name: t('list__search'),
-        action: 'search',
-        disabled: !itemMenuControl.search,
-      },
-      {
         name: t('list__add_to'),
         action: 'addTo',
         disabled: !itemMenuControl.addTo,
-      },
-      {
-        name: t('list__source_detail'),
-        action: 'sourceDetail',
-        disabled: !itemMenuControl.sourceDetail,
       },
       {
         name: t('list__dislike'),
@@ -70,7 +55,6 @@ export default ({
   })
 
   const showMenu = (event, musicInfo) => {
-    itemMenuControl.sourceDetail = !!musicSdk[musicInfo.source]?.getMusicDetailPageUrl
     // this.listMenu.itemMenuControl.play =
     //   this.listMenu.itemMenuControl.playLater =
     itemMenuControl.download = assertApiSupport(musicInfo.source)
@@ -112,14 +96,8 @@ export default ({
       case 'playLater':
         handlePlayMusicLater(index)
         break
-      case 'search':
-        handleSearch(index)
-        break
       case 'addTo':
         handleShowMusicAddModal(index)
-        break
-      case 'sourceDetail':
-        handleOpenMusicDetail(index)
         break
       case 'dislike':
         handleDislikeMusic(index)

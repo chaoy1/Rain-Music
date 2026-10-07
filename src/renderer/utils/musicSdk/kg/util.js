@@ -34,8 +34,8 @@ export const createHttpFetch = async(url, options, retryNum = 0) => {
     console.log(err)
     return createHttpFetch(url, options, ++retryNum)
   }
-  // console.log(result.statusCode, result.body)
-  if (result.statusCode !== 200 ||
+  // console.log(result.status, result.body)
+  if (result.status !== 200 ||
     (
       result.body.error_code ??
       result.body.errcode ??

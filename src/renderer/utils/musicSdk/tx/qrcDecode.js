@@ -1,4 +1,4 @@
-import { inflate, constants } from 'zlib'
+import { Inflate, Z_SYNC_FLUSH } from '@common/utils/zlib'
 
 /**
  * QRC 歌词解密（3DES-ECB + zlib inflate）
@@ -219,11 +219,16 @@ const QRC_KEY = Buffer.from([
 ])
 
 const handleInflate = (data) => new Promise((resolve, reject) => {
-  // Z_SYNC_FLUSH：容忍尾部不完整的 zlib 流（对应原实现忽略 Z_BUF_ERROR 的行为）
-  inflate(data, { finishFlush: constants.Z_SYNC_FLUSH }, (err, result) => {
-    if (err) reject(err)
-    else resolve(result)
-  })
+  // Z_SYNC_FLUSH：容忍尾部不完整的 zlib 流（对应原实现忽略 Z_BUF_ERROR 的行为）。
+  // 阶段 3：`node:zlib` 的 `inflate(data, { finishFlush: constants.Z_SYNC_FLUSH }, cb)`
+  // 换成纯 JS 的 `pako.Inflate#push(data, Z_SYNC_FLUSH)` —— 保留原来那个 `finishFlush` 语义，
+  // 而不是用 `pako.inflate()`（它内部固定 `push(data, true)`，即 Z_FINISH，是否容忍截断流
+  // 取决于 pako 版本；本机 pako 1.0.11 实测两者结果相同，见
+  // `tests/unit/rsa-no-padding.test.cjs`，但不把结论押在版本行为上）。
+  const inflator = new Inflate()
+  inflator.push(data, Z_SYNC_FLUSH)
+  if (inflator.err) return reject(new Error(inflator.msg || `inflate error ${inflator.err}`))
+  resolve(Buffer.from(inflator.result))
 })
 /**
  * 解密腾讯 QRC 歌词。

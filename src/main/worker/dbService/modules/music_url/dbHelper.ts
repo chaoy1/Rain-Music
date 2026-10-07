@@ -13,23 +13,23 @@ import {
  * @param id 歌曲id
  * @returns url
  */
-export const queryMusicUrl = (id: string) => {
+export const queryMusicUrl = async(id: string) => {
   const queryStatement = createQueryStatement()
-  return (queryStatement.get(id) as { url: string } | null)?.url ?? null
+  return ((await queryStatement.get(id)) as { url: string } | null)?.url ?? null
 }
 
 /**
  * 批量插入歌曲url
  * @param urlInfo 列表
  */
-export const insertMusicUrl = (urlInfo: Rain.DBService.MusicUrlInfo[]) => {
+export const insertMusicUrl = async(urlInfo: Rain.DBService.MusicUrlInfo[]) => {
   const db = getDB()
   const insertStatement = createInsertStatement()
   const deleteStatement = createDeleteStatement()
-  db.transaction((urlInfo: Rain.DBService.MusicUrlInfo[]) => {
+  await db.transaction(async(urlInfo: Rain.DBService.MusicUrlInfo[]) => {
     for (const info of urlInfo) {
-      deleteStatement.run(info.id)
-      insertStatement.run(info)
+      await deleteStatement.run(info.id)
+      await insertStatement.run(info)
     }
   })(urlInfo)
 }
@@ -38,11 +38,11 @@ export const insertMusicUrl = (urlInfo: Rain.DBService.MusicUrlInfo[]) => {
  * 批量删除歌曲url
  * @param ids 列表
  */
-export const deleteMusicUrl = (ids: string[]) => {
+export const deleteMusicUrl = async(ids: string[]) => {
   const db = getDB()
   const deleteStatement = createDeleteStatement()
-  db.transaction((ids: string[]) => {
-    for (const id of ids) deleteStatement.run(id)
+  await db.transaction(async(ids: string[]) => {
+    for (const id of ids) await deleteStatement.run(id)
   })(ids)
 }
 
@@ -50,26 +50,26 @@ export const deleteMusicUrl = (ids: string[]) => {
  * 批量更新歌曲url
  * @param urlInfo 列表
  */
-// export const updateMusicUrl = (urlInfo: Rain.DBService.MusicUrlInfo[]) => {
+// export const updateMusicUrl = async(urlInfo: Rain.DBService.MusicUrlInfo[]) => {
 //   const db = getDB()
 //   const updateStatement = createUpdateStatement()
-//   db.transaction((urlInfo: Rain.DBService.MusicUrlInfo[]) => {
-//     for (const info of urlInfo) updateStatement.run(info)
+//   await db.transaction(async(urlInfo: Rain.DBService.MusicUrlInfo[]) => {
+//     for (const info of urlInfo) await updateStatement.run(info)
 //   })(urlInfo)
 // }
 
 /**
  * 清空歌曲url
  */
-export const clearMusicUrl = () => {
+export const clearMusicUrl = async() => {
   const clearStatement = createClearStatement()
-  clearStatement.run()
+  await clearStatement.run()
 }
 
 /**
  * 统计歌曲信息数量
  */
-export const countMusicUrl = () => {
+export const countMusicUrl = async() => {
   const countStatement = createCountStatement()
-  return (countStatement.get() as { count: number }).count
+  return ((await countStatement.get()) as { count: number }).count
 }

@@ -2,13 +2,20 @@ import { onBeforeUnmount } from '@common/utils/vueTools'
 import { useI18n } from '@renderer/plugins/i18n'
 import { musicInfo, playMusicInfo } from '@renderer/store/player/state'
 import { setStop, isEmpty } from '@renderer/plugins/player'
-import { playNext, setMusicUrl } from '@renderer/core/player'
+import {
+  playNext,
+  setMusicUrl,
+  getMusicUrlRefreshNum,
+  increaseMusicUrlRefreshNum,
+  resetMusicUrlRefreshNum,
+  MAX_MUSIC_URL_REFRESH_TIMES,
+} from '@renderer/core/player'
+import { removeMusicUrlCache } from '@renderer/core/music'
 import { setAllStatus } from '@renderer/store/player/action'
 import { AUTO_SKIP_ON_ERROR } from '@common/constants'
 
 export default () => {
   const t = useI18n()
-  let retryNum = 0
   let prevTimeoutId: string | null = null
 
   let loadingTimeout: NodeJS.Timeout | null = null
@@ -86,12 +93,23 @@ export default () => {
     clearLoadingTimeout()
     if (window.rain.isPlayedStop) return
     if (!isEmpty()) setStop()
-    if (playMusicInfo.musicInfo && errCode !== 1 && retryNum < 2) { // 若音频URL无效则尝试刷新2次URL
-      // console.log(this.retryNum)
-      retryNum++
+    // 若音频URL无效则尝试刷新2次URL。
+    // 刷新计数由 core/player/action.ts 持有：只有「新的一次播放」
+    // （setMusicUrl 以 isRefresh 为假调用）才会把它清零，
+    // 刷新动作本身（isRefresh = true）永远不会清零，所以这里的上限依然成立。
+    if (playMusicInfo.musicInfo && errCode !== 1 && getMusicUrlRefreshNum() < MAX_MUSIC_URL_REFRESH_TIMES) {
+      // console.log(getMusicUrlRefreshNum())
+      increaseMusicUrlRefreshNum()
       setMusicUrl(playMusicInfo.musicInfo, true)
       setAllStatus(t('player__refresh_url'))
       return
+    }
+
+    // 刷新 2 次仍失败、即将放弃：删掉这首歌（该音质）在 music_url 里的失效缓存，
+    // 让下一次播放直接 cache miss、重新向音源取，而不是先拿一条死链再白跑一轮刷新。
+    // 删除失败不能影响播放流程，这里吞掉异常。
+    if (playMusicInfo.musicInfo && errCode !== 1) {
+      void removeMusicUrlCache(playMusicInfo.musicInfo).catch(() => {})
     }
 
     if (AUTO_SKIP_ON_ERROR) {
@@ -106,7 +124,8 @@ export default () => {
   }
 
   const handleSetPlayInfo = () => {
-    retryNum = 0
+    // 切歌（playMusicInfo 变更）同样属于「新的一次播放」，一并清零。
+    resetMusicUrlRefreshNum()
     prevTimeoutId = null
     clearDelayNextTimeout()
     clearLoadingTimeout()

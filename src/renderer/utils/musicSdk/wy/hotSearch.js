@@ -9,8 +9,8 @@ export default {
     const _requestObj = eapiRequest('/api/search/chart/detail', {
       id: 'HOT_SEARCH_SONG#@#',
     })
-    const { body, statusCode } = await _requestObj.promise
-    if (statusCode != 200 || body.code !== 200) throw new Error('获取热搜词失败')
+    const { body, status } = await _requestObj.promise
+    if (status != 200 || body.code !== 200) throw new Error('获取热搜词失败')
 
     return { source: 'wy', list: this.filterList(body.data.itemList) }
   },

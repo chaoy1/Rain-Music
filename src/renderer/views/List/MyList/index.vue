@@ -244,7 +244,7 @@ export default {
   background: transparent;
   border-right: 1px solid var(--glass-edge);
   flex: none;
-  width: 18%;
+  width: clamp(148px, 18%, 224px);
   min-width: 148px;
   display: flex;
   flex-flow: column nowrap;

@@ -23,7 +23,7 @@ test('removed player settings are not migrated any more', () => {
 const settingUtils = () => load('src/main/utils/index.ts', {
   '@common/utils': { throttle: f => f },
   '@common/utils/migrateSetting': { default: x => x, __esModule: true },
-  '@main/utils/store': () => ({ override() {} }),
+  '@main/platform/storage/adapter': () => ({ override() {} }),
   '@common/constants': { STORE_NAMES: {} },
   '@common/defaultSetting': { version: '2.12.8', 'common.fontSize': 16, 'theme.id': 'auto' },
   '@common/defaultHotKey': {}, './migrate': {},

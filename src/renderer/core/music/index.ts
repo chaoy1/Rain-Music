@@ -18,6 +18,8 @@ import {
   getLyricInfo as getLocalLyricInfo,
 } from './local'
 
+export { getMusicUrlCacheInfo, removeMusicUrlCache } from './utils'
+
 
 export const getMusicUrl = async({
   musicInfo,

@@ -46,6 +46,10 @@ export default () => {
   mainHandle<Rain.Music.MusicUrlInfo>(WIN_MAIN_RENDERER_EVENT_NAME.save_music_url, async({ params: { id, url } }) => {
     await global.rain.worker.dbService.musicUrlSave([{ id, url }])
   })
+  // 删除单条缓存的歌曲URL（播放刷新多次仍失败时，用于丢弃已失效的直链）
+  mainHandle<string>(WIN_MAIN_RENDERER_EVENT_NAME.remove_music_url, async({ params: id }) => {
+    await global.rain.worker.dbService.musicUrlRemove([id])
+  })
   mainHandle(WIN_MAIN_RENDERER_EVENT_NAME.clear_music_url, async() => {
     await global.rain.worker.dbService.musicUrlClear()
   })

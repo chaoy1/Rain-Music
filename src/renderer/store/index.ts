@@ -3,7 +3,12 @@ import { windowSizeList as configWindowSizeList } from '@common/config'
 import { appSetting } from './setting'
 import pkg from '../../../package.json'
 import music from '@renderer/utils/musicSdk'
-process.versions.app = pkg.version
+// 阶段 3：`process.versions.app` 的**唯一**读取处（`utils/request.js` 里的 `bHtml` deflate
+// 分支）已随死代码一起删除。这里保留赋值以兼容外部读取，但补一层宿主判定 ——
+// Web/Android 端的 `process` 是构建期 polyfill（webpack `ProvidePlugin` 注入的模块变量，
+// **不**挂在 globalThis 上），不能再假设 Node 的 process 一定存在
+// （`docs/android/native-bridge-needs.md` §2.6.1）。
+if (globalThis.process?.versions != null) globalThis.process.versions.app = pkg.version
 
 export const apiSource = ref<string | null>(null)
 

@@ -1,6 +1,6 @@
 import { userApis as defaultUserApis } from './config'
 import { STORE_NAMES } from '@common/constants'
-import getStore from '@main/utils/store'
+import getStore from '@main/platform/storage/adapter'
 import zlib from 'node:zlib'
 
 let userApis: Rain.UserApi.UserApiInfo[] | null

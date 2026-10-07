@@ -23,8 +23,8 @@ const toDBMusicInfo = (id: string, musicInfos: Rain.Music.MusicInfo[]): Rain.DBS
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const getMusicInfoOtherSource = (id: string): Rain.Music.MusicInfoOnline[] => {
-  const list = queryMusicInfo(id).sort((a, b) => a.order - b.order).map(info => {
+export const getMusicInfoOtherSource = async(id: string): Promise<Rain.Music.MusicInfoOnline[]> => {
+  const list = (await queryMusicInfo(id)).sort((a, b) => a.order - b.order).map(info => {
     return {
       id: info.id,
       name: info.name,
@@ -43,30 +43,30 @@ export const getMusicInfoOtherSource = (id: string): Rain.Music.MusicInfoOnline[
  * @param id 歌曲id
  * @param musicInfos 歌词信息
  */
-export const musicInfoOtherSourceAdd = (id: string, musicInfos: Rain.Music.MusicInfoOnline[]) => {
-  insertMusicInfo(toDBMusicInfo(id, musicInfos))
+export const musicInfoOtherSourceAdd = async(id: string, musicInfos: Rain.Music.MusicInfoOnline[]) => {
+  await insertMusicInfo(toDBMusicInfo(id, musicInfos))
 }
 
 /**
  * 删除歌曲信息信息
  * @param ids 歌曲id
  */
-export const musicInfoOtherSourceRemove = (ids: string[]) => {
-  deleteMusicInfo(ids)
+export const musicInfoOtherSourceRemove = async(ids: string[]) => {
+  await deleteMusicInfo(ids)
 }
 
 /**
  * 清空歌曲信息信息
  */
-export const musicInfoOtherSourceClear = () => {
-  clearMusicInfo()
+export const musicInfoOtherSourceClear = async() => {
+  await clearMusicInfo()
 }
 
 
 /**
  * 统计歌曲信息信息数量
  */
-export const musicInfoOtherSourceCount = () => {
-  return countMusicInfo()
+export const musicInfoOtherSourceCount = async() => {
+  return await countMusicInfo()
 }
 

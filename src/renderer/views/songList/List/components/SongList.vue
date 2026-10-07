@@ -105,15 +105,17 @@ defineExpose({
   padding: 18px;
 
   ul {
-    display: flex;
-    flex-flow: row wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+    width: 100%;
+    max-width: 1760px;
+    margin: 0 auto;
     gap: 20px;
     align-items: flex-start;
   }
 }
 .item {
-  max-width: 360px;
-  width: calc((100% - 40px) / 3);
+  min-width: 0;
   padding: 8px;
   border-radius: 12px;
   border: 0;
@@ -221,5 +223,4 @@ defineExpose({
   }
 }
 
-@media (max-width: 1000px) { .item { width: calc((100% - 20px) / 2); } }
 </style>

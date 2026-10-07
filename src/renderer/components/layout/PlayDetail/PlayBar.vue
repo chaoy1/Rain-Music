@@ -35,7 +35,9 @@ const seekByKey = event => {
 <style lang="less" module>
 .dock {
   flex: none;
-  width: min(100%, 340px);
+  // Five 40px hit targets and the transport need room even when a short
+  // window reduces the cover below the dock's comfortable minimum width.
+  width: min(100%, max(280px, var(--detail-cover-size, 340px)));
   box-sizing: border-box;
   padding: 14px 18px 16px;
   border-radius: 20px;
@@ -54,14 +56,15 @@ const seekByKey = event => {
     color: var(--color-font);
     cursor: pointer;
     transition: background-color .18s ease;
-    svg { width: 18px; height: 18px; fill: currentColor; }
+    svg { width: 18px; height: 18px; }
     &:hover:not(:disabled) { background: var(--control-hover); }
     &:disabled { opacity: .25; cursor: default; }
     &:focus-visible { outline: 2px solid var(--control-outline); outline-offset: 2px; }
   }
 }
 .timeline { position: relative; display: flex; align-items: center; height: 24px; cursor: pointer; border-radius: 4px; &:focus-visible { outline: 2px solid var(--control-outline); outline-offset: 2px; } }
-.progress { height: 3px !important; background: var(--control-outline) !important; > div { background: var(--control-ink); } }
+.progress { height: 4px; }
 .time { display: flex; justify-content: space-between; font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; opacity: .58; }
 .primary { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 8px; margin-top: 10px; min-height: 52px; > button { opacity: .8; } }
+.primary :global([data-playback-controls]) { justify-content: space-evenly; }
 </style>

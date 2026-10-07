@@ -71,16 +71,22 @@ app.on('browser-window-created', (_, win) => {
       }
       await evaluate(win, `location.hash='#/setting';void 0`)
       await wait(300)
+      // 设置页现在是「目录 + 滚动分区」的单页布局：目录项是 `[data-settings-nav]` 按钮，
+      // 分区是 `[data-settings-section]`。「列表设置」分区及其 `list.*` 设置项已随产品精简整体删除，
+      // 因此这里改用仍然存在的「下载设置」分区，保留原来的验证意图：
+      // 点击目录项 → 该分区成为当前分区（aria-current）并渲染出自己的内容。
+      await evaluate(win, `document.querySelector('#view [data-settings-nav="SettingDownload"]').click();void 0`)
+      // 目录项用 scrollTo({behavior:'smooth'}) 滚动分区，等它滚完再断言（Chromium 平滑滚动上限约 700ms）。
+      await wait(900)
+      check('settings directory activates the clicked section',await evaluate(win, `(() => {const nav=document.querySelector('#view [data-settings-nav="SettingDownload"]');const section=document.querySelector('#view [data-settings-section="SettingDownload"]');const box=document.querySelector('#setting_download_enable');if(!nav||!section||!box)return false;const s=section.getBoundingClientRect(),v=document.querySelector('#view').getBoundingClientRect();return nav.getAttribute('aria-current')==='true'&&section.contains(box)&&s.top>=v.top-1&&s.top<v.bottom;})()`))
       // 基本设置分区已不再提供普通复选框（动画、全屏启动等控件已删除），
-      // 改用列表设置分区的「显示歌曲来源平台」复选框验证同一个复选控件的样式与无障碍状态。
-      await evaluate(win, `document.querySelector('#view [role=toolbar] [role=tab][aria-label="列表设置"]').click();void 0`)
-      await wait(300)
-      await evaluate(win, `document.querySelector('#setting_list_showSource_enable').click();void 0`)
+      // 改用下载设置分区的「启用下载」复选框验证同一个复选控件的样式与无障碍状态。
+      await evaluate(win, `document.querySelector('#setting_download_enable').click();void 0`)
       await wait(250)
-      check('restyled checkbox toggles its setting and accessible state',await evaluate(win, `window.rainData.appSetting['list.isShowSource']===false&&document.querySelector('#setting_list_showSource_enable').nextElementSibling.querySelector('[role=checkbox]').getAttribute('aria-checked')==='false'`))
-      await evaluate(win, `document.querySelector('#setting_list_showSource_enable').click();void 0`)
+      check('restyled checkbox toggles its setting and accessible state',await evaluate(win, `window.rainData.appSetting['download.enable']===false&&document.querySelector('#setting_download_enable').nextElementSibling.querySelector('[role=checkbox]').getAttribute('aria-checked')==='false'`))
+      await evaluate(win, `document.querySelector('#setting_download_enable').click();void 0`)
       await wait(250)
-      check('restyled checkbox can restore its enabled setting',await evaluate(win, `window.rainData.appSetting['list.isShowSource']===true`))
+      check('restyled checkbox can restore its enabled setting',await evaluate(win, `window.rainData.appSetting['download.enable']===true`))
       await evaluate(win, `location.hash='#/search'; window.rainData.updateSetting({'theme.id':'mono'}); void 0`)
       await wait(500)
       const suggestions=await evaluate(win, `(() => {const find=v=>{if(!v)return; if(v.component?.type?.props?.visibleList)return v.component; const sub=find(v.component?.subTree);if(sub)return sub;for(const child of Array.isArray(v.children)?v.children:[]){const c=find(child);if(c)return c;}};const c=find(document.querySelector('#root')._vnode);if(!c)return false;window.suggestionComponent=c;c.props.list=['轻柔音乐','晚间爵士']; c.props.visibleList=true; c.proxy.focus=true; c.proxy.selectIndex=0;return true;})()`)

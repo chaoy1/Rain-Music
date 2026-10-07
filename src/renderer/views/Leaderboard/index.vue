@@ -119,7 +119,7 @@ export default {
 
 .lists {
   flex: none;
-  width: 18%;
+  width: clamp(148px, 18%, 224px);
   min-width: 148px;
   border-right: 1px solid var(--glass-edge);
   background: transparent;
@@ -182,6 +182,7 @@ export default {
 }
 
 .list {
+  min-width: 0;
   position: relative;
   overflow: hidden;
   height: 100%;

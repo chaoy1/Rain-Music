@@ -1,15 +1,16 @@
-import Database from 'better-sqlite3'
 import path from 'path'
 import { existsSync } from 'fs'
 import tables, { DB_VERSION } from './tables'
 import verifyDB from './verifyDB'
 import migrateData from './migrate'
+import { createSQLAdapter } from './adapter'
+import { type SQLAdapter } from './adapter/types'
 
-let db: Database.Database
+let db: SQLAdapter
 
 
-const initTables = (db: Database.Database) => {
-  db.exec(`
+const initTables = async(db: SQLAdapter) => {
+  await db.exec(`
     ${Array.from(tables.values()).join('\n')}
     INSERT INTO "main"."db_info" ("field_name", "field_value") VALUES ('version', '${DB_VERSION}');
   `)
@@ -17,7 +18,7 @@ const initTables = (db: Database.Database) => {
 
 
 // 打开、初始化数据库
-export const init = (rainDataPath: string): boolean | null => {
+export const init = async(rainDataPath: string): Promise<boolean | null> => {
   const databasePath = path.join(rainDataPath, 'rain.data.db')
   const nativeBinding = path.join(__dirname, '../node_modules/better-sqlite3/build/Release/better_sqlite3.node')
 
@@ -29,7 +30,8 @@ export const init = (rainDataPath: string): boolean | null => {
 
   if (dbFileExists) {
     try {
-      db = new Database(databasePath, {
+      db = createSQLAdapter({
+        databasePath,
         fileMustExist: true,
         nativeBinding,
       })
@@ -40,23 +42,24 @@ export const init = (rainDataPath: string): boolean | null => {
   }
 
   if (!dbFileExists) {
-    db = new Database(databasePath, {
+    db = createSQLAdapter({
+      databasePath,
       nativeBinding,
     })
-    initTables(db)
+    await initTables(db)
   }
   try {
-    db.pragma('journal_mode = WAL')
-    if (dbFileExists) migrateData(db)
+    await db.pragma('journal_mode = WAL')
+    if (dbFileExists) await migrateData(db)
     // https://www.sqlite.org/pragma.html#pragma_optimize
-    if (dbFileExists) db.exec('PRAGMA optimize;')
-    if (!verifyDB(db)) {
-      db.close()
+    if (dbFileExists) await db.exec('PRAGMA optimize;')
+    if (!await verifyDB(db)) {
+      await db.close()
       return null
     }
   } catch (error) {
     console.log(error)
-    db.close()
+    await db.close()
     if (!dbFileExists) throw error
     return null
   }
@@ -64,11 +67,14 @@ export const init = (rainDataPath: string): boolean | null => {
   // https://www.sqlite.org/lang_vacuum.html
   // db.exec('VACUUM "main"')
 
-  process.on('exit', () => db.close())
+  // `process.on` 只有 Node（桌面版 worker_threads）才有；Android WebView / Web Worker 里没有进程概念，
+  // 关库由 Capacitor 生命周期负责，因此这里按宿主能力注册。
+  const hostProcess = (globalThis as { process?: { on?: (event: string, listener: () => void) => void } }).process
+  if (typeof hostProcess?.on === 'function') hostProcess.on('exit', () => { void db.close() })
   console.log('db inited')
   // require('./test')
   return dbFileExists
 }
 
 // 获取数据库实例
-export const getDB = (): Database.Database => db
+export const getDB = (): SQLAdapter => db

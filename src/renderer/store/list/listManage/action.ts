@@ -8,6 +8,7 @@ import {
 import { overwriteListPosition, overwriteListUpdateInfo, removeListPosition, removeListUpdateInfo } from '@renderer/utils/data'
 import { LIST_IDS } from '@common/constants'
 import { arrPush, arrUnshift } from '@common/utils/common'
+import { dedupePlaybackQueue, filterPlaybackQueueAdditions } from '@common/utils/playbackQueue'
 
 export const setUserLists = (lists: Rain.List.UserListInfo[]) => {
   userLists.splice(0, userLists.length, ...lists)
@@ -15,12 +16,14 @@ export const setUserLists = (lists: Rain.List.UserListInfo[]) => {
 }
 
 export const setMusicList = (listId: string, musicList: Rain.Music.MusicInfo[]) => {
+  if (listId == LIST_IDS.DEFAULT) musicList = dedupePlaybackQueue(musicList)
   const list = markRawList(musicList)
   allMusicList.set(listId, list)
   return list
 }
 
 const overwriteMusicList = (id: string, list: Rain.Music.MusicInfo[]) => {
+  if (id == LIST_IDS.DEFAULT) list = dedupePlaybackQueue(list)
   // console.log(id, list)
   markRawList(list)
   let targetList = allMusicList.get(id)
@@ -222,7 +225,7 @@ export const listMusicAdd = (id: string, musicInfos: Rain.Music.MusicInfo[], add
 
   const listSet = new Set<string>()
   for (const item of targetList) listSet.add(item.id)
-  musicInfos = musicInfos.filter(item => {
+  musicInfos = id == LIST_IDS.DEFAULT ? filterPlaybackQueueAdditions(targetList, musicInfos).map(item => markRaw(item)) : musicInfos.filter(item => {
     if (listSet.has(item.id)) return false
     markRaw(item)
     listSet.add(item.id)

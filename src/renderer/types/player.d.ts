@@ -51,6 +51,9 @@ declare namespace Rain {
       maxTime: number
       listId: string
       index: number
+      musicId?: string
+      musicName?: string
+      musicSinger?: string
     }
 
   }

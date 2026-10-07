@@ -150,7 +150,7 @@ export default {
     //   return this.getBoards(retryNum)
     // }
     // console.log(response.body)
-    // if (response.statusCode !== 200 || response.body.code !== 200) return this.getBoards(retryNum)
+    // if (response.status !== 200 || response.body.code !== 200) return this.getBoards(retryNum)
     // const list = this.filterBoardsData(response.body.list)
     // console.log(list)
     // console.log(JSON.stringify(list))
@@ -178,7 +178,7 @@ export default {
         return this.getList(bangid, page, retryNum)
       }
     }
-    if (resp.statusCode !== 200 || resp.body.code !== 200) return this.getList(bangid, page, retryNum)
+    if (resp.status !== 200 || resp.body.code !== 200) return this.getList(bangid, page, retryNum)
     // console.log(resp.body)
     let musicDetail
     try {

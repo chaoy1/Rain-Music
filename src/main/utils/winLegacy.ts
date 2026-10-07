@@ -2,7 +2,7 @@ import os from 'node:os'
 
 import { dialog } from 'electron'
 import { STORE_NAMES } from '@common/constants'
-import getStore from '@main/utils/store'
+import getStore from '@main/platform/storage/adapter'
 import { openUrl } from '@common/utils/electron'
 
 

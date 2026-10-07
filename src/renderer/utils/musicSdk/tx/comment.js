@@ -110,9 +110,9 @@ export default {
         pagesize: limit,
       },
     })
-    const { body, statusCode } = await _requestObj.promise
-    if (statusCode != 200 || body.code !== 0) throw new Error('获取评论失败')
-    // console.log(body, statusCode)
+    const { body, status } = await _requestObj.promise
+    if (status != 200 || body.code !== 0) throw new Error('获取评论失败')
+    // console.log(body, status)
     const comment = body.comment
     return {
       source: 'tx',
@@ -180,9 +180,9 @@ export default {
         origin: 'https://y.qq.com',
       },
     })
-    const { body, statusCode } = await _requestObj2.promise
+    const { body, status } = await _requestObj2.promise
     // console.log('body', body)
-    if (statusCode != 200 || body.code !== 0 || body.req.code !== 0) throw new Error('获取热门评论失败')
+    if (status != 200 || body.code !== 0 || body.req.code !== 0) throw new Error('获取热门评论失败')
     const comment = body.req.data.CommentList
     return {
       source: 'tx',

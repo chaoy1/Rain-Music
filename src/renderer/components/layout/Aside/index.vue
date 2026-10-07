@@ -1,13 +1,13 @@
 <template>
   <div :class="$style.aside">
-    <div :class="$style.windowHeader"><TrafficLights /></div>
+    <div :class="$style.windowHeader"><WindowControls /></div>
     <div :class="$style.brand"><span :class="$style.mark">Rain</span><span>Music</span></div>
     <NavBar />
   </div>
 </template>
 
 <script setup>
-import TrafficLights from '../Toolbar/TrafficLights.vue'
+import WindowControls from '@renderer/platform/WindowControls.vue'
 import NavBar from './NavBar.vue'
 
 </script>

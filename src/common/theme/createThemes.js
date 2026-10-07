@@ -7,20 +7,21 @@ const { createThemeColors } = require('./utils')
 const defaultThemes = [
   {
     id: 'mono',
-    name: '银灰',
+    name: '月白',
     isDark: false,
     isDarkFont: false,
     config: {
-      primary: 'rgb(65, 65, 68)',
-      font: 'rgb(44, 44, 46)',
-      '--color-material-base': '#d7d7d9',
-      '--wallpaper-opacity': '.09',
-      '--color-app-background': 'rgba(220, 220, 222, 0.96)',
-      '--color-main-background': 'rgba(249, 249, 250, 0.74)',
+      primary: 'rgb(90, 100, 113)',
+      font: 'rgb(38, 41, 46)',
+      '--color-font': 'rgb(38, 41, 46)',
+      '--color-font-label': 'rgb(101, 107, 116)',
+      '--color-450': 'rgb(101, 107, 116)',
+      '--color-500': 'rgb(101, 107, 116)',
+      '--color-material-base': '#e7e8eb',
+      '--wallpaper-opacity': '.04',
+      '--color-app-background': 'rgba(234, 235, 238, 0.98)',
+      '--color-main-background': 'rgba(250, 251, 252, 0.96)',
       '--color-nav-font': 'var(--color-primary)',
-      // 导航选中态用实色纯黑：NavBar 的选中标记默认取
-      // var(--color-primary-dark-200-alpha-700)，纯黑主色下会塌缩成
-      // 半透明黑（对比度仅 1.5），几乎看不见。
       '--color-nav-active-bar': 'var(--color-primary)',
       '--background-image': 'none',
       '--background-image-position': 'center',
@@ -31,8 +32,6 @@ const defaultThemes = [
       '--color-btn-min': 'rgba(120, 120, 126, 1)',
       '--color-btn-close': 'rgba(127, 127, 132, 1)',
 
-      // 同理：纯黑主色的 dark-* 色阶会全部塌缩成纯黑，
-      // 徽标需要浅色阶才能在浅底上可见。
       '--color-badge-primary': 'var(--color-primary-light-500)',
       '--color-badge-secondary': 'rgba(110, 110, 116, 1)',
       '--color-badge-tertiary': 'rgba(165, 165, 170, 1)',
@@ -280,16 +279,20 @@ const defaultThemes = [
   },
   {
     id: 'mono_dark',
-    name: '炭黑',
+    name: '石墨',
     isDark: true,
     isDarkFont: false,
     config: {
-      primary: 'rgb(228, 228, 230)',
-      font: 'rgb(232, 232, 234)',
-      '--color-material-base': '#1c1c1e',
-      '--wallpaper-opacity': '.06',
-      '--color-app-background': 'rgba(29, 29, 31, 0.96)',
-      '--color-main-background': 'rgba(43, 43, 45, 0.72)',
+      primary: 'rgb(196, 203, 213)',
+      font: 'rgb(241, 242, 244)',
+      '--color-font': 'rgb(241, 242, 244)',
+      '--color-font-label': 'rgb(169, 173, 182)',
+      '--color-450': 'rgb(169, 173, 182)',
+      '--color-500': 'rgb(169, 173, 182)',
+      '--color-material-base': '#25262a',
+      '--wallpaper-opacity': '.03',
+      '--color-app-background': 'rgba(37, 38, 42, 0.98)',
+      '--color-main-background': 'rgba(48, 49, 54, 0.96)',
       // 深色下用「更暗」的色阶做选中态（isDark 时 dark-* 朝亮方向走，
       // 所以这里取 light 系列的极值 1000，即深灰）
       '--color-nav-font': 'var(--color-primary-light-1000)',
@@ -430,11 +433,34 @@ const defaultThemes = [
   },
 ]
 
+// Accent colors stay in navigation and selections; the reading panel remains neutral.
+// Preserve legacy IDs so saved palettes remain loadable even when not offered in settings.
+const silver = defaultThemes.find(theme => theme.id == 'mono')
+defaultThemes.push(...[
+  { id: 'mist_blue', name: '雾蓝', primary: 'rgb(73, 107, 150)', base: '#e4e9ef', app: 'rgba(228, 233, 239, 0.98)', main: 'rgba(250, 251, 252, 0.96)' },
+  { id: 'sand', name: '暖砂', primary: 'rgb(135, 107, 79)', base: '#eee9e2', app: 'rgba(238, 233, 226, 0.98)', main: 'rgba(252, 251, 249, 0.96)' },
+  { id: 'sage', name: '鼠尾草', primary: 'rgb(95, 126, 110)', base: '#dae1d9', app: 'rgba(225, 232, 223, 0.96)', main: 'rgba(247, 250, 246, 0.80)' },
+].map(({ id, name, primary, base, app, main }) => ({
+  ...silver,
+  id,
+  name,
+  config: {
+    ...silver.config,
+    primary,
+    '--color-material-base': base,
+    '--color-app-background': app,
+    '--color-main-background': main,
+  },
+})))
+
 // Structural glass is applied once per panel; text-heavy content has a denser tint.
 // Keep translucent image themes intact via withGlassAlpha below.
 const GLASS_THEMES = {
-  mono: { app: 0.96, main: 0.74, sidebar: 'rgba(214, 214, 216, 0.54)', bar: 'rgba(232, 232, 234, 0.36)' },
-  mono_dark: { app: 0.96, main: 0.72, sidebar: 'rgba(36, 36, 38, 0.54)', bar: 'rgba(47, 47, 49, 0.32)' },
+  mono: { app: 0.98, main: 0.96, sidebar: 'rgba(234, 235, 238, 0.72)', bar: 'rgba(243, 244, 246, 0.82)' },
+  mono_dark: { app: 0.98, main: 0.96, sidebar: 'rgba(37, 38, 42, 0.78)', bar: 'rgba(42, 43, 48, 0.86)' },
+  mist_blue: { app: 0.98, main: 0.96, sidebar: 'rgba(228, 233, 239, 0.72)', bar: 'rgba(241, 244, 248, 0.82)' },
+  sand: { app: 0.98, main: 0.96, sidebar: 'rgba(238, 233, 226, 0.72)', bar: 'rgba(247, 243, 237, 0.82)' },
+  sage: { app: 0.96, main: 0.80, sidebar: 'rgba(214, 225, 212, 0.54)', bar: 'rgba(232, 239, 228, 0.36)' },
 }
 const DEFAULT_GLASS = { light: { app: 0.94, main: 0.92 }, dark: { app: 0.94, main: 0.94 } }
 const DARK_GLASS = { sidebar: 'rgba(32, 34, 39, 0.76)', bar: 'rgba(30, 32, 37, 0.84)' }

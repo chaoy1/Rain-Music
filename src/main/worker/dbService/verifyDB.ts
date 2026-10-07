@@ -1,9 +1,9 @@
-import type Database from 'better-sqlite3'
 import tables from './tables'
+import { type SQLAdapter } from './adapter/types'
 
 const rxp = /\n|\s|;|--.+/g
-export default (db: Database.Database) => {
-  const result = db.prepare<[]>('SELECT type,name,tbl_name,sql FROM "main".sqlite_master WHERE sql NOT NULL;').all() as Array<{ type: string, name: string, tbl_name: string, sql: string }>
+export default async(db: SQLAdapter) => {
+  const result = await db.prepare<[]>('SELECT type,name,tbl_name,sql FROM "main".sqlite_master WHERE sql NOT NULL;').all() as Array<{ type: string, name: string, tbl_name: string, sql: string }>
   const dbTableMap = new Map<string, string>()
   for (const info of result) dbTableMap.set(info.name, info.sql.replace(rxp, ''))
   return Array.from(tables.entries()).every(([name, sql]) => {

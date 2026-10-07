@@ -3,7 +3,7 @@ import { onBeforeUnmount } from '@common/utils/vueTools'
 import { playInfo, playMusicInfo } from '@renderer/store/player/state'
 import { setPlayMusicInfo, updatePlayIndex } from '@renderer/store/player/action'
 import { throttle } from '@common/utils'
-import { playNext, stop } from '@renderer/core/player'
+import { playNext, stop, resetRandomNextMusicInfo } from '@renderer/core/player'
 
 const changedListIds = new Set<string | null>()
 
@@ -28,6 +28,7 @@ export default () => {
   })
 
   const handleListChange = (listIds: string[]) => {
+    if (playInfo.playerListId && listIds.includes(playInfo.playerListId)) resetRandomNextMusicInfo()
     for (const id of listIds) {
       changedListIds.add(id)
     }

@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3'
 import tables, { DB_VERSION } from './tables'
+import { type SQLAdapter } from './adapter/types'
 
 // 已删除的内置「我的收藏」列表 id。
 // 迁移脚本刻意写死字面量（而不是引用 constants 里的常量），
@@ -31,12 +31,12 @@ const LOVE_LIST_ID = 'love'
 //   db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: '2' })
 // }
 
-const migrateV1 = (db: Database.Database) => {
+const migrateV1 = async(db: SQLAdapter) => {
   // 修复 v2.4.0 的默认数据库版本号不对的问题
-  const existsTable = db.prepare('SELECT name FROM "main".sqlite_master WHERE type=\'table\' AND name=\'dislike_list\';').get()
+  const existsTable = await db.prepare('SELECT name FROM "main".sqlite_master WHERE type=\'table\' AND name=\'dislike_list\';').get()
   if (!existsTable) {
     const sql = tables.get('dislike_list')!
-    db.exec(sql)
+    await db.exec(sql)
   }
 }
 
@@ -48,10 +48,10 @@ const migrateV1 = (db: Database.Database) => {
  * 用户确认「不做迁移、连同数据一起删除」，因此这里直接清空这些行，
  * 老版本升级后收藏数据不再存在。
  */
-const migrateV2 = (db: Database.Database) => {
-  db.prepare('DELETE FROM "main"."my_list" WHERE "id" = ?').run(LOVE_LIST_ID)
-  db.prepare('DELETE FROM "main"."my_list_music_info" WHERE "listId" = ?').run(LOVE_LIST_ID)
-  db.prepare('DELETE FROM "main"."my_list_music_info_order" WHERE "listId" = ?').run(LOVE_LIST_ID)
+const migrateV2 = async(db: SQLAdapter) => {
+  await db.prepare('DELETE FROM "main"."my_list" WHERE "id" = ?').run(LOVE_LIST_ID)
+  await db.prepare('DELETE FROM "main"."my_list_music_info" WHERE "listId" = ?').run(LOVE_LIST_ID)
+  await db.prepare('DELETE FROM "main"."my_list_music_info_order" WHERE "listId" = ?').run(LOVE_LIST_ID)
 }
 
 /**
@@ -65,8 +65,8 @@ const migrateV2 = (db: Database.Database) => {
  * 这里按存储顺序（rowid）重新编号一次，让顺序有明确、可持久化的依据；
  * 已经是 0..n-1 的库不会被改动。
  */
-const migrateV3 = (db: Database.Database) => {
-  const rows = db.prepare(`
+const migrateV3 = async(db: SQLAdapter) => {
+  const rows = await db.prepare(`
     SELECT "id", "position"
     FROM "main"."my_list"
     ORDER BY "position" ASC, "rowid" ASC
@@ -74,33 +74,33 @@ const migrateV3 = (db: Database.Database) => {
   if (!rows.length) return
   if (rows.every((row, index) => row.position === index)) return
   const update = db.prepare('UPDATE "main"."my_list" SET "position"=@position WHERE "id"=@id')
-  rows.forEach((row, index) => {
-    update.run({ id: row.id, position: index })
-  })
+  for (const [index, row] of rows.entries()) {
+    await update.run({ id: row.id, position: index })
+  }
 }
 
-export default (db: Database.Database) => {
+export default async(db: SQLAdapter) => {
   // PRAGMA user_version = x
   // console.log(db.prepare('PRAGMA user_version').get().user_version)
   // https://github.com/WiseLibs/better-sqlite3/issues/668#issuecomment-1145285728
-  const info = db.prepare<[string]>('SELECT "field_value" FROM "main"."db_info" WHERE "field_name" = ?').get('version') as { field_value: string } | undefined
+  const info = await db.prepare<[string]>('SELECT "field_value" FROM "main"."db_info" WHERE "field_name" = ?').get('version') as { field_value: string } | undefined
   if (!info) throw new Error('Database schema version is missing')
   const version = info.field_value
   switch (version) {
     case '1':
-      migrateV1(db)
-      migrateV2(db)
-      migrateV3(db)
-      db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
+      await migrateV1(db)
+      await migrateV2(db)
+      await migrateV3(db)
+      await db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '2':
-      migrateV2(db)
-      migrateV3(db)
-      db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
+      await migrateV2(db)
+      await migrateV3(db)
+      await db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '3':
-      migrateV3(db)
-      db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
+      await migrateV3(db)
+      await db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case DB_VERSION:
       break

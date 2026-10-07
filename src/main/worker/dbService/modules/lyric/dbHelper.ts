@@ -20,9 +20,9 @@ import {
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const queryLyric = (id: string) => {
+export const queryLyric = async(id: string) => {
   const lyricQueryStatement = createLyricQueryStatement()
-  return lyricQueryStatement.all(id) as Rain.DBService.Lyricnfo[]
+  return await lyricQueryStatement.all(id) as Rain.DBService.Lyricnfo[]
 }
 
 /**
@@ -30,20 +30,20 @@ export const queryLyric = (id: string) => {
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const queryRawLyric = (id: string) => {
+export const queryRawLyric = async(id: string) => {
   const rawLyricQueryStatement = createRawLyricQueryStatement()
-  return rawLyricQueryStatement.all(id) as Rain.DBService.Lyricnfo[]
+  return await rawLyricQueryStatement.all(id) as Rain.DBService.Lyricnfo[]
 }
 
 /**
  * 批量插入原始歌词
  * @param lyrics 列表
  */
-export const insertRawLyric = (lyrics: Rain.DBService.Lyricnfo[]) => {
+export const insertRawLyric = async(lyrics: Rain.DBService.Lyricnfo[]) => {
   const db = getDB()
   const rawLyricInsertStatement = createRawLyricInsertStatement()
-  db.transaction((lyrics: Rain.DBService.Lyricnfo[]) => {
-    for (const lyric of lyrics) rawLyricInsertStatement.run(lyric)
+  await db.transaction(async(lyrics: Rain.DBService.Lyricnfo[]) => {
+    for (const lyric of lyrics) await rawLyricInsertStatement.run(lyric)
   })(lyrics)
 }
 
@@ -51,11 +51,11 @@ export const insertRawLyric = (lyrics: Rain.DBService.Lyricnfo[]) => {
  * 批量删除原始歌词
  * @param ids 列表
  */
-export const deleteRawLyric = (ids: string[]) => {
+export const deleteRawLyric = async(ids: string[]) => {
   const db = getDB()
   const rawLyricDeleteStatement = createRawLyricDeleteStatement()
-  db.transaction((ids: string[]) => {
-    for (const id of ids) rawLyricDeleteStatement.run(id)
+  await db.transaction(async(ids: string[]) => {
+    for (const id of ids) await rawLyricDeleteStatement.run(id)
   })(ids)
 }
 
@@ -63,28 +63,28 @@ export const deleteRawLyric = (ids: string[]) => {
  * 批量更新原始歌词
  * @param lyrics 列表
  */
-export const updateRawLyric = (lyrics: Rain.DBService.Lyricnfo[]) => {
+export const updateRawLyric = async(lyrics: Rain.DBService.Lyricnfo[]) => {
   const db = getDB()
   const rawLyricUpdateStatement = createRawLyricUpdateStatement()
-  db.transaction((lyrics: Rain.DBService.Lyricnfo[]) => {
-    for (const lyric of lyrics) rawLyricUpdateStatement.run(lyric)
+  await db.transaction(async(lyrics: Rain.DBService.Lyricnfo[]) => {
+    for (const lyric of lyrics) await rawLyricUpdateStatement.run(lyric)
   })(lyrics)
 }
 
 /**
  * 清空原始歌词
  */
-export const clearRawLyric = () => {
+export const clearRawLyric = async() => {
   const rawLyricClearStatement = createRawLyricClearStatement()
-  rawLyricClearStatement.run()
+  await rawLyricClearStatement.run()
 }
 
 /**
  * 统计已编辑歌词数量
  */
-export const countRawLyric = () => {
+export const countRawLyric = async() => {
   const countStatement = createRawLyricCountStatement()
-  return (countStatement.get() as { count: number }).count
+  return ((await countStatement.get()) as { count: number }).count
 }
 
 
@@ -93,20 +93,20 @@ export const countRawLyric = () => {
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const queryEditedLyric = (id: string) => {
+export const queryEditedLyric = async(id: string) => {
   const rawLyricQueryStatement = createEditedLyricQueryStatement()
-  return rawLyricQueryStatement.all(id) as Rain.DBService.Lyricnfo[]
+  return await rawLyricQueryStatement.all(id) as Rain.DBService.Lyricnfo[]
 }
 
 /**
  * 批量插入已编辑歌词
  * @param lyrics 列表
  */
-export const insertEditedLyric = (lyrics: Rain.DBService.Lyricnfo[]) => {
+export const insertEditedLyric = async(lyrics: Rain.DBService.Lyricnfo[]) => {
   const db = getDB()
   const rawLyricInsertStatement = createEditedLyricInsertStatement()
-  db.transaction((lyrics: Rain.DBService.Lyricnfo[]) => {
-    for (const lyric of lyrics) rawLyricInsertStatement.run(lyric)
+  await db.transaction(async(lyrics: Rain.DBService.Lyricnfo[]) => {
+    for (const lyric of lyrics) await rawLyricInsertStatement.run(lyric)
   })(lyrics)
 }
 
@@ -114,11 +114,11 @@ export const insertEditedLyric = (lyrics: Rain.DBService.Lyricnfo[]) => {
  * 批量删除已编辑歌词
  * @param ids 列表
  */
-export const deleteEditedLyric = (ids: string[]) => {
+export const deleteEditedLyric = async(ids: string[]) => {
   const db = getDB()
   const rawLyricDeleteStatement = createEditedLyricDeleteStatement()
-  db.transaction((ids: string[]) => {
-    for (const id of ids) rawLyricDeleteStatement.run(id)
+  await db.transaction(async(ids: string[]) => {
+    for (const id of ids) await rawLyricDeleteStatement.run(id)
   })(ids)
 }
 
@@ -126,27 +126,27 @@ export const deleteEditedLyric = (ids: string[]) => {
  * 批量更新已编辑歌词
  * @param lyrics 列表
  */
-export const updateEditedLyric = (lyrics: Rain.DBService.Lyricnfo[]) => {
+export const updateEditedLyric = async(lyrics: Rain.DBService.Lyricnfo[]) => {
   const db = getDB()
   const rawLyricUpdateStatement = createEditedLyricUpdateStatement()
-  db.transaction((lyrics: Rain.DBService.Lyricnfo[]) => {
-    for (const lyric of lyrics) rawLyricUpdateStatement.run(lyric)
+  await db.transaction(async(lyrics: Rain.DBService.Lyricnfo[]) => {
+    for (const lyric of lyrics) await rawLyricUpdateStatement.run(lyric)
   })(lyrics)
 }
 
 /**
  * 清空已编辑歌词
  */
-export const clearEditedLyric = () => {
+export const clearEditedLyric = async() => {
   const rawLyricClearStatement = createEditedLyricClearStatement()
-  rawLyricClearStatement.run()
+  await rawLyricClearStatement.run()
 }
 
 
 /**
  * 统计已编辑歌词数量
  */
-export const countEditedLyric = () => {
+export const countEditedLyric = async() => {
   const countStatement = createEditedLyricCountStatement()
-  return (countStatement.get() as { count: number }).count
+  return ((await countStatement.get()) as { count: number }).count
 }

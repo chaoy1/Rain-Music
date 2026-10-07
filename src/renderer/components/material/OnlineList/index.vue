@@ -25,7 +25,7 @@
       </div>
       <div :class="$style.content">
         <div v-show="!noItem" ref="dom_listContent" :class="$style.content">
-          <base-virtualized-list v-if="actionButtonsVisible" ref="listRef" :list="list" key-name="id" :item-height="listItemHeight" container-class="scroll" content-class="list" @contextmenu.capture="handleListRightClick">
+          <base-virtualized-list v-if="actionButtonsVisible" ref="listRef" :list="list" key-name="id" :item-height="listItemHeight" container-class="scroll" content-class="list">
             <template #default="{ item, index }">
               <div
                 class="list-item" :class="[{ selected: rightClickSelectedIndex == index }, { active: selectedList.includes(item) }]"
@@ -52,7 +52,7 @@
               </div>
             </template>
           </base-virtualized-list>
-          <base-virtualized-list v-else ref="listRef" :list="list" key-name="id" :item-height="listItemHeight" container-class="scroll" content-class="list" @contextmenu.capture="handleListRightClick">
+          <base-virtualized-list v-else ref="listRef" :list="list" key-name="id" :item-height="listItemHeight" container-class="scroll" content-class="list">
             <template #default="{ item, index }">
               <div
                 class="list-item" :class="[{ selected: rightClickSelectedIndex == index }, { active: selectedList.includes(item) }]"
@@ -97,7 +97,6 @@
 </template>
 
 <script>
-import { clipboardWriteText } from '@common/utils/electron'
 import { assertApiSupport } from '@renderer/store/utils'
 import { ref } from '@common/utils/vueTools'
 import useList from './useList'
@@ -172,8 +171,6 @@ export default {
     } = useMusicDownload({ selectedList, props })
 
     const {
-      handleSearch,
-      handleOpenMusicDetail,
       handleDislikeMusic,
     } = useMusicActions({ props })
 
@@ -191,9 +188,7 @@ export default {
       handleShowDownloadModal,
       handlePlayMusic,
       handlePlayMusicLater,
-      handleSearch,
       handleShowMusicAddModal,
-      handleOpenMusicDetail,
       handleDislikeMusic,
     })
 
@@ -203,6 +198,8 @@ export default {
       doubleClickPlay(index)
     }
     const handleListItemRightClick = (event, index) => {
+      event.preventDefault()
+      event.stopPropagation()
       rightClickSelectedIndex.value = index
       showMenu(event, props.list[index], index)
     }
@@ -211,19 +208,6 @@ export default {
       rightClickSelectedIndex.value = -1
       menuClick(action, index)
     }
-    const handleListRightClick = (event) => {
-      if (!event.target.classList.contains('select')) return
-      event.stopImmediatePropagation()
-      let classList = dom_listContent.value.classList
-      classList.add('copying')
-      window.requestAnimationFrame(() => {
-        let str = window.getSelection().toString()
-        classList.remove('copying')
-        str = str.split(/\n\n/).map(s => s.replace(/\n/g, '  ')).join('\n').trim()
-        if (!str.length) return
-        clipboardWriteText(str)
-      })
-    }
     const handleListBtnClick = ({ action, index }) => {
       switch (action) {
         case 'download':
@@ -231,9 +215,6 @@ export default {
           break
         case 'play':
           void handlePlayMusic(index, true)
-          break
-        case 'search':
-          handleSearch(index)
           break
         case 'listAdd':
           handleShowMusicAddModal(index, true)
@@ -260,7 +241,6 @@ export default {
       menuLocation,
       handleMenuClick,
 
-      handleListRightClick,
       assertApiSupport,
 
       isShowListAdd,

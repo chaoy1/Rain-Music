@@ -1,8 +1,8 @@
 <template>
-  <section id="song-detail" :class="$style.detail" data-song-detail data-glass ignore-tip role="main" :aria-label="$t('player__detail_title')" @contextmenu="handleContextMenu">
+  <section id="song-detail" :class="[$style.detail, { [$style.fullscreen]: isFullscreen }]" data-song-detail data-glass ignore-tip role="main" :aria-label="$t('player__detail_title')" @contextmenu="handleContextMenu">
     <div v-if="musicInfo.pic && !coverFailed" :class="$style.ambient" aria-hidden="true" :style="{ backgroundImage: `url(${JSON.stringify(musicInfo.pic)})` }" />
     <header :class="$style.header">
-      <TrafficLights data-detail-window-controls />
+      <WindowControls data-detail-window-controls />
       <span :class="$style.heading">{{ $t('player__detail_now_playing') }}</span>
       <DetailDismissButton data-detail-back @click="hide" />
     </header>
@@ -40,11 +40,12 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from '@common/utils/vueTools'
 import { musicInfo, isShowPlayerDetail } from '@renderer/store/player/state'
+import { isFullscreen } from '@renderer/store'
 import { lyric } from '@renderer/store/player/lyric'
 import { setShowPlayerDetail, setShowPlayComment, setShowPlayLrcSelectContentLrc } from '@renderer/store/player/action'
 import LyricPlayer from './LyricPlayer.vue'
 import PlayerDock from './PlayBar.vue'
-import TrafficLights from '../Toolbar/TrafficLights.vue'
+import WindowControls from '@renderer/platform/WindowControls.vue'
 import DetailDismissButton from '@renderer/components/common/DetailDismissButton.vue'
 
 defineOptions({ name: 'CorePlayDetail' })
@@ -89,6 +90,28 @@ onBeforeUnmount(() => {
 
 <style lang="less" module>
 .detail:global(#song-detail) {
+  // The immersive surface keeps readable ink in both app themes. Cover colors
+  // come from the blurred image, without canvas sampling or cross-origin reads.
+  --detail-cover-size: max(120px, min(30vw, calc(100vh - 340px), 520px));
+  --color-font: #f5f5f0;
+  --color-button-font: #f5f5f0;
+  --color-button-font-selected: #f5f5f0;
+  --color-font-label: rgba(245, 245, 240, .72);
+  --color-400: rgba(245, 245, 240, .65);
+  --color-450: rgba(245, 245, 240, .48);
+  --color-content-background: #242927;
+  --color-primary-dark-100: #f5f5f0;
+  --color-primary-background-hover: rgba(245, 245, 240, .08);
+  --color-primary-background-active: rgba(245, 245, 240, .12);
+  --control-ink: #f5f5f0;
+  --control-well: rgba(255, 255, 255, .045);
+  --control-rest: rgba(255, 255, 255, .06);
+  --control-active: rgba(255, 255, 255, .12);
+  --control-hover: rgba(255, 255, 255, .14);
+  --control-outline: rgba(245, 245, 240, .28);
+  --glass-highlight: rgba(255, 255, 255, .12);
+  --glass-edge: rgba(0, 0, 0, .22);
+  --frost-grain: .16;
   position: absolute;
   inset: 0;
   z-index: 5;
@@ -99,47 +122,76 @@ onBeforeUnmount(() => {
   height: 100%;
   box-sizing: border-box;
   -webkit-app-region: no-drag;
-  background: radial-gradient(ellipse at 15% 30%, var(--glass-ambient), transparent 65%), var(--color-primary-light-1000);
+  color: var(--color-font);
+  background: #151918;
   overflow: hidden;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, rgba(10, 14, 12, .08), rgba(10, 14, 12, .38)), linear-gradient(180deg, rgba(10, 14, 12, .2), transparent 30%, rgba(10, 14, 12, .26));
+  }
+  &.fullscreen { --detail-cover-size: max(120px, min(30vw, calc(100vh - 340px), 560px)); }
 }
-.ambient { position: absolute; inset: -100px; background-size: cover; background-position: center; filter: blur(110px) saturate(50%); opacity: .17; pointer-events: none; z-index: -1; }
+.ambient {
+  position: absolute;
+  inset: -100px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(90px) saturate(.95) brightness(.58);
+  opacity: .8;
+  pointer-events: none;
+  z-index: 0;
+}
 .header {
-  display: flex;
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 88px;
   align-items: center;
-  gap: 16px;
   flex: none;
   height: 52px;
-  padding: 0 22px 0 0;
+  padding: 0 20px;
   box-sizing: border-box;
   -webkit-app-region: drag;
+  > :last-child { justify-self: end; }
 }
-.heading { flex: auto; min-width: 0; font-size: 11px; opacity: .4; text-align: center; padding-right: 54px; letter-spacing: 1px; }
+.heading { min-width: 0; font-size: 11px; opacity: .5; text-align: center; letter-spacing: 1px; }
 .body {
+  position: relative;
+  z-index: 1;
   flex: auto;
   min-height: 0;
   min-width: 0;
+  width: 100%;
+  max-width: 1760px;
+  margin: 0 auto;
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: minmax(280px, .85fr) minmax(0, 1.15fr);
-  gap: clamp(32px, 7vw, 100px);
-  padding: 0 clamp(32px, 6vw, 90px) 32px;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  gap: clamp(36px, 6vw, 120px);
+  padding: clamp(16px, 3vh, 48px) clamp(32px, 6vw, 100px) clamp(20px, 4vh, 64px);
 }
 .album {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: safe center;
   min-height: 0;
   min-width: 0;
   padding: 0;
   gap: 24px;
   box-sizing: border-box;
 }
-.presentation { display: flex; flex-direction: column; justify-content: safe center; align-items: center; flex: auto; min-height: 0; width: 100%; }
+.presentation { display: flex; flex-direction: column; align-items: center; flex: none; min-height: 0; width: 100%; }
 .cover {
   flex: none;
-  width: min(100%, calc(100vh - 340px), 340px);
+  width: min(100%, var(--detail-cover-size));
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 20px;
   transform-origin: top left;
   background: var(--control-well);
   box-shadow: 0 18px 44px var(--glass-edge), 0 2px 6px var(--glass-edge), inset 0 0 0 1px var(--glass-highlight);
@@ -156,16 +208,16 @@ onBeforeUnmount(() => {
   svg { width: 54%; height: 54%; fill: none; stroke: currentColor; stroke-width: 1.2; opacity: .28; }
 }
 .metadata {
-  width: min(100%, 340px);
+  width: min(100%, var(--detail-cover-size));
   margin-top: 22px;
-  h2 { font-size: 25px; font-weight: 500; line-height: 1.35; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  h2 { font-size: clamp(22px, 2vw, 32px); font-weight: 500; line-height: 1.35; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   p { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 1.5; }
 }
-.artist { margin-top: 10px; font-size: 14px; opacity: .76; }
-.albumName { margin-top: 4px; font-size: 12px; opacity: .45; }
+.artist { margin-top: 10px; font-size: clamp(14px, 1.1vw, 18px); opacity: .78; }
+.albumName { margin-top: 4px; font-size: clamp(12px, .9vw, 14px); opacity: .55; }
 .emptyHint { margin-top: 12px; font-size: 12px; opacity: .5; }
-.stage { position: relative; min-height: 0; min-width: 0; }
-.lyrics { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.stage { position: relative; display: flex; align-items: center; min-height: 0; min-width: 0; }
+.lyrics { width: 100%; height: min(100%, 720px); min-width: 0; min-height: 0; }
 .lyrics { position: relative; display: flex; }
 .emptyLyric {
   position: absolute;
@@ -183,14 +235,17 @@ onBeforeUnmount(() => {
   svg { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; }
 }
 @media (max-width: 880px) {
-  .body { padding: 0 32px 24px; gap: 36px; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.15fr); }
+  .body { padding: 16px 32px 24px; gap: 36px; }
   .metadata { margin-top: 18px; h2 { font-size: 22px; } }
 }
 @media (max-height: 600px) {
-  .body { padding-bottom: 20px; }
+  .body { padding-top: 16px; padding-bottom: 20px; }
   .album { gap: 16px; }
   .metadata { margin-top: 14px; }
   .artist { margin-top: 6px; }
   .emptyHint { margin-top: 6px; }
+}
+@media (max-width: 700px) {
+  .body { padding-left: 20px; padding-right: 20px; gap: 24px; }
 }
 </style>

@@ -21,12 +21,26 @@ import {
 } from './statements'
 
 const idFixRxp = /\.0$/
+const QUEUE_RESTORE_SNAPSHOT_KEY = 'playback_queue_startup_restore'
+type QueueRestoreRecord = Pick<Rain.Music.MusicInfo, 'id' | 'name' | 'singer'>
+
+export const getPlaybackQueueRestoreSnapshot = async(): Promise<QueueRestoreRecord[] | null> => {
+  const row = await getDB().prepare('SELECT field_value FROM db_info WHERE field_name = ?').get(QUEUE_RESTORE_SNAPSHOT_KEY) as { field_value: string } | undefined
+  if (!row) return null
+  const records = JSON.parse(row.field_value) as QueueRestoreRecord[]
+  if (!Array.isArray(records) || records.some(record => typeof record.id != 'string' || typeof record.name != 'string' || typeof record.singer != 'string')) throw new Error('Invalid playback queue restoration metadata')
+  return records
+}
+
+export const clearPlaybackQueueRestoreSnapshot = async() => {
+  await getDB().prepare('DELETE FROM db_info WHERE field_name = ?').run(QUEUE_RESTORE_SNAPSHOT_KEY)
+}
 /**
  * 获取用户列表
  * @returns
  */
-export const queryAllUserList = () => {
-  const list = createListQueryStatement().all() as Rain.DBService.UserListInfo[]
+export const queryAllUserList = async() => {
+  const list = await createListQueryStatement().all() as Rain.DBService.UserListInfo[]
   for (const info of list) {
     // 兼容v2.3.0之前版本插入数字类型的ID导致其意外在末尾追加 .0 的问题
     if (info.sourceListId?.endsWith?.('.0')) {
@@ -41,14 +55,14 @@ export const queryAllUserList = () => {
  * @param lists 列表
  * @param isClear 是否清空列表
  */
-export const insertUserLists = (lists: Rain.DBService.UserListInfo[], isClear: boolean = false) => {
+export const insertUserLists = async(lists: Rain.DBService.UserListInfo[], isClear: boolean = false) => {
   const db = getDB()
   const listClearStatement = createListClearStatement()
   const listInsertStatement = createListInsertStatement()
-  db.transaction((lists: Rain.DBService.UserListInfo[]) => {
-    if (isClear) listClearStatement.run()
+  await db.transaction(async(lists: Rain.DBService.UserListInfo[]) => {
+    if (isClear) await listClearStatement.run()
     for (const list of lists) {
-      listInsertStatement.run({
+      await listInsertStatement.run({
         id: list.id,
         name: list.name,
         source: list.source,
@@ -64,16 +78,16 @@ export const insertUserLists = (lists: Rain.DBService.UserListInfo[], isClear: b
  * 批量删除用户列表及列表内歌曲
  * @param listIds 列表id
  */
-export const deleteUserLists = (listIds: string[]) => {
+export const deleteUserLists = async(listIds: string[]) => {
   const db = getDB()
   const listDeleteStatement = createListDeleteStatement()
   const musicInfoDeleteByListIdStatement = createMusicInfoDeleteByListIdStatement()
   const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
-  db.transaction((listIds: string[]) => {
+  await db.transaction(async(listIds: string[]) => {
     for (const id of listIds) {
-      listDeleteStatement.run(id)
-      musicInfoDeleteByListIdStatement.run(id)
-      musicInfoOrderDeleteByListIdStatement.run(id)
+      await listDeleteStatement.run(id)
+      await musicInfoDeleteByListIdStatement.run(id)
+      await musicInfoOrderDeleteByListIdStatement.run(id)
     }
   })(listIds)
 }
@@ -82,11 +96,11 @@ export const deleteUserLists = (listIds: string[]) => {
  * 批量更新用户列表
  * @param lists 列表
  */
-export const updateUserLists = (lists: Rain.DBService.UserListInfo[]) => {
+export const updateUserLists = async(lists: Rain.DBService.UserListInfo[]) => {
   const db = getDB()
   const listUpdateStatement = createListUpdateStatement()
-  db.transaction((lists: Rain.DBService.UserListInfo[]) => {
-    for (const list of lists) listUpdateStatement.run(list)
+  await db.transaction(async(lists: Rain.DBService.UserListInfo[]) => {
+    for (const list of lists) await listUpdateStatement.run(list)
   })(lists)
 }
 
@@ -95,14 +109,14 @@ export const updateUserLists = (lists: Rain.DBService.UserListInfo[]) => {
  * 批量添加歌曲
  * @param list
  */
-export const insertMusicInfoList = (list: Rain.DBService.MusicInfo[]) => {
+export const insertMusicInfoList = async(list: Rain.DBService.MusicInfo[]) => {
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
   const musicInfoOrderInsertStatement = createMusicInfoOrderInsertStatement()
   const db = getDB()
-  db.transaction((musics: Rain.DBService.MusicInfo[]) => {
+  await db.transaction(async(musics: Rain.DBService.MusicInfo[]) => {
     for (const music of musics) {
-      musicInfoInsertStatement.run(music)
-      musicInfoOrderInsertStatement.run({
+      await musicInfoInsertStatement.run(music)
+      await musicInfoOrderInsertStatement.run({
         listId: music.listId,
         musicInfoId: music.id,
         order: music.order,
@@ -117,24 +131,24 @@ export const insertMusicInfoList = (list: Rain.DBService.MusicInfo[]) => {
  * @param listId 列表Id
  * @param listAll 原始列表歌曲，列表去重后
  */
-export const insertMusicInfoListAndRefreshOrder = (list: Rain.DBService.MusicInfo[], listId: string, listAll: Rain.DBService.MusicInfo[]) => {
+export const insertMusicInfoListAndRefreshOrder = async(list: Rain.DBService.MusicInfo[], listId: string, listAll: Rain.DBService.MusicInfo[]) => {
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
   const musicInfoOrderInsertStatement = createMusicInfoOrderInsertStatement()
   const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
 
   const db = getDB()
-  db.transaction((list: Rain.DBService.MusicInfo[], listId: string, listAll: Rain.DBService.MusicInfo[]) => {
-    musicInfoOrderDeleteByListIdStatement.run(listId)
+  await db.transaction(async(list: Rain.DBService.MusicInfo[], listId: string, listAll: Rain.DBService.MusicInfo[]) => {
+    await musicInfoOrderDeleteByListIdStatement.run(listId)
     for (const music of list) {
-      musicInfoInsertStatement.run(music)
-      musicInfoOrderInsertStatement.run({
+      await musicInfoInsertStatement.run(music)
+      await musicInfoOrderInsertStatement.run({
         listId: music.listId,
         musicInfoId: music.id,
         order: music.order,
       })
     }
     for (const music of listAll) {
-      musicInfoOrderInsertStatement.run({
+      await musicInfoOrderInsertStatement.run({
         listId: music.listId,
         musicInfoId: music.id,
         order: music.order,
@@ -147,12 +161,12 @@ export const insertMusicInfoListAndRefreshOrder = (list: Rain.DBService.MusicInf
  * 批量更新歌曲
  * @param list
  */
-export const updateMusicInfos = (list: Rain.DBService.MusicInfo[]) => {
+export const updateMusicInfos = async(list: Rain.DBService.MusicInfo[]) => {
   const musicInfoUpdateStatement = createMusicInfoUpdateStatement()
   const db = getDB()
-  db.transaction((musics: Rain.DBService.MusicInfo[]) => {
+  await db.transaction(async(musics: Rain.DBService.MusicInfo[]) => {
     for (const music of musics) {
-      musicInfoUpdateStatement.run(music)
+      await musicInfoUpdateStatement.run(music)
     }
   })(list)
 }
@@ -162,9 +176,9 @@ export const updateMusicInfos = (list: Rain.DBService.MusicInfo[]) => {
  * @param listId 列表Id
  * @returns 列表歌曲
  */
-export const queryMusicInfoByListId = (listId: string) => {
+export const queryMusicInfoByListId = async(listId: string) => {
   const musicInfoQueryStatement = createMusicInfoQueryStatement()
-  return musicInfoQueryStatement.all({ listId }) as Rain.DBService.MusicInfo[]
+  return await musicInfoQueryStatement.all({ listId }) as Rain.DBService.MusicInfo[]
 }
 
 /**
@@ -173,7 +187,7 @@ export const queryMusicInfoByListId = (listId: string) => {
  * @param ids 要移动的歌曲
  * @param musicInfos 音乐信息
  */
-export const moveMusicInfo = (fromId: string, ids: string[], musicInfos: Rain.DBService.MusicInfo[]) => {
+export const moveMusicInfo = async(fromId: string, ids: string[], musicInfos: Rain.DBService.MusicInfo[]) => {
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
   const musicInfoOrderInsertStatement = createMusicInfoOrderInsertStatement()
   const musicInfoDeleteStatement = createMusicInfoDeleteStatement()
@@ -181,15 +195,15 @@ export const moveMusicInfo = (fromId: string, ids: string[], musicInfos: Rain.DB
   // const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
 
   const db = getDB()
-  db.transaction((fromId: string, ids: string[], musicInfos: Rain.DBService.MusicInfo[]) => {
+  await db.transaction(async(fromId: string, ids: string[], musicInfos: Rain.DBService.MusicInfo[]) => {
     // musicInfoOrderDeleteByListIdStatement.run(fromId)
     for (const id of ids) {
-      musicInfoDeleteStatement.run({ listId: fromId, id })
-      musicInfoOrderDeleteStatement.run({ listId: fromId, id })
+      await musicInfoDeleteStatement.run({ listId: fromId, id })
+      await musicInfoOrderDeleteStatement.run({ listId: fromId, id })
     }
     for (const music of musicInfos) {
-      musicInfoInsertStatement.run(music)
-      musicInfoOrderInsertStatement.run({
+      await musicInfoInsertStatement.run(music)
+      await musicInfoOrderInsertStatement.run({
         listId: music.listId,
         musicInfoId: music.id,
         order: music.order,
@@ -205,7 +219,7 @@ export const moveMusicInfo = (fromId: string, ids: string[], musicInfos: Rain.DB
  * @param musicInfos 要移动的歌曲，目标列表去重后
  * @param toListAll 目标列表歌曲
  */
-export const moveMusicInfoAndRefreshOrder = (fromId: string, ids: string[], toId: string, musicInfos: Rain.DBService.MusicInfo[], toListAll: Rain.DBService.MusicInfo[]) => {
+export const moveMusicInfoAndRefreshOrder = async(fromId: string, ids: string[], toId: string, musicInfos: Rain.DBService.MusicInfo[], toListAll: Rain.DBService.MusicInfo[]) => {
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
   const musicInfoDeleteStatement = createMusicInfoDeleteStatement()
   const musicInfoOrderDeleteStatement = createMusicInfoOrderDeleteStatement()
@@ -213,22 +227,22 @@ export const moveMusicInfoAndRefreshOrder = (fromId: string, ids: string[], toId
   const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
 
   const db = getDB()
-  db.transaction((fromId: string, ids: string[], musicInfos: Rain.DBService.MusicInfo[], toListAll: Rain.DBService.MusicInfo[]) => {
+  await db.transaction(async(fromId: string, ids: string[], musicInfos: Rain.DBService.MusicInfo[], toListAll: Rain.DBService.MusicInfo[]) => {
     for (const id of ids) {
-      musicInfoDeleteStatement.run({ listId: fromId, id })
-      musicInfoOrderDeleteStatement.run({ listId: fromId, id })
+      await musicInfoDeleteStatement.run({ listId: fromId, id })
+      await musicInfoOrderDeleteStatement.run({ listId: fromId, id })
     }
-    musicInfoOrderDeleteByListIdStatement.run(toId)
+    await musicInfoOrderDeleteByListIdStatement.run(toId)
     for (const music of musicInfos) {
-      musicInfoInsertStatement.run(music)
-      musicInfoOrderInsertStatement.run({
+      await musicInfoInsertStatement.run(music)
+      await musicInfoOrderInsertStatement.run({
         listId: music.listId,
         musicInfoId: music.id,
         order: music.order,
       })
     }
     for (const music of toListAll) {
-      musicInfoOrderInsertStatement.run({
+      await musicInfoOrderInsertStatement.run({
         listId: music.listId,
         musicInfoId: music.id,
         order: music.order,
@@ -242,14 +256,14 @@ export const moveMusicInfoAndRefreshOrder = (fromId: string, ids: string[], toId
  * @param listId 列表id
  * @param ids 音乐id
  */
-export const removeMusicInfos = (listId: string, ids: string[]) => {
+export const removeMusicInfos = async(listId: string, ids: string[]) => {
   const musicInfoDeleteStatement = createMusicInfoDeleteStatement()
   const musicInfoOrderDeleteStatement = createMusicInfoOrderDeleteStatement()
   const db = getDB()
-  db.transaction((listId: string, ids: string[]) => {
+  await db.transaction(async(listId: string, ids: string[]) => {
     for (const id of ids) {
-      musicInfoDeleteStatement.run({ listId, id })
-      musicInfoOrderDeleteStatement.run({ listId, id })
+      await musicInfoDeleteStatement.run({ listId, id })
+      await musicInfoOrderDeleteStatement.run({ listId, id })
     }
   })(listId, ids)
 }
@@ -258,14 +272,14 @@ export const removeMusicInfos = (listId: string, ids: string[]) => {
  * 清空列表内歌曲
  * @param listId 列表id
  */
-export const removeMusicInfoByListId = (ids: string[]) => {
+export const removeMusicInfoByListId = async(ids: string[]) => {
   const db = getDB()
   const musicInfoDeleteByListIdStatement = createMusicInfoDeleteByListIdStatement()
   const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
-  db.transaction((ids: string[]) => {
+  await db.transaction(async(ids: string[]) => {
     for (const id of ids) {
-      musicInfoDeleteByListIdStatement.run(id)
-      musicInfoOrderDeleteByListIdStatement.run(id)
+      await musicInfoDeleteByListIdStatement.run(id)
+      await musicInfoOrderDeleteByListIdStatement.run(id)
     }
   })(ids)
 }
@@ -276,9 +290,9 @@ export const removeMusicInfoByListId = (ids: string[]) => {
  * @param musicInfoId 音乐id
  * @returns
  */
-export const queryMusicInfoByListIdAndMusicInfoId = (listId: string, musicInfoId: string) => {
+export const queryMusicInfoByListIdAndMusicInfoId = async(listId: string, musicInfoId: string) => {
   const musicInfoByListAndMusicInfoIdQueryStatement = createMusicInfoByListAndMusicInfoIdQueryStatement()
-  return musicInfoByListAndMusicInfoIdQueryStatement.get({ listId, musicInfoId }) as Rain.DBService.MusicInfo | null
+  return await musicInfoByListAndMusicInfoIdQueryStatement.get({ listId, musicInfoId }) as Rain.DBService.MusicInfo | null
 }
 
 /**
@@ -286,9 +300,9 @@ export const queryMusicInfoByListIdAndMusicInfoId = (listId: string, musicInfoId
  * @param id 音乐id
  * @returns
  */
-export const queryMusicInfoByMusicInfoId = (id: string) => {
+export const queryMusicInfoByMusicInfoId = async(id: string) => {
   const musicInfoByMusicInfoIdQueryStatement = createMusicInfoByMusicInfoIdQueryStatement()
-  return musicInfoByMusicInfoIdQueryStatement.all(id) as Rain.DBService.MusicInfo[]
+  return await musicInfoByMusicInfoIdQueryStatement.all(id) as Rain.DBService.MusicInfo[]
 }
 
 /**
@@ -296,13 +310,13 @@ export const queryMusicInfoByMusicInfoId = (id: string) => {
  * @param listId 列表id
  * @param musicInfoOrders 音乐顺序
  */
-export const updateMusicInfoOrder = (listId: string, musicInfoOrders: Rain.DBService.MusicInfoOrder[]) => {
+export const updateMusicInfoOrder = async(listId: string, musicInfoOrders: Rain.DBService.MusicInfoOrder[]) => {
   const db = getDB()
   const musicInfoOrderInsertStatement = createMusicInfoOrderInsertStatement()
   const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
-  db.transaction((listId: string, musicInfoOrders: Rain.DBService.MusicInfoOrder[]) => {
-    musicInfoOrderDeleteByListIdStatement.run(listId)
-    for (const orderInfo of musicInfoOrders) musicInfoOrderInsertStatement.run(orderInfo)
+  await db.transaction(async(listId: string, musicInfoOrders: Rain.DBService.MusicInfoOrder[]) => {
+    await musicInfoOrderDeleteByListIdStatement.run(listId)
+    for (const orderInfo of musicInfoOrders) await musicInfoOrderInsertStatement.run(orderInfo)
   })(listId, musicInfoOrders)
 }
 
@@ -311,18 +325,23 @@ export const updateMusicInfoOrder = (listId: string, musicInfoOrders: Rain.DBSer
  * @param listId 列表id
  * @param musicInfos 歌曲列表
  */
-export const overwriteMusicInfo = (listId: string, musicInfos: Rain.DBService.MusicInfo[]) => {
+export const overwriteMusicInfo = async(listId: string, musicInfos: Rain.DBService.MusicInfo[], startupRestoreSnapshot?: QueueRestoreRecord[]) => {
   const db = getDB()
   const musicInfoDeleteByListIdStatement = createMusicInfoDeleteByListIdStatement()
   const musicInfoOrderDeleteByListIdStatement = createMusicInfoOrderDeleteByListIdStatement()
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
   const musicInfoOrderInsertStatement = createMusicInfoOrderInsertStatement()
-  db.transaction((listId: string, musicInfos: Rain.DBService.MusicInfo[]) => {
-    musicInfoDeleteByListIdStatement.run(listId)
-    musicInfoOrderDeleteByListIdStatement.run(listId)
+  await db.transaction(async(listId: string, musicInfos: Rain.DBService.MusicInfo[]) => {
+    // Commit the old index identities atomically with the first merge. A crash
+    // after this transaction can then restore the correct song in a new worker.
+    if (startupRestoreSnapshot && !await getPlaybackQueueRestoreSnapshot()) {
+      await db.prepare('INSERT INTO db_info (field_name, field_value) VALUES (?, ?)').run(QUEUE_RESTORE_SNAPSHOT_KEY, JSON.stringify(startupRestoreSnapshot))
+    }
+    await musicInfoDeleteByListIdStatement.run(listId)
+    await musicInfoOrderDeleteByListIdStatement.run(listId)
     for (const musicInfo of musicInfos) {
-      musicInfoInsertStatement.run(musicInfo)
-      musicInfoOrderInsertStatement.run({
+      await musicInfoInsertStatement.run(musicInfo)
+      await musicInfoOrderInsertStatement.run({
         listId: musicInfo.listId,
         musicInfoId: musicInfo.id,
         order: musicInfo.order,
@@ -336,7 +355,7 @@ export const overwriteMusicInfo = (listId: string, musicInfos: Rain.DBService.Mu
  * @param lists 列表
  * @param musicInfos 歌曲列表
  */
-export const overwriteListData = (lists: Rain.DBService.UserListInfo[], musicInfos: Rain.DBService.MusicInfo[]) => {
+export const overwriteListData = async(lists: Rain.DBService.UserListInfo[], musicInfos: Rain.DBService.MusicInfo[]) => {
   const db = getDB()
   const listClearStatement = createListClearStatement()
   const listInsertStatement = createListInsertStatement()
@@ -344,10 +363,10 @@ export const overwriteListData = (lists: Rain.DBService.UserListInfo[], musicInf
   const musicInfoInsertStatement = createMusicInfoInsertStatement()
   const musicInfoOrderClearStatement = createMusicInfoOrderClearStatement()
   const musicInfoOrderInsertStatement = createMusicInfoOrderInsertStatement()
-  db.transaction((lists: Rain.DBService.UserListInfo[], musicInfos: Rain.DBService.MusicInfo[]) => {
-    listClearStatement.run()
+  await db.transaction(async(lists: Rain.DBService.UserListInfo[], musicInfos: Rain.DBService.MusicInfo[]) => {
+    await listClearStatement.run()
     for (const list of lists) {
-      listInsertStatement.run({
+      await listInsertStatement.run({
         id: list.id,
         name: list.name,
         source: list.source,
@@ -356,11 +375,11 @@ export const overwriteListData = (lists: Rain.DBService.UserListInfo[], musicInf
         position: list.position,
       })
     }
-    musicInfoClearStatement.run()
-    musicInfoOrderClearStatement.run()
+    await musicInfoClearStatement.run()
+    await musicInfoOrderClearStatement.run()
     for (const musicInfo of musicInfos) {
-      musicInfoInsertStatement.run(musicInfo)
-      musicInfoOrderInsertStatement.run({
+      await musicInfoInsertStatement.run(musicInfo)
+      await musicInfoOrderInsertStatement.run({
         listId: musicInfo.listId,
         musicInfoId: musicInfo.id,
         order: musicInfo.order,
@@ -376,7 +395,7 @@ export const overwriteListData = (lists: Rain.DBService.UserListInfo[], musicInf
  * @param musicInfoId 音乐id
  * @returns 音乐排序信息
  */
-export const getMusicInfoOrder = (listId: string, musicInfoId: string) => {
+export const getMusicInfoOrder = async(listId: string, musicInfoId: string) => {
   const musicInfoOrderStatement = createMusicInfoOrderStatement()
-  return musicInfoOrderStatement.get({ listId, musicInfoId })
+  return await musicInfoOrderStatement.get({ listId, musicInfoId })
 }

@@ -104,8 +104,8 @@ export default {
         ids: '[' + ids.join(',') + ']',
       }),
     })
-    const { body, statusCode } = await requestObj.promise
-    if (statusCode != 200 || body.code !== 200) throw new Error('获取歌曲详情失败')
+    const { body, status } = await requestObj.promise
+    if (status != 200 || body.code !== 200) throw new Error('获取歌曲详情失败')
     // console.log(body)
     return { source: 'wy', list: this.filterList(body) }
   },

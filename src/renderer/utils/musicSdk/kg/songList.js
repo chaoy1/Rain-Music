@@ -265,8 +265,8 @@ export default {
       console.log(err)
       return this.createHttp(url, options, ++retryNum)
     }
-    // console.log(result.statusCode, result.body)
-    if (result.statusCode !== 200 ||
+    // console.log(result.status, result.body)
+    if (result.status !== 200 ||
       (
         (result.body.error_code !== undefined
           ? result.body.error_code
@@ -691,9 +691,9 @@ export default {
         Referer: link,
       },
     })
-    const { headers: { location }, statusCode, body } = await requestObj_listDetailLink.promise
+    const { headers: { location }, status, body } = await requestObj_listDetailLink.promise
     // console.log(body, location)
-    if (statusCode > 400) return this.getUserListDetail(link, page, ++retryNum)
+    if (status > 400) return this.getUserListDetail(link, page, ++retryNum)
     if (location) {
       if (location.includes('global_collection_id') && location.includes('chain')) {
         return this.getListDetailByGcidChain(location.replace(/^.*?global_collection_id=(\w+)(?:&.*$|#.*$|$)/, '$1'), location.replace(/^.*?chain=(\w+)(?:&.*$|#.*$|$)/, '$1'))

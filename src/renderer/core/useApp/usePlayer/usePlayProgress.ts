@@ -137,6 +137,9 @@ export default () => {
         maxTime: playProgress.maxPlayTime,
         listId: playMusicInfo.listId,
         index: playInfo.playIndex,
+        musicId: playMusicInfo.musicInfo?.id,
+        musicName: musicInfo.name,
+        musicSinger: musicInfo.singer,
       })
     }
   }
@@ -149,6 +152,9 @@ export default () => {
         maxTime: playProgress.maxPlayTime,
         listId: playMusicInfo.listId as string,
         index: playInfo.playIndex,
+        musicId: playMusicInfo.musicInfo?.id,
+        musicName: musicInfo.name,
+        musicSinger: musicInfo.singer,
       })
     }
   })
@@ -159,8 +165,25 @@ export default () => {
         maxTime: maxPlayTime,
         listId: playMusicInfo.listId as string,
         index: playInfo.playIndex,
+        musicId: playMusicInfo.musicInfo?.id,
+        musicName: musicInfo.name,
+        musicSinger: musicInfo.singer,
       })
     }
+  })
+
+  watch(() => [playMusicInfo.listId, playInfo.playIndex, playMusicInfo.musicInfo?.id, playMusicInfo.isTempPlay], () => {
+    const index = playInfo.playIndex
+    if (index < 0 || playMusicInfo.isTempPlay || !playMusicInfo.listId) return
+    delaySavePlayInfo({
+      time: playProgress.nowPlayTime,
+      maxTime: playProgress.maxPlayTime,
+      listId: playMusicInfo.listId,
+      index,
+      musicId: playMusicInfo.musicInfo?.id,
+      musicName: musicInfo.name,
+      musicSinger: musicInfo.singer,
+    })
   })
 
   // window.app_event.on('play', handlePlay)

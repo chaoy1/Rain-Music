@@ -1,10 +1,10 @@
 // import { useCommit } from '@common/utils/vueTools'
 import { defaultList } from '@renderer/store/list/state'
 import { getListMusics, addListMusics } from '@renderer/store/list/action'
-import { addTempPlayList } from '@renderer/store/player/action'
+import { addToPlaybackQueue } from '@renderer/core/player/playbackQueue'
 import { type Ref } from '@common/utils/vueTools'
 import { playList } from '@renderer/core/player'
-import { LIST_IDS } from '@common/constants'
+import { findPlaybackQueueMusicIndex } from '@common/utils/playbackQueue'
 
 export default ({ selectedList, props, removeAllSelect, emit }: {
   selectedList: Ref<Rain.Music.MusicInfoOnline[]>
@@ -26,18 +26,18 @@ export default ({ selectedList, props, removeAllSelect, emit }: {
     } else {
       await addListMusics(defaultList.id, [targetSong])
     }
-    let targetIndex = defaultListMusics.findIndex(s => s.id === targetSong.id)
+    let targetIndex = findPlaybackQueueMusicIndex(defaultListMusics, targetSong)
     if (targetIndex > -1) {
       playList(defaultList.id, targetIndex)
     }
   }
 
-  const handlePlayMusicLater = (index: number, single: boolean) => {
+  const handlePlayMusicLater = async(index: number, single: boolean) => {
     if (selectedList.value.length && !single) {
-      addTempPlayList(selectedList.value.map(s => ({ listId: LIST_IDS.PLAY_LATER, musicInfo: s })))
+      await addToPlaybackQueue([...selectedList.value])
       removeAllSelect()
     } else {
-      addTempPlayList([{ listId: LIST_IDS.PLAY_LATER, musicInfo: props.list[index] }])
+      await addToPlaybackQueue([props.list[index]])
     }
   }
 

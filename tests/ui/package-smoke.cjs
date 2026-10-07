@@ -29,6 +29,7 @@ async function run() {
     }
     const sqlite = asar.statFile(archive, path.join('node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'))
     check('package includes SQLite and third-party licenses', sqlite.size > 0 && fs.existsSync(path.join(packageDir, 'resources/licenses/license_zh.txt')))
+    check('package contains the verified native-resolution tray assets', ['tray_black.png', 'tray_white.png', 'tray_black@4x.png', 'tray_white@4x.png'].every(file => hash(asar.extractFile(archive, path.join('dist', 'static', 'images', 'tray', file))) === hash(fs.readFileSync(path.join(root, 'src/static/images/tray', file)))))
     const server = net.createServer()
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     const port = server.address().port
@@ -85,7 +86,11 @@ async function run() {
     await evaluate(`location.hash='#/setting';true`)
     check('packaged settings contain all seven continuous sections', await until(`document.querySelectorAll('[data-settings-section]').length === 7`))
     check('empty packaged player hides the timeline', await evaluate(`!document.querySelector('[data-footer-progress],[data-footer-time]')`))
-    check('packaged theme picker expands and collapses', await evaluate(`(async()=>{const button=document.querySelector('[data-theme-toggle]');button.click();await new Promise(r=>setTimeout(r,100));const open=button.getAttribute('aria-expanded')==='true';button.click();await new Promise(r=>setTimeout(r,100));return open&&button.getAttribute('aria-expanded')==='false'})()`))
+    check('packaged theme presets stay visible in one row and save selection', await evaluate(`(async()=>{const buttons=[...document.querySelectorAll('#settings-themes [data-theme-preset]')];if(buttons.map(b=>b.dataset.themePreset).join(',')!=='mono,mono_dark,mist_blue,sand,auto'||document.querySelector('[data-theme-toggle]'))return false;const boxes=buttons.map(b=>b.getBoundingClientRect());if(!boxes.every(b=>Math.abs(b.top-boxes[0].top)<1))return false;document.querySelector('[data-theme-preset="sand"]').click();await new Promise(r=>setTimeout(r,100));return rainData.appSetting['theme.id']==='sand'&&document.querySelector('[data-theme-preset="sand"]').getAttribute('aria-pressed')==='true'})()`))
+    check('packaged queue labels use the new name', await evaluate(`window.i18n.t('default_list')==='播放列表'&&window.i18n.t('list__name_default')==='播放列表'`))
+    await evaluate(`document.querySelector('[data-sleep-timer]').click();true`)
+    check('packaged custom timer panel opens', await until(`!!document.querySelector('[data-sleep-timer-custom]')`))
+    check('packaged custom timer starts and cancels', await evaluate(`(async()=>{const input=document.querySelector('[data-sleep-timer-minutes]');input.value='45';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-sleep-timer-custom]').requestSubmit();await new Promise(r=>setTimeout(r,80));const trigger=document.querySelector('[data-sleep-timer]');if(trigger.getAttribute('aria-pressed')!=='true'||!trigger.textContent.includes('45:00'))return false;trigger.click();await new Promise(r=>setTimeout(r,80));document.querySelector('[data-sleep-timer-off]').click();await new Promise(r=>setTimeout(r,80));return trigger.getAttribute('aria-pressed')==='false'})()`))
     const capture = await command('Page.captureScreenshot', { format: 'png' })
     fs.writeFileSync(path.join(evidence, 'settings.png'), Buffer.from(capture.data, 'base64'))
     socket.send(JSON.stringify({ id: ++id, method: 'Runtime.evaluate', params: { expression: `require('electron').ipcRenderer.send('winMain_quit');true` } }))

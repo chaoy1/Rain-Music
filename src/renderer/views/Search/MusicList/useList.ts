@@ -7,6 +7,7 @@ import { addHistoryWord } from '@renderer/store/search/action'
 // import { } from '@renderer/store/search/state'
 import { search as searchMusic, listInfos, type ListInfo } from '@renderer/store/search/music'
 import { assertApiSupport } from '@renderer/store/utils'
+import { findPlaybackQueueMusicIndex } from '@common/utils/playbackQueue'
 
 export type SearchSource = Rain.OnlineSource
 
@@ -44,7 +45,7 @@ export default () => {
 
     await addListMusics(LIST_IDS.DEFAULT, [targetSong])
 
-    let targetIndex = defaultListMusics.findIndex(s => s.id === targetSong.id)
+    let targetIndex = findPlaybackQueueMusicIndex(defaultListMusics, targetSong)
     if (targetIndex > -1) playList(LIST_IDS.DEFAULT, targetIndex)
   }
 

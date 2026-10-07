@@ -6,7 +6,7 @@
     </button>
     <div :class="[$style.trackContent, { [$style.timelineVisible]: hasTimeline }]">
     <div :class="$style.infoContent" data-footer-song>
-      <div :class="$style.title" :aria-label="title + $t('copy_tip')" @click="handleCopy(title)">
+      <div :class="$style.title" :aria-label="title" @click="handleCopy(title)">
         {{ title }}
       </div>
       <div v-if="statusText" :class="$style.status">{{ statusText }}</div>
@@ -166,10 +166,11 @@ export default {
   height: 24px;
   z-index: 3;
   outline: none;
-  &:focus-visible { box-shadow: 0 0 0 2px var(--control-outline); }
+  border-radius: 6px;
+  &:focus-visible { outline: 2px solid var(--control-outline); outline-offset: 2px; }
   // height: 15px;
   .progressBar {
-    height: 3px;
+    height: 4px;
     border-radius: 3px;
   }
 }
@@ -274,6 +275,18 @@ export default {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+@media (max-width: 960px) {
+  .trackContent.timelineVisible {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 24px;
+    gap: 2px 8px;
+  }
+  .timelineVisible .infoContent { grid-column: 1; grid-row: 1; }
+  .timelineVisible .status { display: none; }
+  .timelineVisible .progress { grid-column: 1 / -1; grid-row: 2; }
+  .timelineVisible .timeContent { grid-column: 2; grid-row: 1; font-size: 11px; }
 }
 
 

@@ -1,5 +1,5 @@
 import { watch } from '@common/utils/vueTools'
-import { isFullscreen, windowSizeActive } from '@renderer/store'
+import { windowSizeActive } from '@renderer/store'
 import { appSetting } from '@renderer/store/setting'
 import { setWindowSize } from '@renderer/utils/ipc'
 import { setLanguage } from '@root/lang'
@@ -15,7 +15,6 @@ export default () => {
     setWindowSize(info.width, info.height)
   })
   watch(() => appSetting['common.fontSize'], (fontSize) => {
-    if (isFullscreen.value) return
     document.documentElement.style.fontSize = `${fontSize}px`
   })
 

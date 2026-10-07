@@ -144,7 +144,9 @@ export default {
     const lrcFontSize = computed(() => {
       const size = appSetting['playDetail.style.fontSize'] / 100
       return {
-        '--playDetail-lrc-font-size': (size * 1.35) + 'rem',
+        // Viewport scaling is bounded independently of the fullscreen root rem.
+        // The user's lyric size preference still scales every bound.
+        '--playDetail-lrc-font-size': `clamp(${size * 16}px, ${size * 1.65}vw, ${size * 28}px)`,
       }
     })
 
@@ -248,6 +250,7 @@ export default {
       &.line-mode.active .font-lrc, &.font-mode.played .font-lrc {
         color: var(--control-ink);
       }
+      &.active .line { font-weight: 600; }
       &.font-mode .extended .font-lrc {
         transition: @transition-slow;
         transition-property: font-size, color;

@@ -666,9 +666,9 @@ export default {
       },
       follow_max: 2,
     })
-    const { headers: { location }, statusCode, body } = await requestLink.promise
-    // console.log(body, location, statusCode)
-    if (statusCode > 400) return this.getUserListDetail(link, page, ++retryNum)
+    const { headers: { location }, status, body } = await requestLink.promise
+    // console.log(body, location, status)
+    if (status > 400) return this.getUserListDetail(link, page, ++retryNum)
     if (typeof body == 'string') {
       if (body.includes('"global_collection_id":')) return this.getUserListDetailByCollectionId(body.replace(/^[\s\S]+?"global_collection_id":"(\w+)"[\s\S]+?$/, '$1'), page)
       if (body.includes('"albumid":')) return album.getAlbumDetail(body.replace(/^[\s\S]+?"albumid":(\w+)[\s\S]+?$/, '$1'), page)

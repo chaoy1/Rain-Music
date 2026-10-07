@@ -141,9 +141,9 @@ export default {
         threadId: id,
       }),
     })
-    const { body, statusCode } = await _requestObj.promise
+    const { body, status } = await _requestObj.promise
     // console.log(body)
-    if (statusCode != 200 || body.code !== 200) throw new Error('获取评论失败')
+    if (status != 200 || body.code !== 200) throw new Error('获取评论失败')
     cursorTools.setCursor(songmid, body.data.cursor, cursorInfo.orderType, cursorInfo.offset, page)
     return { source: 'wy', comments: this.filterComment(body.data.comments), total: body.data.totalCount, page, limit, maxPage: Math.ceil(body.data.totalCount / limit) || 1 }
   },
@@ -167,8 +167,8 @@ export default {
         beforeTime: Date.now().toString(),
       }),
     })
-    const { body, statusCode } = await _requestObj2.promise
-    if (statusCode != 200 || body.code !== 200) throw new Error('获取热门评论失败')
+    const { body, status } = await _requestObj2.promise
+    if (status != 200 || body.code !== 200) throw new Error('获取热门评论失败')
     const total = body.total ?? 0
     return { source: 'wy', comments: this.filterComment(body.hotComments), total, page, limit, maxPage: Math.ceil(total / limit) || 1 }
   },

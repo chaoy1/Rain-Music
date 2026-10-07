@@ -43,17 +43,6 @@ export const setTitle = (title: string | null) => {
 }
 
 
-export const getFontSizeWithScreen = (screenWidth: number = window.innerWidth): number => {
-  return screenWidth <= 1440
-    ? 16
-    : screenWidth <= 1920
-      ? 18
-      : screenWidth <= 2560
-        ? 20
-        : screenWidth <= 2560 ? 20 : 22
-}
-
-
 export const deduplicationList = <T extends Rain.Music.MusicInfo>(list: T[]): T[] => {
   const ids = new Set<string>()
   return list.filter(s => {

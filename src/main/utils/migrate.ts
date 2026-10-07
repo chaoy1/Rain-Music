@@ -1,23 +1,32 @@
-import fs from 'node:fs'
-import { checkPath, joinPath } from '@common/utils/nodejs'
+import { joinPath } from '@common/utils/nodejs'
 import { log } from '@common/utils'
 import { filterMusicList, toNewMusicInfo } from '@common/utils/tools'
 import { APP_EVENT_NAMES, STORE_NAMES } from '@common/constants'
+import { electronConfigFiles } from '@main/platform/storage/adapter'
 
 /**
- * 读取配置文件
- * @returns
+ * Rain Music Android 移植 · 阶段 2 / 线 B
+ *
+ * 这个文件是 **v2.0.0 之前旧 Electron 数据目录的一次性迁移**，
+ * 全部文件操作已改走 `IFileAdapter`（`src/common/storage/types.ts`）。
+ *
+ * 为什么这里直接用 `electronConfigFiles` 而不是走 `@main/platform/storage/adapter` 的默认导出：
+ * 迁移的**输入**是 `global.rainOldDataPath`（`src/main/utils/dataPath.ts:41` 记录的
+ * `app.getPath('userData')`），这个概念在 Android 上不存在（Capacitor 侧没有旧 Electron 数据目录）。
+ * 也就是说这段代码**天生就是桌面专有**的；把它接到 Android 适配器上只会得到一个永远返回 null 的空实现。
+ * 用 `electronConfigFiles` 明确表达"这里是桌面路径"，比藏一个平台分支更诚实。
+ */
+const files = electronConfigFiles
+
+/**
+ * 读取旧数据目录里的配置文件。
+ *
+ * 等价于原实现（`fs.promises.readFile` + `JSON.parse` + `checkPath`），
+ * 现在收敛到 `IFileAdapter.readJsonOrNull()`：
+ * 不存在 → `null`；解析失败 → 记日志后 `null`。
  */
 export const parseDataFile = async<T>(name: string): Promise<T | null> => {
-  const path = joinPath(global.rainOldDataPath, name)
-  if (await checkPath(path)) {
-    try {
-      return JSON.parse((await fs.promises.readFile(path)).toString())
-    } catch (err) {
-      log.error(err)
-    }
-  }
-  return null
+  return files.readJsonOrNull<T>(joinPath(global.rainOldDataPath, name))
 }
 
 interface OldUserListInfo {
@@ -74,17 +83,16 @@ export const migrateDBData = async() => {
   }
 }
 
-// 迁移文件
+/**
+ * 迁移文件：目标不存在且源存在时复制一次。
+ *
+ * 等价于原实现（两次 `checkPath` + `copyFile` + 两次 `.catch(log.error)`）。
+ */
 const migrateFile = async(name: string, targetName: string) => {
-  let path = joinPath(global.rainDataPath, targetName)
-  let oldPath = joinPath(global.rainOldDataPath, name)
-  if (!await checkPath(path) && await checkPath(oldPath)) {
-    await fs.promises.copyFile(oldPath, path).catch(err => {
-      log.error(err)
-    }).catch(err => {
-      log.error(err)
-    })
-  }
+  await files.copyIfMissing(
+    joinPath(global.rainOldDataPath, name),
+    joinPath(global.rainDataPath, targetName),
+  )
 }
 
 /**
@@ -92,8 +100,8 @@ const migrateFile = async(name: string, targetName: string) => {
  * @returns
  */
 export const migrateDataJson = async() => {
-  const path = joinPath(global.rainDataPath, 'data.json')
-  if (await checkPath(path)) return
+  const targetPath = joinPath(global.rainDataPath, 'data.json')
+  if (await files.exists(targetPath)) return
   const oldDataFile = await parseDataFile<{
     searchHistoryList?: string[]
     playInfo?: any
@@ -109,7 +117,9 @@ export const migrateDataJson = async() => {
   if (oldDataFile.listPosition) newData.listScrollPosition = oldDataFile.listPosition
   if (oldDataFile.listUpdateInfo) newData.listUpdateInfo = oldDataFile.listUpdateInfo
 
-  await fs.promises.writeFile(path, JSON.stringify(newData)).catch(err => {
+  // 原实现（`migrate.ts:112-114`）用 `.catch(err => log.error(err))` 吞掉写失败；
+  // 适配器把错误抛出来，这里照旧吞掉，行为不变。
+  await files.writeText(targetPath, JSON.stringify(newData)).catch(err => {
     log.error(err)
   })
 }

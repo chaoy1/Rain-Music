@@ -2,12 +2,13 @@ import { markRaw } from '@common/utils/vueTools'
 import { useRouter } from '@common/utils/vueRouter'
 import { decodeName } from '@renderer/utils'
 // import { allList, defaultList, userLists } from '@renderer/store/list'
-import { playMusicInfo, isShowPlayerDetail } from '@renderer/store/player/state'
-import { setShowPlayerDetail, addTempPlayList } from '@renderer/store/player/action'
+import { isShowPlayerDetail } from '@renderer/store/player/state'
+import { setShowPlayerDetail } from '@renderer/store/player/action'
+import { addToPlaybackQueue } from '@renderer/core/player/playbackQueue'
 
 import { dataVerify, qualityFilter, sources } from './utils'
 import { focusWindow } from '@renderer/utils/ipc'
-import { playNext } from '@renderer/core/player/action'
+import { playListById } from '@renderer/core/player/action'
 import { toNewMusicInfo } from '@common/utils/tools'
 import { LIST_IDS } from '@common/constants'
 import { getOtherSource } from '@renderer/core/music/utils'
@@ -105,7 +106,7 @@ const usePlayMusic = () => {
     return musicInfo
   }
 
-  return ({ data: _musicInfo }) => {
+  return async({ data: _musicInfo }) => {
     _musicInfo = filterInfoByPlayMusic(_musicInfo)
 
     let musicInfo = {
@@ -122,9 +123,8 @@ const usePlayMusic = () => {
     }
     musicInfo = toNewMusicInfo(musicInfo)
     markRaw(musicInfo)
-    const isPlaying = !!playMusicInfo.musicInfo
-    addTempPlayList([{ listId: LIST_IDS.PLAY_LATER, musicInfo, isTop: true }])
-    if (isPlaying) playNext()
+    const [queued] = await addToPlaybackQueue([musicInfo])
+    playListById(LIST_IDS.DEFAULT, queued.id)
   }
 }
 
@@ -171,12 +171,11 @@ const useSearchPlayMusic = () => {
       console.log('find music:', musicList)
       const musicInfo = musicList[0]
       markRaw(musicInfo)
-      const isPlaying = !!playMusicInfo.musicInfo
       if (info.playLater) {
-        addTempPlayList([{ listId: LIST_IDS.PLAY_LATER, musicInfo }])
+        await addToPlaybackQueue([musicInfo])
       } else {
-        addTempPlayList([{ listId: LIST_IDS.PLAY_LATER, musicInfo, isTop: true }])
-        if (isPlaying) playNext()
+        const [queued] = await addToPlaybackQueue([musicInfo])
+        playListById(LIST_IDS.DEFAULT, queued.id)
       }
     } else {
       console.log('msuic not found:', info)
@@ -196,7 +195,7 @@ export default () => {
         handleSearchMusic(info)
         break
       case 'play':
-        handlePlayMusic(info)
+        await handlePlayMusic(info)
         break
       case 'searchPlay':
         await handleSearchPlayMusic(info)

@@ -5,6 +5,7 @@ import {
   // getOtherSource as getOtherSourceFromStore,
   // saveOtherSource as saveOtherSourceFromStore,
   getMusicUrl as getStoreMusicUrl,
+  removeMusicUrl as removeStoreMusicUrl,
   getPlayerLyric as getStoreLyric,
 } from '@renderer/utils/ipc'
 import { appSetting } from '@renderer/store/setting'
@@ -192,6 +193,35 @@ export const getPlayQuality = (highQuality: Rain.Quality, musicInfo: Rain.Music.
     if (t) type = t
   }
   return type
+}
+
+/**
+ * 计算一首歌在 music_url 缓存里「正常播放时会被读取」的那条直链记录。
+ * 读取用的 id 形状是 `<musicInfo.id>_<quality>`（见 @renderer/utils/ipc 的 createMusicUrlId），
+ * 这里只负责推导出与各音源读取路径一致的 musicInfo 与 quality：
+ * - 下载列表：实际读取的是 `metadata.musicInfo`（见 ./download.ts）；
+ * - 存在换源对象(toggleMusicInfo)时，实际使用的是换源对象
+ *   （见 core/player/action.ts 的 getMusicPlayUrl）；
+ * - 本地歌曲固定 128k（见本文件 getOnlineOtherSourceMusicUrlByLocal）；
+ * - 在线歌曲则是 getPlayQuality(appSetting['player.playQuality'], musicInfo)（见 ./online.ts）。
+ */
+export const getMusicUrlCacheInfo = (musicInfo: Rain.Music.MusicInfo | Rain.Download.ListItem): {
+  musicInfo: Rain.Music.MusicInfo
+  quality: Rain.Quality
+} => {
+  const info = 'progress' in musicInfo ? musicInfo.metadata.musicInfo : musicInfo
+  const usedMusicInfo = info.meta.toggleMusicInfo ?? info
+  if (usedMusicInfo.source == 'local') return { musicInfo: usedMusicInfo, quality: '128k' }
+  return { musicInfo: usedMusicInfo, quality: getPlayQuality(appSetting['player.playQuality'], usedMusicInfo) }
+}
+
+/**
+ * 删除一首歌（该音质）在 music_url 里缓存的直链。
+ * 用于「刷新 2 次仍然失败」时丢弃已失效的直链，让下一次播放直接 cache miss。
+ */
+export const removeMusicUrlCache = async(musicInfo: Rain.Music.MusicInfo | Rain.Download.ListItem): Promise<void> => {
+  const { musicInfo: usedMusicInfo, quality } = getMusicUrlCacheInfo(musicInfo)
+  await removeStoreMusicUrl(usedMusicInfo, quality)
 }
 
 export const getOnlineOtherSourceMusicUrl = async({ musicInfos, quality, onToggleSource, isRefresh, retryedSource = [] }: {

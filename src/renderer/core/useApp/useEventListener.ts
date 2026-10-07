@@ -1,4 +1,3 @@
-import { getFontSizeWithScreen } from '@renderer/utils'
 import {
   onFocus,
   onSettingChanged,
@@ -79,12 +78,12 @@ export default () => {
     if (val) {
       document.documentElement.classList.remove(window.dt ? 'disableTransparent' : 'transparent')
       document.documentElement.classList.add('fullscreen')
-      document.documentElement.style.fontSize = `${getFontSizeWithScreen(window.screen.width)}px`
     } else {
       document.documentElement.classList.remove('fullscreen')
       document.documentElement.classList.add(window.dt ? 'disableTransparent' : 'transparent')
-      document.documentElement.style.fontSize = `${appSetting['common.fontSize']}px`
     }
+    // Fullscreen changes the available space, not the user's preferred UI scale.
+    document.documentElement.style.fontSize = `${appSetting['common.fontSize']}px`
   }, {
     immediate: true,
   })

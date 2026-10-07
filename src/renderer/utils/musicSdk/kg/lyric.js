@@ -21,8 +21,8 @@ export default {
   //       'User-Agent': 'KuGou2012-9020-ExpandSearchManager',
   //     },
   //   })
-  //   requestObj.promise = requestObj.promise.then(({ body, statusCode }) => {
-  //     if (statusCode !== 200) {
+  //   requestObj.promise = requestObj.promise.then(({ body, status }) => {
+  //     if (status !== 200) {
   //       if (tryNum > 5) return Promise.reject(new Error('歌词获取失败'))
   //       let tryRequestObj = this.getLyric(songInfo, ++tryNum)
   //       requestObj.cancelHttp = tryRequestObj.cancelHttp.bind(tryRequestObj)
@@ -43,8 +43,8 @@ export default {
         'User-Agent': 'KuGou2012-9020-ExpandSearchManager',
       },
     })
-    requestObj.promise = requestObj.promise.then(({ body, statusCode }) => {
-      if (statusCode !== 200) {
+    requestObj.promise = requestObj.promise.then(({ body, status }) => {
+      if (status !== 200) {
         if (tryNum > 5) return Promise.reject(new Error('歌词获取失败'))
         let tryRequestObj = this.searchLyric(name, hash, time, ++tryNum)
         requestObj.cancelHttp = tryRequestObj.cancelHttp.bind(tryRequestObj)
@@ -66,8 +66,8 @@ export default {
         'User-Agent': 'KuGou2012-9020-ExpandSearchManager',
       },
     })
-    requestObj.promise = requestObj.promise.then(({ body, statusCode }) => {
-      if (statusCode !== 200) {
+    requestObj.promise = requestObj.promise.then(({ body, status }) => {
+      if (status !== 200) {
         if (tryNum > 5) return Promise.reject(new Error('歌词获取失败'))
         let tryRequestObj = this.getLyric(id, accessKey, fmt, ++tryNum)
         requestObj.cancelHttp = tryRequestObj.cancelHttp.bind(tryRequestObj)

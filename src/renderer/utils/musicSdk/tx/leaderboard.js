@@ -206,7 +206,7 @@ export default {
     //   return this.getBoards(retryNum)
     // }
     // // console.log(response.body)
-    // if (response.statusCode !== 200 || response.body.code !== 0) return this.getBoards(retryNum)
+    // if (response.status !== 200 || response.body.code !== 0) return this.getBoards(retryNum)
     // const list = this.filterBoardsData(response.body.data.topList)
     // console.log(list)
     // console.log(JSON.stringify(list))

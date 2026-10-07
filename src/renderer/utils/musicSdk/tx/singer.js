@@ -91,7 +91,7 @@ const createMusicuFetch = async(data, options, retryNum = 0) => {
     console.log(err)
     return createMusicuFetch(data, options, ++retryNum)
   }
-  if (result.statusCode !== 200 || result.body.code != 0) return createMusicuFetch(data, options, ++retryNum)
+  if (result.status !== 200 || result.body.code != 0) return createMusicuFetch(data, options, ++retryNum)
 
   return result.body
 }

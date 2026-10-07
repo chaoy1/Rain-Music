@@ -1,5 +1,6 @@
 import tips from './Tips'
 import { debounce } from '@common/utils'
+import { getTipText } from './policy'
 
 let instance
 let prevTips
@@ -7,17 +8,13 @@ let prevX = 0
 let prevY = 0
 let isDraging = false
 
-const getTipText = el => {
-  return el.getAttribute('aria-label') && el.getAttribute('ignore-tip') == null ? el.getAttribute('aria-label') : null
-}
-
 const getTips = el =>
   el
     ? getTipText(el)
       ? getTipText(el)
       : el.parentNode === document.documentElement
         ? null
-        : getTips(el.parentNode)
+        : getTips(el.parentElement)
     : null
 
 const showTips = debounce(event => {

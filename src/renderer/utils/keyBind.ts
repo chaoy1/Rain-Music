@@ -81,7 +81,8 @@ const handleKeyDown = (event: Rain.KeyEvent) => {
 
 const handleKeyUp = (event: Rain.KeyEvent) => {
   // if (assertStopCallback(event.target)) return
-  event.preventDefault()
+  // Native buttons activate on Space keyup. Only matched hotkeys should cancel
+  // browser defaults (registerKeyEvent handles those explicitly).
   let keys = eventModifiers(event)
   switch (event.key) {
     case 'Control':

@@ -34,8 +34,8 @@ const toDBLyric = (id: string, source: Rain.DBService.Lyricnfo['source'], lyricI
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const getPlayerLyric = (id: string): Rain.Player.LyricInfo => {
-  const lyrics = queryLyric(id)
+export const getPlayerLyric = async(id: string): Promise<Rain.Player.LyricInfo> => {
+  const lyrics = await queryLyric(id)
 
   let lyricInfo: Rain.Music.LyricInfo = {
     lyric: '',
@@ -70,8 +70,8 @@ export const getPlayerLyric = (id: string): Rain.Player.LyricInfo => {
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const getRawLyric = (id: string): Rain.Music.LyricInfo => {
-  const lyrics = queryRawLyric(id)
+export const getRawLyric = async(id: string): Promise<Rain.Music.LyricInfo> => {
+  const lyrics = await queryRawLyric(id)
 
   let lyricInfo: Rain.Music.LyricInfo = {
     lyric: '',
@@ -89,16 +89,16 @@ export const getRawLyric = (id: string): Rain.Music.LyricInfo => {
  * @param id 歌曲id
  * @param lyricInfo 歌词信息
  */
-export const rawLyricAdd = (id: string, lyricInfo: Rain.Music.LyricInfo) => {
-  insertRawLyric(toDBLyric(id, 'raw', lyricInfo))
+export const rawLyricAdd = async(id: string, lyricInfo: Rain.Music.LyricInfo) => {
+  await insertRawLyric(toDBLyric(id, 'raw', lyricInfo))
 }
 
 /**
  * 删除原始歌词信息
  * @param ids 歌曲id
  */
-export const rawLyricRemove = (ids: string[]) => {
-  deleteRawLyric(ids)
+export const rawLyricRemove = async(ids: string[]) => {
+  await deleteRawLyric(ids)
 }
 
 /**
@@ -106,22 +106,22 @@ export const rawLyricRemove = (ids: string[]) => {
  * @param id 歌曲id
  * @param lyricInfo 歌词信息
  */
-export const rawLyricUpdate = (id: string, lyricInfo: Rain.Music.LyricInfo) => {
-  updateRawLyric(toDBLyric(id, 'raw', lyricInfo))
+export const rawLyricUpdate = async(id: string, lyricInfo: Rain.Music.LyricInfo) => {
+  await updateRawLyric(toDBLyric(id, 'raw', lyricInfo))
 }
 
 /**
  * 清空原始歌词信息
  */
-export const rawLyricClear = () => {
-  clearRawLyric()
+export const rawLyricClear = async() => {
+  await clearRawLyric()
 }
 
 /**
  * 统计原始歌词数量
  */
-export const rawLyricCount = () => {
-  return countRawLyric()
+export const rawLyricCount = async() => {
+  return await countRawLyric()
 }
 
 
@@ -130,8 +130,8 @@ export const rawLyricCount = () => {
  * @param id 歌曲id
  * @returns 歌词信息
  */
-export const getEditedLyric = (id: string): Rain.Music.LyricInfo => {
-  const lyrics = queryEditedLyric(id)
+export const getEditedLyric = async(id: string): Promise<Rain.Music.LyricInfo> => {
+  const lyrics = await queryEditedLyric(id)
 
   let lyricInfo: Rain.Music.LyricInfo = {
     lyric: '',
@@ -149,16 +149,16 @@ export const getEditedLyric = (id: string): Rain.Music.LyricInfo => {
  * @param id 歌曲id
  * @param lyricInfo 歌词信息
  */
-export const editedLyricAdd = (id: string, lyricInfo: Rain.Music.LyricInfo) => {
-  insertEditedLyric(toDBLyric(id, 'edited', lyricInfo))
+export const editedLyricAdd = async(id: string, lyricInfo: Rain.Music.LyricInfo) => {
+  await insertEditedLyric(toDBLyric(id, 'edited', lyricInfo))
 }
 
 /**
  * 删除已编辑歌词信息
  * @param ids 歌曲id
  */
-export const editedLyricRemove = (ids: string[]) => {
-  deleteEditedLyric(ids)
+export const editedLyricRemove = async(ids: string[]) => {
+  await deleteEditedLyric(ids)
 }
 
 /**
@@ -166,15 +166,15 @@ export const editedLyricRemove = (ids: string[]) => {
  * @param id 歌曲id
  * @param lyricInfo 歌词信息
  */
-export const editedLyricUpdate = (id: string, lyricInfo: Rain.Music.LyricInfo) => {
-  updateEditedLyric(toDBLyric(id, 'edited', lyricInfo))
+export const editedLyricUpdate = async(id: string, lyricInfo: Rain.Music.LyricInfo) => {
+  await updateEditedLyric(toDBLyric(id, 'edited', lyricInfo))
 }
 
 /**
  * 清空已编辑歌词信息
  */
-export const editedLyricClear = () => {
-  clearEditedLyric()
+export const editedLyricClear = async() => {
+  await clearEditedLyric()
 }
 
 /**
@@ -182,16 +182,15 @@ export const editedLyricClear = () => {
  * @param id 歌曲id
  * @param lyricInfo 歌词信息
  */
-export const editedLyricUpdateAddAndUpdate = (id: string, lyricInfo: Rain.Music.LyricInfo) => {
-  const lyrics = queryEditedLyric(id)
-  if (lyrics.length) updateEditedLyric(toDBLyric(id, 'edited', lyricInfo))
-  else insertEditedLyric(toDBLyric(id, 'edited', lyricInfo))
+export const editedLyricUpdateAddAndUpdate = async(id: string, lyricInfo: Rain.Music.LyricInfo) => {
+  const lyrics = await queryEditedLyric(id)
+  if (lyrics.length) await updateEditedLyric(toDBLyric(id, 'edited', lyricInfo))
+  else await insertEditedLyric(toDBLyric(id, 'edited', lyricInfo))
 }
 
 /**
  * 统计已编辑歌词数量
  */
-export const editedLyricCount = () => {
-  return countEditedLyric()
+export const editedLyricCount = async() => {
+  return await countEditedLyric()
 }
-

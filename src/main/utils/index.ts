@@ -1,6 +1,6 @@
 import { encodePath, isUrl, throttle, isMac } from '@common/utils'
 import migrateSetting from '@common/utils/migrateSetting'
-import getStore from '@main/utils/store'
+import getStore from '@main/platform/storage/adapter'
 import { STORE_NAMES, URL_SCHEME_RXP } from '@common/constants'
 import defaultSetting from '@common/defaultSetting'
 import defaultHotKey from '@common/defaultHotKey'

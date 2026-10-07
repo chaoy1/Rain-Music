@@ -27,6 +27,12 @@ app.on('browser-window-created',(_,win)=>{
   if(!win.webContents.getURL().includes('index.html'))return
   try{
     await initialized
+    // Native pointer capture and Tab navigation need a foreground test window.
+    // Keep this isolated QA window above the concurrently running desktop app.
+    win.setAlwaysOnTop(true)
+    win.show()
+    win.focus()
+    await wait(200)
     await wait(300)
     win.webContents.debugger.attach('1.3')
     await setMotion(true);await wait(250)
@@ -92,6 +98,9 @@ app.on('browser-window-created',(_,win)=>{
     })()`)
     await wait(700)
     check('detail displays current metadata and actual lyric nodes',fixture&&await evaluate(win,`document.querySelector('[data-song-detail]').textContent.includes('雾与晨光')&&document.querySelector('[data-song-detail] .lyric .line-content.active')?.textContent.includes('让这一刻慢一点')`))
+    // Populate all timeline fields together, as setProgress does in playback.
+    // This fixture has no audio file to supply a real duration to the screenshots.
+    await evaluate(win,`window.setDetailFixtureProgress=()=>{const p=findVue(document.querySelector('#root')._vnode,c=>c.type.name==='CorePlayBar');Object.assign(p.proxy,{maxPlayTime:240,nowPlayTime:141,progress:141/240,nowPlayTimeStr:'02:21',maxPlayTimeStr:'04:00'});};setDetailFixtureProgress();void 0`)
     await evaluate(win,`const status=findVue(document.querySelector('#root')._vnode,c=>typeof c.proxy?.statusText==='string');if(status)status.proxy.statusText='让这一刻慢一点';void 0`);await wait(80)
     check('current lyric is shown only on the right, not repeated beneath metadata',await evaluate(win,`!document.querySelector('[data-detail-reveal]').textContent.includes('让这一刻慢一点')&&document.querySelector('[data-detail-lyrics]').textContent.includes('让这一刻慢一点')`))
     for(const theme of ['mono','mono_dark']){
@@ -99,6 +108,30 @@ app.on('browser-window-created',(_,win)=>{
       check(`${theme} detail fills the whole window`,await evaluate(win,`(()=>{const d=document.querySelector('[data-song-detail]').getBoundingClientRect();return d.left<2&&d.top<2&&Math.abs(d.right-innerWidth)<2&&Math.abs(d.bottom-innerHeight)<2&&document.body.scrollWidth<=innerWidth;})()`))
       await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(evidence,`detail-${theme}.png`),img.toPNG()))
     }
+    for (const [width,height] of [[1080,720],[1920,1280],[2560,1080]]) {
+      win.setContentSize(width,height);await wait(400)
+      const layout=await evaluate(win,`(()=>{const cover=document.querySelector('[data-detail-cover]').getBoundingClientRect(),meta=document.querySelector('[data-song-detail] h2').parentElement.getBoundingClientRect(),dock=document.querySelector('[data-detail-dock]').getBoundingClientRect(),lyrics=document.querySelector('[data-detail-lyrics]').getBoundingClientRect(),view=document.querySelector('[data-song-detail] .lyric'),ambient=document.querySelector('[data-song-detail] [aria-hidden="true"]');return {width:innerWidth,height:innerHeight,cover:cover.toJSON(),meta:meta.toJSON(),dock:dock.toJSON(),lyrics:lyrics.toJSON(),align:getComputedStyle(view).textAlign,fontSize:parseFloat(getComputedStyle(view).fontSize),ambientOpacity:ambient?Number(getComputedStyle(ambient).opacity):0};})()`)
+      check(`${width}x${height} keeps the cover, metadata and dock together`,layout.dock.top-layout.meta.bottom<=40&&Math.abs(layout.cover.width-layout.dock.width)<2,layout)
+      check(`${width}x${height} centers lyrics without enlarging them beyond the reading area`,layout.align==='center'&&layout.fontSize<=48&&layout.lyrics.height<=760,layout)
+      check(`${width}x${height} provides a visible cover-colored ambient background`,layout.ambientOpacity>=.45,layout)
+      if(width===1920)check('large screens enlarge the album cover proportionally',layout.cover.width>=440&&layout.cover.width<=580,layout)
+      check(`${width}x${height} keeps the playback group inside the viewport`,layout.cover.top>=52&&layout.dock.bottom<=layout.height-16&&layout.lyrics.right<=layout.width,layout)
+      await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(evidence,`detail-adaptive-${width}x${height}.png`),img.toPNG()))
+    }
+    win.setContentSize(1080,720);await wait(300)
+    for(const theme of ['mono','mono_dark']){
+      await evaluate(win,`window.rainData.updateSetting({'theme.id':'${theme}'});void 0`);await wait(250)
+      const colors=await evaluate(win,`(()=>{const active=document.querySelector('[data-song-detail] .lyric .line-content.active .font-lrc'),d=document.querySelector('[data-song-detail]');return {active:getComputedStyle(active).color,ink:getComputedStyle(d).color};})()`)
+      check(`${theme} uses bright readable text on the immersive background`,[colors.active,colors.ink].every(color=>Number(color.match(/[0-9.]+/g)[0])>=230),colors)
+      const sample=async color=>{
+        await evaluate(win,`window.rainData.musicInfo.pic='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="${color}"/></svg>');void 0`);await wait(180)
+        const pixel=(await win.webContents.capturePage({x:30,y:320,width:1,height:1})).toBitmap()
+        return {r:pixel[2],g:pixel[1],b:pixel[0]}
+      }
+      const warm=await sample('#d74030'),cool=await sample('#3060d7')
+      check(`${theme} ambient colors follow the actual cover`,warm.r>cool.r+10&&cool.b>warm.b+10,{warm,cool})
+    }
+    await evaluate(win,`window.rainData.musicInfo.pic='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="#435e58"/><circle cx="420" cy="180" r="70" fill="#d8c9a2"/><path d="M0 370 Q150 230 300 380 T600 350 V600 H0" fill="#819887"/><path d="M0 490 Q250 455 600 530 V600 H0" fill="#233f38"/></svg>');void 0`);await wait(180)
     check('detail omits secondary tools and desktop lyric controls',await evaluate(win,`!document.querySelector('[data-detail-select-lyrics],[data-detail-comment],[data-detail-comments]')&&document.querySelectorAll('[data-detail-dock] button').length===5`))
     check('detail omits volume controls',await evaluate(win,`!document.querySelector('[data-detail-volume]')`))
     check('all dock controls share a baseline and generous hit targets',await evaluate(win,`(()=>{const bs=[...document.querySelectorAll('[data-detail-dock] button')].map(e=>e.getBoundingClientRect());return bs.every(r=>r.width>=40&&r.height>=40)&&Math.max(...bs.map(r=>r.top+r.height/2))-Math.min(...bs.map(r=>r.top+r.height/2))<.5;})()`))
@@ -111,7 +144,7 @@ app.on('browser-window-created',(_,win)=>{
     win.webContents.sendInputEvent({type:'mouseMove',x:Math.round(pressRect.right+30),y:Math.round(pressRect.bottom+20)});win.webContents.sendInputEvent({type:'mouseUp',x:Math.round(pressRect.right+30),y:Math.round(pressRect.bottom+20),button:'left',clickCount:1});await wait(250)
     check('releasing outside restores the playback button without activating it',await evaluate(win,`(()=>{const s=getComputedStyle(document.querySelector('[data-detail-play]')).scale;return s==='none'||Math.abs(Number(s)-1)<.001;})()`))
     await setMotion(true);await wait(80)
-    check('important controls sit together in the lower left',await evaluate(win,`(()=>{const d=document.querySelector('[data-detail-dock]').getBoundingClientRect();return d.left<innerWidth*.3&&d.right<innerWidth*.55&&d.bottom>innerHeight*.85&&!!document.querySelector('[data-detail-play]')&&!!document.querySelector('[data-detail-prev]')&&!!document.querySelector('[data-detail-next]');})()`))
+    check('important controls stay together beneath the song metadata',await evaluate(win,`(()=>{const d=document.querySelector('[data-detail-dock]').getBoundingClientRect(),m=document.querySelector('[data-song-detail] h2').parentElement.getBoundingClientRect();return d.left<innerWidth*.3&&d.right<innerWidth*.55&&d.top-m.bottom<=40&&!!document.querySelector('[data-detail-play]')&&!!document.querySelector('[data-detail-prev]')&&!!document.querySelector('[data-detail-next]');})()`))
     check('original sidebar and player are excluded from interaction',await evaluate(win,`document.querySelector('#app-chrome').inert&&document.querySelector('#app-chrome').getAttribute('aria-hidden')==='true'&&getComputedStyle(document.querySelector('#left')).visibility==='hidden'`))
     await evaluate(win,`const p=findVue(document.querySelector('#root')._vnode,c=>c.type.name==='CorePlayBar');p.proxy.maxPlayTime=120;window.seekEvents=[];window.onSeek=v=>seekEvents.push(v);window.app_event.on('setProgress',onSeek);document.querySelector('[data-detail-progress]').focus();void 0`)
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'END'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'END'});await wait(100)
@@ -136,12 +169,19 @@ app.on('browser-window-created',(_,win)=>{
     await wait(350)
     check('active lyric keeps its reading position after resizing',await evaluate(win,`(()=>{const line=document.querySelector('[data-song-detail] .lyric .line-content.active'),view=line.closest('.lyric');return Math.abs(line.getBoundingClientRect().top-view.getBoundingClientRect().top-view.clientHeight*.38)<8;})()`))
     check('small detail keeps cover, lyrics and controls in bounds',await evaluate(win,`(()=>{const v=document.querySelector('#root').getBoundingClientRect();return Array.from(document.querySelectorAll('[data-song-detail] button,[data-detail-cover],[data-detail-lyrics],[data-detail-dock]')).every(e=>{const r=e.getBoundingClientRect();return r.right<=v.right+1&&r.bottom<=v.bottom+1;});})()`))
+    check('small detail keeps every playback button separate and inside its dock',await evaluate(win,`(()=>{const dock=document.querySelector('[data-detail-dock]').getBoundingClientRect(),buttons=[...document.querySelectorAll('[data-detail-dock] button')].map(e=>e.getBoundingClientRect()).sort((a,b)=>a.left-b.left);return buttons.every((r,i)=>r.left>=dock.left&&r.right<=dock.right&&(!i||buttons[i-1].right<=r.left+1));})()`))
+    await evaluate(win,`setDetailFixtureProgress();document.activeElement.blur();void 0`);await wait(60)
     await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(evidence,'detail-small.png'),img.toPNG()))
     await evaluate(win,`window.rainData.musicInfo.name='雾与晨光'.repeat(30);void 0`);await wait(80)
     check('long song titles do not displace the compact dock',await evaluate(win,`(()=>{const h=document.querySelector('[data-song-detail] h2'),d=document.querySelector('[data-detail-dock]').getBoundingClientRect();return getComputedStyle(h).textOverflow==='ellipsis'&&h.clientHeight<40&&d.bottom<=innerHeight;})()`))
     await evaluate(win,`window.rainData.musicInfo.name='雾与晨光';void 0`)
     await evaluate(win,`document.querySelectorAll('[data-detail-window-controls] button')[2].click();void 0`);await wait(700)
     check('native fullscreen retains immersive details and its controls',win.isFullScreen()&&await evaluate(win,`!!document.querySelector('[data-song-detail]')&&Math.abs(document.querySelector('[data-song-detail]').getBoundingClientRect().bottom-innerHeight)<2&&getComputedStyle(document.querySelector('#player')).visibility==='hidden'`))
+    check('native fullscreen shows three traffic lights with a keyboard reachable exit',await evaluate(win,`(()=>{const lights=document.querySelector('[data-detail-window-controls]'),buttons=[...lights.querySelectorAll('button')],green=buttons[2];return lights.getClientRects().length>0&&buttons.length===3&&buttons.every(b=>b.getClientRects().length>0&&b.tabIndex===0)&&green.getAttribute('aria-pressed')==='true'&&green.getAttribute('aria-label')==='退出全屏'&&!document.querySelector('[data-detail-fullscreen-exit]');})()`))
+    check('native fullscreen keeps lyrics centered with a bounded font size',await evaluate(win,`(()=>{const v=document.querySelector('[data-song-detail] .lyric');return getComputedStyle(v).textAlign==='center'&&parseFloat(getComputedStyle(v).fontSize)<=48;})()`))
+    win.webContents.sendInputEvent({type:'mouseMove',x:500,y:80});await wait(250)
+    await evaluate(win,`setDetailFixtureProgress();document.activeElement.blur();void 0`);await wait(60)
+    await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(evidence,'detail-native-fullscreen.png'),img.toPNG()))
     await evaluate(win,`document.querySelectorAll('[data-detail-window-controls] button')[2].click();void 0`);await wait(700)
     check('exiting native fullscreen retains immersive details',!win.isFullScreen()&&await evaluate(win,`!!document.querySelector('[data-song-detail]')&&Math.abs(document.querySelector('[data-song-detail]').getBoundingClientRect().bottom-innerHeight)<2`))
     for(const variant of ['full','middle','mini']){

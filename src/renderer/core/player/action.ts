@@ -1,5 +1,5 @@
 import { isEmpty, setPause, setPlay, setResource, setStop } from '@renderer/plugins/player'
-import { isPlay, playedList, playInfo, playMusicInfo, tempPlayList, musicInfo as _musicInfo } from '@renderer/store/player/state'
+import { isPlay, playedList, playInfo, playMusicInfo, musicInfo as _musicInfo } from '@renderer/store/player/state'
 import {
   getList,
   clearPlayedList,
@@ -8,7 +8,6 @@ import {
   addPlayedList,
   setMusicInfo,
   setAllStatus,
-  removeTempPlayList,
   setPlayListId,
   removePlayedList,
 } from '@renderer/store/player/action'
@@ -124,9 +123,38 @@ const getMusicPlayUrl = async(musicInfo: Rain.Music.MusicInfo | Rain.Download.Li
   })
 }
 
+/**
+ * 当前这一次播放已经刷新过多少次音频URL。
+ *
+ * 放在 `setMusicUrl` 所在的模块里，是为了让「谁可以把它清零」只有一个入口、一种解释：
+ * 只有 `setMusicUrl(musicInfo)`（`isRefresh` 为假，也就是一次**新的播放**）才会重置；
+ * 刷新路径固定以 `setMusicUrl(musicInfo, true)` 调用，因此刷新动作永远不会把自己清零，
+ * 「单次播放最多刷新 2 次」的上限不会被刷新本身破坏（消费方见 usePlayEvent.handleError）。
+ *
+ * 重置点**不能**放在音频的 loadstart / emptied 这类事件上：
+ * 设置新的 src 就会触发它们，刷新时会顺带重置 → 上限失效 → 无限刷新。
+ */
+let musicUrlRefreshNum = 0
+/** 单次播放允许刷新音频URL的最大次数 */
+export const MAX_MUSIC_URL_REFRESH_TIMES = 2
+/** 当前这次播放已刷新音频URL的次数 */
+export const getMusicUrlRefreshNum = () => musicUrlRefreshNum
+/** 记录一次音频URL刷新 */
+export const increaseMusicUrlRefreshNum = () => {
+  musicUrlRefreshNum++
+  return musicUrlRefreshNum
+}
+/** 重置音频URL刷新次数（新的一次播放开始时） */
+export const resetMusicUrlRefreshNum = () => {
+  musicUrlRefreshNum = 0
+}
+
 export const setMusicUrl = (musicInfo: Rain.Music.MusicInfo | Rain.Download.ListItem, isRefresh?: boolean) => {
   // if (AUTO_SKIP_ON_ERROR) addLoadTimeout()
   if (!diffCurrentMusicInfo(musicInfo)) return
+  // 新的一次播放（isRefresh 为假）才重置刷新计数。
+  // 刷新路径固定传 isRefresh = true，所以刷新不会把「最多刷新 2 次」的上限清零。
+  if (!isRefresh) resetMusicUrlRefreshNum()
   if (cancelDelayRetry) cancelDelayRetry()
   gettingUrlId = createGettingUrlId(musicInfo)
   void getMusicPlayUrl(musicInfo, isRefresh).then((url) => {
@@ -274,7 +302,9 @@ const randomNextMusicInfo = {
   info: null as Rain.Player.PlayMusicInfo | null,
   // index: -1,
 }
+let nextMusicRevision = 0
 export const resetRandomNextMusicInfo = () => {
+  nextMusicRevision++
   if (randomNextMusicInfo.info) {
     randomNextMusicInfo.info = null
     // randomNextMusicInfo.index = -1
@@ -282,11 +312,6 @@ export const resetRandomNextMusicInfo = () => {
 }
 
 export const getNextPlayMusicInfo = async(): Promise<Rain.Player.PlayMusicInfo | null> => {
-  if (tempPlayList.length) { // 如果稍后播放列表存在歌曲则直接播放改列表的歌曲
-    const playMusicInfo = tempPlayList[0]
-    return playMusicInfo
-  }
-
   if (playMusicInfo.musicInfo == null) return null
 
   if (randomNextMusicInfo.info) return randomNextMusicInfo.info
@@ -318,6 +343,10 @@ export const getNextPlayMusicInfo = async(): Promise<Rain.Player.PlayMusicInfo |
 
     if (index < playedList.length) return playedList[index]
   }
+  const revision = nextMusicRevision
+  const currentMusic = playMusicInfo.musicInfo
+  const currentIndex = playInfo.playerPlayIndex
+  const playMethod = appSetting['player.togglePlayMethod']
   // const isCheckFile = findNum > 2 // 针对下载列表，如果超过两次都碰到无效歌曲，则过滤整个列表内的无效歌曲
   let { filteredList, playerIndex } = await filterList({ // 过滤已播放歌曲
     listId: currentListId,
@@ -326,6 +355,9 @@ export const getNextPlayMusicInfo = async(): Promise<Rain.Player.PlayMusicInfo |
     playerMusicInfo: currentList[playInfo.playerPlayIndex],
     isNext: true,
   })
+
+  // Preloading can finish after a queue switch. Discard its old cursor/cache.
+  if (revision !== nextMusicRevision || currentListId !== playInfo.playerListId || currentMusic !== playMusicInfo.musicInfo || currentIndex !== playInfo.playerPlayIndex || playMethod !== appSetting['player.togglePlayMethod']) return getNextPlayMusicInfo()
 
   if (!filteredList.length) return null
   // let currentIndex: number = filteredList.indexOf(currentList[playInfo.playerPlayIndex])
@@ -375,14 +407,6 @@ const handlePlayNext = (playMusicInfo: Rain.Player.PlayMusicInfo) => {
  */
 export const playNext = async(isAutoToggle = false): Promise<void> => {
   console.log('skip next', isAutoToggle)
-  if (tempPlayList.length) { // 如果稍后播放列表存在歌曲则直接播放改列表的歌曲
-    const playMusicInfo = tempPlayList[0]
-    removeTempPlayList(0)
-    handlePlayNext(playMusicInfo)
-    console.log('play temp list')
-    return
-  }
-
   if (playMusicInfo.musicInfo == null) {
     handleToggleStop()
     console.log('musicInfo empty')

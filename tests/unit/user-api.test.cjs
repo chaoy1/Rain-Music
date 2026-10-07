@@ -6,7 +6,7 @@ test('batch deletion removes every requested source regardless of id ordering', 
   let saved
   const module = load('src/main/modules/userApi/utils.ts', {
     './config': { userApis: [] }, '@common/constants': { STORE_NAMES: {} },
-    '@main/utils/store': () => ({
+    '@main/platform/storage/adapter': () => ({
       get: () => ['A', 'B', 'C'].map(id => ({ id, name: id, version: '1', script: `script-${id}` })),
       set: (_, value) => { saved = value },
     }),
@@ -23,7 +23,7 @@ test('batch deletion removes every requested source regardless of id ordering', 
 test('deleting missing ids preserves other sources', () => {
   const module = load('src/main/modules/userApi/utils.ts', {
     './config': { userApis: [] }, '@common/constants': { STORE_NAMES: {} },
-    '@main/utils/store': () => ({ get: () => [{ id: 'A', version: '1', script: 'a' }], set() {} }),
+    '@main/platform/storage/adapter': () => ({ get: () => [{ id: 'A', version: '1', script: 'a' }], set() {} }),
   })
   module.getUserApis()
   module.removeApi(['missing'])

@@ -1,9 +1,7 @@
-import needle from 'needle'
+import { transport } from '../platform/http/index.js'
 // import progress from 'request-progress'
 import { debugRequest } from './env'
 import { requestMsg } from './message'
-import { bHh } from './musicSdk/options'
-import { deflateRaw } from 'zlib'
 // import fs from 'fs'
 
 
@@ -22,7 +20,7 @@ const request = (url, options, callback) => {
   }
   options.response_timeout = options.timeout
 
-  return needle.request(options.method || 'get', url, data, options, (err, resp, body) => {
+  return transport.request(options.method || 'get', url, data, options, (err, resp, body) => {
     if (!err) {
       body = resp.body = resp.raw.toString()
       try {
@@ -31,7 +29,7 @@ const request = (url, options, callback) => {
       body = resp.body
     }
     callback(err, resp, body)
-  }).request
+  })
 }
 
 
@@ -115,143 +113,11 @@ export const cancelHttp = requestObj => {
   requestObj.abort()
 }
 
-
-/**
- * http 请求
- * @param {*} url 地址
- * @param {*} options 选项
- * @param {*} cb 回调
- * @return {Number} index 用于取消请求
- */
-export const http = (url, options, cb) => {
-  if (typeof options === 'function') {
-    cb = options
-    options = {}
-  }
-
-  // 默认选项
-  if (options.method == null) options.method = 'get'
-
-  debugRequest && console.log(`\n---send request------${url}------------`)
-  return fetchData(url, options.method, options, (err, resp, body) => {
-    // options.isShowProgress && window.api.hideProgress()
-    debugRequest && console.log(`\n---response------${url}------------`)
-    debugRequest && console.log(body)
-    if (err) {
-      debugRequest && console.log(JSON.stringify(err))
-    }
-    cb(err, resp, body)
-  })
-}
-
-/**
- * http get 请求
- * @param {*} url 地址
- * @param {*} options 选项
- * @param {*} callback 回调
- * @return {Number} index 用于取消请求
- */
-export const httpGet = (url, options, callback) => {
-  if (typeof options === 'function') {
-    callback = options
-    options = {}
-  }
-  // options.isShowProgress && window.api.showProgress({
-  //   title: options.progressMsg || '请求中',
-  //   modal: true,
-  // })
-
-  debugRequest && console.log(`\n---send request-------${url}------------`)
-  return fetchData(url, 'get', options, function(err, resp, body) {
-    // options.isShowProgress && window.api.hideProgress()
-    debugRequest && console.log(`\n---response------${url}------------`)
-    debugRequest && console.log(body)
-    if (err) {
-      debugRequest && console.log(JSON.stringify(err))
-    }
-    callback(err, resp, body)
-  })
-}
-
-/**
- * http post 请求
- * @param {*} url 请求地址
- * @param {*} data 提交的数据
- * @param {*} options 选项
- * @param {*} callback 回调
- * @return {Number} index 用于取消请求
- */
-export const httpPost = (url, data, options, callback) => {
-  if (typeof options === 'function') {
-    callback = options
-    options = {}
-  }
-  // options.isShowProgress && window.api.showProgress({
-  //   title: options.progressMsg || '请求中',
-  //   modal: true,
-  // })
-  options.data = data
-
-  debugRequest && console.log(`\n---send request-------${url}------------`)
-  return fetchData(url, 'post', options, function(err, resp, body) {
-    // options.isShowProgress && window.api.hideProgress()
-    debugRequest && console.log(`\n---response------${url}------------`)
-    debugRequest && console.log(body)
-    if (err) {
-      debugRequest && console.log(JSON.stringify(err))
-    }
-    callback(err, resp, body)
-  })
-}
-
-/**
- * http jsonp 请求
- * @param {*} url 请求地址
- * @param {*} options 选项
- *             options.jsonpCallback 回调
- * @param {*} callback 回调
- * @return {Number} index 用于取消请求
- */
-export const http_jsonp = (url, options, callback) => {
-  if (typeof options === 'function') {
-    callback = options
-    options = {}
-  }
-
-  let jsonpCallback = 'jsonpCallback'
-  if (url.indexOf('?') < 0) url += '?'
-  url += `&${options.jsonpCallback}=${jsonpCallback}`
-
-  options.format = 'script'
-
-  // options.isShowProgress && window.api.showProgress({
-  //   title: options.progressMsg || '请求中',
-  //   modal: true,
-  // })
-
-  debugRequest && console.log(`\n---send request-------${url}------------`)
-  return fetchData(url, 'get', options, function(err, resp, body) {
-    // options.isShowProgress && window.api.hideProgress()
-    debugRequest && console.log(`\n---response------${url}------------`)
-    debugRequest && console.log(body)
-    if (err) {
-      debugRequest && console.log(JSON.stringify(err))
-    } else {
-      body = JSON.parse(body.replace(new RegExp(`^${jsonpCallback}\\(({.*})\\)$`), '$1'))
-    }
-
-    callback(err, resp, body)
-  })
-}
-
-const handleDeflateRaw = data => new Promise((resolve, reject) => {
-  deflateRaw(data, (err, buf) => {
-    if (err) return reject(err)
-    resolve(buf)
-  })
-})
-
-const regx = /(?:\d\w)+/g
+// 阶段 3 删除：`http` / `httpGet` / `httpPost` / `http_jsonp` / `checkUrl` 五个导出
+// 全库调用点为 0（`docs/android/native-bridge-needs.md` §2.6.2），且都是 needle 回调形状的
+// 薄封装，会把 Node 侧的请求模型带进 Android bundle。同批删除的还有 `handleDeflateRaw`
+// 与 `bHtml` deflate 分支（那个分支只被 3 个零引用的 `api-test.js` 触发，不是 tx 的签名头；
+// tx 签名在 `musicSdk/tx/utils/crypto.js`，只用 SHA-1 + base64）。
 
 const fetchData = async(url, method, {
   headers = {},
@@ -262,16 +128,6 @@ const fetchData = async(url, method, {
   // console.log(url, options)
   console.log('---start---', url)
   headers = Object.assign({}, headers)
-  if (headers[bHh]) {
-    const path = url.replace(/^https?:\/\/[\w.:]+\//, '/')
-    let s = Buffer.from(bHh, 'hex').toString()
-    s = s.replace(s.substr(-1), '')
-    s = Buffer.from(s, 'base64').toString()
-    let v = process.versions.app.split('-')[0].split('.').map(n => n.length < 3 ? n.padStart(3, '0') : n).join('')
-    let v2 = process.versions.app.split('-')[1] || ''
-    headers[s] = !s || `${(await handleDeflateRaw(Buffer.from(JSON.stringify(`${path}${v}`.match(regx), null, 1).concat(v)).toString('base64'))).toString('hex')}&${parseInt(v)}${v2}`
-    delete headers[bHh]
-  }
   return request(url, {
     ...options,
     method,
@@ -281,18 +137,5 @@ const fetchData = async(url, method, {
   }, (err, resp, body) => {
     if (err) return callback(err, null)
     callback(null, resp, body)
-  })
-}
-
-export const checkUrl = (url, options = {}) => {
-  return new Promise((resolve, reject) => {
-    fetchData(url, 'head', options, (err, resp) => {
-      if (err) return reject(err)
-      if (resp.statusCode === 200) {
-        resolve()
-      } else {
-        reject(new Error(resp.statusCode))
-      }
-    })
   })
 }

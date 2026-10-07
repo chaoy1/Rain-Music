@@ -66,6 +66,9 @@ build
 
 dist
 
+# 面向 Web/Capacitor 的渲染层产物（npm run build:web 输出，与 Electron 的 dist/ 无关）
+dist-web
+
 # 预览构建产物（pack:preview + deploy-preview.ps1 生成，完全自包含）
 preview/
 

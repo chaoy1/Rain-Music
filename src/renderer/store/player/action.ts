@@ -20,6 +20,7 @@ import { playNext } from '@renderer/core/player'
 import { LIST_IDS } from '@common/constants'
 import { toRaw } from '@common/utils/vueTools'
 import { arrPush, arrUnshift } from '@common/utils/common'
+import { findPlaybackQueueMusicIndex } from '@common/utils/playbackQueue'
 
 
 type PlayerMusicInfoKeys = keyof typeof musicInfo
@@ -109,6 +110,10 @@ export const getPlayIndex = (listId: string | null, musicInfo: Rain.Download.Lis
   if (list.length && musicInfo) {
     const currentId = musicInfo.id
     playIndex = list.findIndex(m => m.id == currentId)
+    if (playIndex < 0 && listId == LIST_IDS.DEFAULT) {
+      const identity = 'progress' in musicInfo ? { ...musicInfo.metadata.musicInfo, id: musicInfo.id } : musicInfo
+      playIndex = findPlaybackQueueMusicIndex(list as Rain.Music.MusicInfo[], identity)
+    }
     if (!isTempPlay) {
       if (playIndex < 0) {
         playerPlayIndex = playerPlayIndex < 1 ? (list.length - 1) : (playerPlayIndex - 1)

@@ -1,4 +1,4 @@
-import { addTempPlayList } from '@renderer/store/player/action'
+import { addToPlaybackQueue } from '@renderer/core/player/playbackQueue'
 import { playList } from '@renderer/core/player'
 
 export default ({ props, selectedList, list, removeAllSelect }) => {
@@ -9,12 +9,12 @@ export default ({ props, selectedList, list, removeAllSelect }) => {
     playList(props.listId, index)
   }
 
-  const handlePlayMusicLater = (index, single) => {
+  const handlePlayMusicLater = async(index, single) => {
     if (selectedList.value.length && !single) {
-      addTempPlayList(selectedList.value.map(s => ({ listId: props.listId, musicInfo: s })))
+      await addToPlaybackQueue([...selectedList.value])
       removeAllSelect()
     } else {
-      addTempPlayList([{ listId: props.listId, musicInfo: list.value[index] }])
+      await addToPlaybackQueue([list.value[index]])
     }
   }
 

@@ -29,8 +29,8 @@ const toDBDownloadInfo = (musicInfos: Rain.Download.ListItem[], offset: number =
   })
 }
 
-const initDownloadList = () => {
-  list = queryDownloadList().map(item => {
+const initDownloadList = async() => {
+  list = (await queryDownloadList()).map(item => {
     const musicInfo = JSON.parse(item.musicInfo) as Rain.Music.MusicInfoOnline
     return {
       id: item.id,
@@ -58,8 +58,8 @@ const initDownloadList = () => {
  * 获取下载列表
  * @returns 下载列表
  */
-export const getDownloadList = (): Rain.Download.ListItem[] => {
-  if (!list) initDownloadList()
+export const getDownloadList = async(): Promise<Rain.Download.ListItem[]> => {
+  if (!list) await initDownloadList()
   return list
 }
 
@@ -67,17 +67,17 @@ export const getDownloadList = (): Rain.Download.ListItem[] => {
  * 添加下载歌曲信息
  * @param downloadInfos url信息
  */
-export const downloadInfoSave = (downloadInfos: Rain.Download.ListItem[], addMusicLocationType: Rain.AddMusicLocationType) => {
-  if (!list) initDownloadList()
+export const downloadInfoSave = async(downloadInfos: Rain.Download.ListItem[], addMusicLocationType: Rain.AddMusicLocationType) => {
+  if (!list) await initDownloadList()
   if (addMusicLocationType == 'top') {
     let newList = [...list]
     arrUnshift(newList, downloadInfos)
-    insertDownloadList(toDBDownloadInfo(downloadInfos), list.map((info, index) => {
+    await insertDownloadList(toDBDownloadInfo(downloadInfos), list.map((info, index) => {
       return { id: info.id, position: downloadInfos.length + index }
     }))
-    list = newList
+    list = newList // eslint-disable-line require-atomic-updates -- dbService 入口已串行化（../../index.ts），不存在并发读改写
   } else {
-    insertDownloadList(toDBDownloadInfo(downloadInfos, list.length), [])
+    await insertDownloadList(toDBDownloadInfo(downloadInfos, list.length), [])
     arrPush(list, downloadInfos)
   }
 }
@@ -86,8 +86,8 @@ export const downloadInfoSave = (downloadInfos: Rain.Download.ListItem[], addMus
  * 批量更新列表信息
  * @param lists 列表信息
  */
-export const downloadInfoUpdate = (lists: Rain.Download.ListItem[]) => {
-  updateDownloadList(toDBDownloadInfo(lists))
+export const downloadInfoUpdate = async(lists: Rain.Download.ListItem[]) => {
+  await updateDownloadList(toDBDownloadInfo(lists))
   if (list) {
     for (const item of lists) {
       const index = list.findIndex(info => info.id === item.id)
@@ -102,8 +102,8 @@ export const downloadInfoUpdate = (lists: Rain.Download.ListItem[]) => {
  * 删除下载列表
  * @param ids 歌曲id
  */
-export const downloadInfoRemove = (ids: string[]) => {
-  deleteDownloadList(ids)
+export const downloadInfoRemove = async(ids: string[]) => {
+  await deleteDownloadList(ids)
   if (list) {
     const idSet = new Set<string>(ids)
     list = list.filter(task => !idSet.has(task.id))
@@ -113,8 +113,7 @@ export const downloadInfoRemove = (ids: string[]) => {
 /**
  * 清空下载列表
  */
-export const downloadInfoClear = () => {
-  clearDownloadList()
+export const downloadInfoClear = async() => {
+  await clearDownloadList()
   list = []
 }
-

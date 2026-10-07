@@ -80,8 +80,8 @@ export default {
     if (this._requestObj_hotTags) this._requestObj_hotTags.cancelHttp()
     if (tryNum > 2) return Promise.reject(new Error('try max num'))
     this._requestObj_hotTags = httpFetch(this.hotTagUrl)
-    return this._requestObj_hotTags.promise.then(({ statusCode, body }) => {
-      if (statusCode !== 200) return this.getHotTag(++tryNum)
+    return this._requestObj_hotTags.promise.then(({ status, body }) => {
+      if (status !== 200) return this.getHotTag(++tryNum)
       return this.filterInfoHotTag(body)
     })
   },
@@ -217,9 +217,9 @@ export default {
     if (retryNum > 2) return Promise.reject(new Error('link try max num'))
 
     const requestObj_listDetailLink = httpFetch(link)
-    const { headers: { location }, statusCode } = await requestObj_listDetailLink.promise
+    const { headers: { location }, status } = await requestObj_listDetailLink.promise
     // console.log(headers)
-    if (statusCode > 400) return this.handleParseId(link, ++retryNum)
+    if (status > 400) return this.handleParseId(link, ++retryNum)
     return location == null ? link : location
   },
 

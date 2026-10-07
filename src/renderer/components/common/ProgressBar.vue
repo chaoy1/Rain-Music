@@ -46,10 +46,10 @@ const finish = event => {
 </script>
 
 <style lang="less" module>
-.progress { position: relative; width: 100%; height: 4px; overflow: hidden; background: var(--control-outline); border-radius: 4px; }
-.progressBar { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: 0; background: var(--control-ink); }
+.progress { position: relative; width: 100%; height: 4px; overflow: hidden; background: color-mix(in srgb, var(--control-ink) 18%, transparent); border-radius: 3px; }
+.progressBar { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: 0; border-radius: inherit; background: var(--control-ink); }
 .barTransition { transition: transform .2s ease-out; }
 .progressMask { position: absolute; left: 0; top: 50%; width: 100%; height: max(100%, 24px); transform: translateY(-50%); cursor: pointer; touch-action: none; }
-.thumb { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--control-ink); box-shadow: 0 1px 3px var(--glass-edge); transform: translate(-50%, -50%); pointer-events: none; opacity: 0; transition: opacity .14s ease; }
-.progressMask:hover .thumb, .dragging .thumb { opacity: 1; }
+.thumb { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--control-ink); box-shadow: 0 0 0 2px var(--color-content-background), 0 1px 3px var(--glass-edge); transform: translate(-50%, -50%); pointer-events: none; opacity: 0; transition: opacity .14s ease; }
+.progressMask:hover .thumb, .dragging .thumb, :global([role="slider"]:focus-visible) .thumb { opacity: 1; }
 </style>

@@ -1,33 +1,15 @@
-import crypto from 'crypto'
-import dns from 'dns'
+import CryptoJS from 'crypto-js'
 import { decodeName } from '@renderer/utils'
 
-export const toMD5 = str => crypto.createHash('md5').update(str).digest('hex')
+export const toMD5 = str => CryptoJS.MD5(str).toString()
 
-
-const ipMap = new Map()
-export const getHostIp = hostname => {
-  const result = ipMap.get(hostname)
-  if (typeof result === 'object') return result
-  if (result === true) return
-  ipMap.set(hostname, true)
-  // console.log(hostname)
-  dns.lookup(hostname, {
-    // family: 4,
-    all: false,
-  }, (err, address, family) => {
-    if (err) return console.log(err)
-    // console.log(address, family)
-    ipMap.set(hostname, { address, family })
-  })
-}
-
-export const dnsLookup = (hostname, options, callback) => {
-  const result = getHostIp(hostname)
-  if (result) return callback(null, result.address, result.family)
-
-  dns.lookup(hostname, options, callback)
-}
+// 阶段 3 删除：`ipMap` / `getHostIp` / `dnsLookup`（DNS pinning）。
+// 它只被 3 个零引用的 `api-test.js` 使用，生产路径调用次数为 0
+// （`docs/android/native-bridge-needs.md` §2.4）；Android 侧没有 JS 的 DNS API，
+// 而 `import dns from 'dns'` 是**顶层静态 import** —— 不删掉它，web 目标打包会因
+// `dns` 无法解析而失败（即使函数没人调用）。同时删掉的还有顶层 `import crypto`：
+// MD5 走已经装了、且已是生产依赖的 `crypto-js@4.2.0`（实测与 `node:crypto` 一致，
+// 见 `docs/android/native-bridge-needs.md` §2.3），web bundle 里不再需要 crypto polyfill。
 
 
 /**

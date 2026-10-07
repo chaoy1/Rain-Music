@@ -1,7 +1,7 @@
 import { STORE_NAMES } from '@common/constants'
 import { WIN_MAIN_RENDERER_EVENT_NAME } from '@common/ipcNames'
 import { mainOn, mainHandle } from '@common/mainIpc'
-import getStore from '@main/utils/store'
+import getStore from '@main/platform/storage/adapter'
 
 export default () => {
   mainHandle<Rain.SoundEffect.EQPreset[]>(WIN_MAIN_RENDERER_EVENT_NAME.get_sound_effect_eq_preset, async() => {

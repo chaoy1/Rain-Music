@@ -21,7 +21,7 @@ const toDBDislikeInfo = (musicInfos: string[]): Rain.DBService.DislikeInfo[] => 
   return list
 }
 
-const initDislikeList = () => {
+const initDislikeList = async() => {
   const dislikeInfo: Rain.Dislike.DislikeInfo = {
     // musicIds: new Set<string>(),
     names: new Set<string>(),
@@ -30,7 +30,7 @@ const initDislikeList = () => {
     rules: '',
   }
   const list: string[] = []
-  for (const item of queryDislikeList()) {
+  for (const item of await queryDislikeList()) {
     if (!item) continue
     let [name, singer] = item.content.split(SPLIT_CHAR.DISLIKE_NAME)
     if (name) {
@@ -60,9 +60,9 @@ const initDislikeList = () => {
  * 获取不喜欢列表信息
  * @returns 不喜欢列表信息
  */
-export const getDislikeListInfo = (): Rain.Dislike.DislikeInfo => {
+export const getDislikeListInfo = async(): Promise<Rain.Dislike.DislikeInfo> => {
   // if (!dislikeInfo) initDislikeList()
-  return initDislikeList()
+  return await initDislikeList()
 }
 
 

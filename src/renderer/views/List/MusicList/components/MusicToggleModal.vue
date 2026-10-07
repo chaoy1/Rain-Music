@@ -63,11 +63,8 @@
 </template>
 
 <script>
-import { LIST_IDS } from '@common/constants'
 import { openUrl } from '@common/utils/electron'
-import { playNext } from '@renderer/core/player'
-import { addTempPlayList } from '@renderer/store/player/action'
-import { playMusicInfo } from '@renderer/store/player/state'
+import { addToPlaybackQueue } from '@renderer/core/player/playbackQueue'
 import { toNewMusicInfo, toOldMusicInfo } from '@renderer/utils'
 import musicSdk from '@renderer/utils/musicSdk'
 import { markRaw } from 'vue'
@@ -154,11 +151,10 @@ export default {
       if (!url) return
       void openUrl(url)
     },
-    handlePlay(musicInfo) {
+    async handlePlay(musicInfo) {
       this.toggleMusicInfo = musicInfo
-      const isPlaying = !!playMusicInfo.musicInfo
-      addTempPlayList([{ listId: LIST_IDS.PLAY_LATER, musicInfo, isTop: true }])
-      if (isPlaying) void playNext()
+      // 换源试听统一走可见播放队列（追加到队尾），不再使用隐藏的一次性插队列表
+      await addToPlaybackQueue([musicInfo])
     },
   },
 }
