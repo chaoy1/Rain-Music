@@ -141,7 +141,19 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | **难度** | 中（**接线**）+ 大（真正的原生桥） |
 | **为什么它比 #3 更隐蔽** | #3 是"同步抛错打断模块求值"，改成逐条容错就过去了；这一条是"**挂载依赖的数据拿不到**"—— Promise 正常 reject，`main.ts` 的模块求值**没有中断**（`registerEvents` 之后的 import 与顶层代码全都跑完了），但 `.then` 回调永远不执行 ⇒ `app.mount()` 永远不执行 ⇒ 页面仍然是全白，且**没有任何同步异常**留下痕迹（只有一条未处理 rejection） |
 | **需要什么才能过** | 两条路，**只能选一条**：① `main.ts:42` 在取值点显式降级（"拿不到设置时用渲染层默认设置继续挂载"）；② 原生桥真正实现 `common_get_app_setting`。①是**本轮就已经准备好的东西**：`src/renderer/platform/ipcFallback/web.js` 的头注释整段就是在论证这件事，但 `main.ts` 至今**没有 import 它**（该模块在本轮之前是惰性的） |
-| **状态** | **未修**（(A) 类，任务书明确"下一条 (A) 类不要修"；实测证据见 §4.4） |
+| **状态** | **已修**（阶段 3 / 线 F；§4.5 实测：降级告警出现、`Set lang zh-cn` 出现、`.then` 回调整段执行到 `app.mount('#root')`，`#root` 被 Vue 标记为容器。**但页面仍未渲染** —— 挡住它的是新记录在案的 **#8**） |
+
+### 阻塞点 #8 —— `app.mount('#root')` 执行了，但 Vue 一个 DOM 都没渲染（无异常、无告警）
+
+| 列 | 内容 |
+| --- | --- |
+| **具体错误** | **没有错误**。这正是它难查的原因：`window.onerror` **0 条**、`unhandledrejection` 与 `console.error` 里**没有一条**来自 Vue 渲染链路、`console.warn` 里也没有 Vue 的告警。实测状态是"静默空渲染"：`#root` 拿到了 Vue 的挂载标记（`data-v-app=""`）却**没有任何子节点**（`childElementCount = 0` / `display: none` / `rect 0x0`），`#app-chrome` 不存在 |
+| **触发源码位置** | `src/renderer/main.ts:129` 的 `app.mount('#root')`（`.then` 回调内的最后一行）。它前面的每一步都跑到了：`main.ts:101` 打了 `Set lang zh-cn`、`main.ts:120` `initSetting(setting)`、`main.ts:127` `initPlugins(app)`（注册 Dialog / SvgIcon / Tips = 39 个组件 + 插件）、`main.ts:128` `mountComponents(app)` 均已执行 |
+| **归类** | **(A) 必须重写**（渲染链路上的阻塞点；不是 IPC 通道缺口，修 IPC 无法绕过） |
+| **难度** | 中（定位）+ 待定（修复面；见下"需要什么才能过"） |
+| **实测证据（阶段 3 / 线 F，强制重挂载探针）** | 在页面主世界对同一个 app 实例做"改 `app.config.errorHandler` + `warnHandler`、包 `console.error` / `console.warn`、清空 `#root`、再 `app.mount(root)`"，得到：`app._instance === null`（**根组件实例从未创建**）、`proxy.subTree === null`（**渲染产物为空**）、`afterMountChildren = 0`、`#root` 的 `outerHTML` 只有 `<div id="root" style="display:none" data-v-app=""></div>`；而 `errorHandler` / `warnHandler` / `console.error` / `console.warn` 四条钩子**一条都没触发**。`require.context` 注册的 39 个组件也确实在 `app._context.components` 里（`RouterLink` / `BaseMusicList` / …），说明 `initPlugins` + `mountComponents` 是成功的 |
+| **为什么它不是 #7 没修对** | #7 的验收点是"`app.mount()` 这一行到底有没有被执行到"。本节的证据是**执行到了**：`#root` 上的 `data-v-app=""` 只有 `app.mount()` 会写；更直接的证据是 `main.ts:101` 的 `Set lang zh-cn` 出现在渲染进程 console 里（那行在 `app.mount()` 之前 28 行，同一个 `.then` 回调里）。所以 #7 的改动**按自己的验收标准已经通过**，挡住画面的是**另一条通道**：Vue 的挂载/渲染没有产出 |
+| **需要什么才能过** | 把"根组件 setup 是否真的被调用"与"`App.vue` 的编译产物是否被 `createApp` 拿到"两件事分别证伪。**下一步的最小实验**（本轮未做，避免超出"最小任务"范围）：① 用同一个页面里的 Vue，`createApp({ render: () => h('div', 'x') }).mount(容器)` 做对照 —— 若对照也不渲染，问题在 Vue 运行时/构建模式，不在业务组件；② 若对照能渲染，则逐个短路 `main.ts:127-128`（`initPlugins` / `mountComponents`）与 `App.vue` 的 `useApp()`，找出让根组件 setup 静默不产出的那一个。注意 `App.vue` 的模板**确实在产物里**（`app-chrome` / `wallpaper-layer` / `data-mobile-title-bar` 字符串各出现 1 次，`__name` 出现 39 次），所以**不是**"模板没编进去" |
 
 ### 阻塞点 #4 —— `@common/utils/electron` 直接 import Electron 的 `shell` / `clipboard`（探针）
 
@@ -274,6 +286,49 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 > "挂载依赖的数据拿不到"。这正是任务书里 "若仍挂载不上：如实汇报新首错" 的情形；
 > 本轮**没有**为了让它过而加空实现或放宽环境。
 
+### 4.5 已修 #7（阶段 3 / 线 F）：`getSetting()` 在取值点降级 —— 实测"回调确实执行到了"，但页面仍未渲染
+
+**改动**：`src/renderer/main.ts:82` 的裸 `void getSetting().then(...)` 改为
+`void invokeWithFallback(async () => getSetting(), CMMON_EVENT_NAME.get_app_setting, () => ({ ...defaultSetting })).then(...)`。
+桌面语义未变（`ipcFallback` 默认路径逐字透传、不读 `fallback`），Android 侧取不到设置就带
+`@common/defaultSetting` 继续走到 `app.mount('#root')`。
+
+**产物**：`npm run build:web`（`NODE_ENV=production`）**exit 0**，2 warnings（与 §6 门 5 同样两条既有 warning），
+主 bundle `dist-web/renderer.1ed89747.js`，**1 113 660 B**。
+
+**实测（strict 环境）**：`nodeIntegration:false / contextIsolation:true / sandbox:true / webSecurity:true`，
+无 preload，`http://127.0.0.1:<随机高位端口>/` 静态服务器，Electron **42.11.6** / Chrome 148.0.7778.280 / Node 24.19.0，
+注入最小 `window.Capacitor` mock（`isNativePlatform()=>true`、`getPlatform()=>'android'`），窗口 412x915（本机 DPR 1.4493 ⇒ 截图 597x1319）。
+
+> **注入方式的一处必要替代（如实记录）**：文档 §1 原方案用 CDP `Page.addScriptToEvaluateOnNewDocument`。
+> 本机 Electron 42 里 `webContents.debugger.attach()` 能成功，但所有**渲染进程**的 CDP 命令
+> （`Page.enable`、`Runtime.evaluate`）**全部超时**（`CDP Page.enable timed out after 6000ms`），因此改用
+> **静态服务器在 `index.html` 的 `<head>` 最前面插入同一段注入脚本**（`<script>` 立即执行，仍早于
+> `<script defer src="renderer.*.js">`）。页面上下文、注入时机（页面脚本之前）、加载来源（`http://127.0.0.1`）、
+> webPreferences 与"不加任何放宽开关"这四点都与原方案一致；探针里的 `__rainStrictInjectedAt` 早于 App 脚本即证明时机正确。
+> 页面读取改用 `webContents.executeJavaScript`。
+
+| 项 | 实测值 |
+| --- | --- |
+| 产物 | `dist-web/renderer.1ed89747.js`，1 113 660 B |
+| 平台判定 | `window.Capacitor` 存在、`getPlatform() === 'android'`、`isNativePlatform() === true`；`<html>` class = `android android-14 transparent` |
+| `window.onerror`（uncaught，含资源失败） | **0 条** |
+| `unhandledrejection` | **1 条** —— `invoke("common_set_app_setting")`（`main.ts:100` 的语言写回，**故意保留的诚实失败**，见 #7 条目与 `main.ts` 注释） |
+| `console.error` | **2 条** —— `on("winMain_on_config_change")`、`invoke("winMain_get_data")`（都是新走到的启动期通道） |
+| `console.warn` | **9 条** = `ipcFallback` 降级 5 条（`winMain_get_hot_key` / **`common_get_app_setting`** / `winMain_set_hot_key_config` / `winMain_key_down` / `winMain_focus`）+ `event/index.ts` 跳过 4 条（上列 4 条订阅/取值通道） |
+| **#7 的关键证据** | `console.warn` 里出现 **`[renderer/platform/ipcFallback] 平台通道 "common_get_app_setting" 取值失败（通道未实现），已使用渲染层默认值继续挂载`**，随后渲染进程 console 打出 **`Set lang zh-cn`**（`main.ts:101`）⇒ `.then` 回调确实执行了，`app.mount()` 那一行确实被走到 |
+| `#root` | `childElementCount = 0`、`computedDisplay = none`、`rect 0x0`、`#app-chrome` 不存在 ⇒ **仍未挂载** |
+| `#root` 的 Vue 标记 | `data-v-app=""` **在**（只有 `app.mount()` 会写），但 `root.__vue_app__._instance === null` 且 `proxy.subTree === null` ⇒ **挂载调用了，渲染产物为空**（见 #8） |
+| 侧栏导航文字 / 播放栏 / "我的列表" | **一个都没有**：`navLabels = []`、`playBarText = null`、`viewText = null`、`body.innerText` 为空 |
+| 其它 DOM | `#left` / `#toolbar` / `#view` / `#player` / `[data-mobile-title-bar]` 全部**不存在**；页面元素总数 50、样式表 1 张 |
+| Worker | 渲染进程 console 出现 `hello main worker` / `hello download worker` ⇒ 两个 Worker 在主世界里**没有同步抛错** |
+| `capturePage()` PNG | **597 x 1319**，4 893 B，画面为**纯白空页**（无可辨认的应用界面：没有侧栏、没有播放栏、没有任何文字） |
+
+> **结论（不要误读）**：#7 **已修**并按自己的验收标准通过 —— 卡住挂载的"取值点"降级已经生效，
+> `.then` 回调整段执行到 `app.mount('#root')`，`#root` 也被 Vue 认领。但"页面挂上"这个**更大的验收目标仍未达成**：
+> 现在挡住它的是 **#8** —— 一条**完全静默**的"挂载调用了、渲染没产出"（`window.onerror` 0 条、
+> `unhandledrejection` 与 `console.error` 里都没有 Vue 渲染链路的痕迹）。本轮**没有**修它（(A) 类，且超出最小任务范围）。
+
 ---
 
 ## 5. 探针产物（"宽容桥"下渲染出的移动端骨架）
@@ -306,7 +361,7 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | 4 | `node build-config/pack.js` | **exit 0** |
 | 5 | `npm run build:web`（`NODE_ENV=production`） | **exit 0**，2 warnings（都是既有的：`url` polyfill 缺 `pathToFileURL` / `URL`） |
 | 6 | `npm.cmd run test:surfaces` + `npm.cmd run test:window-controls` | **均 exit 0**；`surfaces` 88 PASS / 0 FAIL；`window-controls` 6/6 PASS |
-| 7 | strict 环境**实测挂载成功** | ⚠️ **未达成**：同步抛错已归零（#3 已修），但 `#root` 仍是空的 —— 挡住它的是新记录在案的 **#7**（(A) 类）。实测细节见 §4.4 |
+| 7 | strict 环境**实测挂载成功** | ⚠️ **未达成，但失败点前移了一格**：`#3` 已修（同步抛错 0 条）、`#7` 已修（降级告警 + `Set lang zh-cn` 证明 `.then` 回调执行到 `app.mount('#root')`、`#root` 拿到 `data-v-app=""`），**但 Vue 一个 DOM 都没渲染** —— 挡住它的是新记录在案的 **#8**（(A) 类）。实测细节见 §4.5 |
 
 补充实测（阶段 3 / 线 D 时按当时要求额外跑，用来确认桌面没被改坏）：
 
@@ -347,6 +402,10 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
   `.eslintrc.base.cjs`、本文件。）
 - 静态服务器用的是 `127.0.0.1` 高位端口（5199 / 5299），只监听本机；Electron 进程只按
   自己 spawn 出来的 PID 清理（`taskkill /PID <pid> /T /F`），**从未按进程名杀进程**。
+- 阶段 3 / 线 F 的临时件在 `%TEMP%\rain-strict\`（`app/main.cjs`、`app/package.json`、`launch.ps1`、
+  `dump.cjs`、`out/`，Electron 的 `userData` 也重定向到 `out/userdata`），**跑完已删除**；
+  仓库内没有任何临时加载脚本或服务器。清理同样只按自己记录的 PID（`taskkill /PID <pid> /T /F`），
+  没有按映像名杀过任何进程。
 
 ---
 
@@ -365,7 +424,8 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | P0-1 | **IPC 传输桥的原生实现**：`send / invoke / on / off` 四条语义在 Capacitor 侧落地（原生 ↔ WebView 双向消息 + 请求应答配对 + 取消） | #3（注册期已由渲染层容错绕开）· #7 | 替换 `src/common/platform/ipcBridge/web.js` 的占位实现；契约见 `docs/android/ipc-contract.md` | 大 |
 | P0-2 | **启动期必需通道**：`common_get_app_setting`、`common_set_app_setting`、`winMain_get_hot_key`、`winMain_set_hot_key_config`、`winMain_key_down`、`winMain_focus`、`winMain_on_config_change`、`winMain_get_data`、`common_get_env_params`。其中热键与窗口聚焦类在 Android 首版**允许降级为空实现** | #3 · #6 · #7 | 原生侧 handler，逐条对照 `docs/android/ipc-contract.md` 的"B 可直接移除"标记 | 大 |
 | P0-3 | **存储落点**：设置的同步读 / 异步写（Android 只有异步 API，需要"预热内存快照 + 异步回写"） | #7 · #6 | `src/main/platform/storage/adapter.android.ts` 的骨架已有，需接线 `@capacitor/preferences` | 大 |
-| P0-4 | **`getSetting()` 的降级接线**：`src/renderer/main.ts:42` 目前是裸 `void getSetting().then(...)`，**没有 `.catch`**。要么在取值点显式降级（`@renderer/platform/ipcFallback` 就是为它准备的，至今没人 import），要么等 P0-1/P0-2 把 `common_get_app_setting` 接上。**这是当前唯一挡住挂载的点** | #7 | 一行级接线（`main.ts`）—— 但属 (A) 类决策，需单独排期 | 中 |
+| P0-4 | **`getSetting()` 的降级接线**：`src/renderer/main.ts:82` 已改为 `invokeWithFallback(...)`，**已修**（阶段 3 / 线 F，见 §4.5）：`common_get_app_setting` 取不到时用 `@common/defaultSetting` 继续挂载，`.then` 回调确实执行到 `app.mount('#root')` | #7（已修） | 已完成 | 小 |
+| **P0-5** | **Vue 挂载/渲染不产出**：`app.mount('#root')` 执行了、`#root` 被认领，但根组件实例为 `null`、`subTree` 为 `null`、DOM 为空，且无任何异常/告警。**这是当前唯一挡住画面的点**（P0-4 完成后接替它） | #8 | 先做"同页面 `createApp({render})` 对照 + 逐个短路 `initPlugins` / `mountComponents` / `App.vue#useApp`"的最小实验，再决定落点 | 中（定位）+ 待定（修复面） |
 
 ### P1 · 让页面不是"空壳"
 
@@ -464,3 +524,11 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | `.eslintrc.base.cjs` | 修改（`no-confusing-void-expression` 打开 `ignoreVoidOperator`：官方认可的"故意丢弃 Promise"写法，见文件内注释） |
 | `docs/android/web-runtime-blockers.md` | 修改（#3 标为已修并补 §4.4 实测；新增 #7；更新 §6 / §7 / §8 / §10） |
 | `src/common/platform/electron/web.js`、`src/renderer/platform/http/*` | **未改**（线 E 上半段产物，本轮只引用） |
+
+### 阶段 3 / 线 F（#7 验收 + #8 记录）
+
+| 文件 | 状态 |
+| --- | --- |
+| `docs/android/web-runtime-blockers.md` | 修改（#7 标为已修并补 §4.5 实测；新增 #8；更新 §6 门 7 / §8 的 P0-4 与新增 P0-5 / 本表） |
+| **`src/**`** | **未改**（线 F 只做验收与记录，任务书明确"不要改任何 src 文件"、"下一条 (A) 类不要修"） |
+| 临时加载器（`%TEMP%\rain-strict\`：`app/main.cjs` + `app/package.json` + `launch.ps1` + `dump.cjs` + `out/`） | 仓库外，**跑完已删除**（见 §7） |
