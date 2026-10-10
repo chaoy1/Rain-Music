@@ -121,6 +121,11 @@ public class RainMusicIpcPlugin extends Plugin {
         // 与上一行同一处、同一时序理由：必须在渲染层第一次 invoke/send 之前完成注册。
         RainMusicDataChannels.register(this);
 
+        // P0-2 第四刀：歌单 / 列表的**读取**通道（player_list_get，落点 = SQLite 的 my_list 表）。
+        // 写侧（player_list_add / remove / update / update_position / data_overwire / list_music_*）
+        // 一条都不在这里注册 —— 下一刀再做。
+        RainMusicListChannels.register(this);
+
         Logger.info(
             TAG,
             "IPC 传输桥已加载：plugin=" + PLUGIN_NAME + ", event=" + EVENT_NAME +
