@@ -11,23 +11,26 @@
  * 而 web 目标里 `node.__dirname = false` ⇒ **模块加载期直接 `ReferenceError: __dirname is not defined`**，
  * 整个 `renderer.js` 在 `src/common/rendererIpc.ts` 的 import 处就断了，`#root` 永远不挂载。
  *
- * 修法与 `src/renderer/platform/http/` 完全一致：把"用哪种 IPC 传输"收口成两个可替换实现，
+ * 修法与 `src/renderer/platform/http/` 完全一致：把"用哪种 IPC 传输"收口成可替换实现，
  * 由构建期 `NormalModuleReplacementPlugin` 选择（见 `build-config/renderer/webpack.config.web.js`
  * 的"关键差异 4.7"）。
  * - 桌面 bundle：`./desktop.js`（electron 的 `ipcRenderer` **逐字透传**，桌面行为零变化）；
- * - web / Capacitor bundle：`./web.js`（**故意大声抛错**，见该文件说明）。
+ * - web / Capacitor bundle：`./capacitor.js`（**真实原生桥** · P0-1，见该文件说明与
+ *   `android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicIpcPlugin.java`）；
+ * - `./web.js`：占位实现（**调用即抛错**），保留为"没有原生插件的环境"下最诚实的失败形状
+ *   （也是本层契约表与错误文案的参照）。web 构建自 P0-1 起不再指向它。
  *
- * ## 契约（两个适配器必须逐条一致）
+ * ## 契约（三个适配器必须逐条一致）
  *
- * | 方法 | 语义 | 桌面实现 |
- * | --- | --- | --- |
- * | `bridge.send(channel, params?)` | 单向发送 | `ipcRenderer.send` |
- * | `bridge.sendSync(channel, params?)` | 同步发送（会阻塞渲染进程） | `ipcRenderer.sendSync` |
- * | `bridge.invoke(channel, params?)` | 请求 / 应答，返回 Promise | `ipcRenderer.invoke` |
- * | `bridge.on(channel, listener)` | 订阅，回调收到 `{ event, params }` | `ipcRenderer.on` + 包装 |
- * | `bridge.once(channel, listener)` | 只订阅一次，回调同上 | `ipcRenderer.once` + 包装 |
- * | `bridge.off(channel, listener)` | 退订（**listener 是原始函数**，不是包装后的） | `ipcRenderer.removeListener` |
- * | `bridge.offAll(channel)` | 退订该通道全部 | `ipcRenderer.removeAllListeners` |
+ * | 方法 | 语义 | 桌面实现 | Capacitor 实现（`./capacitor.js`） |
+ * | --- | --- | --- | --- |
+ * | `bridge.send(channel, params?)` | 单向发送 | `ipcRenderer.send` | 插件 `post({kind:'send'})`；投递失败 `console.error` |
+ * | `bridge.sendSync(channel, params?)` | 同步发送（会阻塞渲染进程） | `ipcRenderer.sendSync` | **抛错**（Capacitor 只有异步桥） |
+ * | `bridge.invoke(channel, params?)` | 请求 / 应答，返回 Promise | `ipcRenderer.invoke` | `post({kind:'invoke',id})` + 按 id 配对 + 15s 超时 |
+ * | `bridge.on(channel, listener)` | 订阅，回调收到 `{ event, params }` | `ipcRenderer.on` + 包装 | 本地订阅表 + 原生事件 `ipcMessage` |
+ * | `bridge.once(channel, listener)` | 只订阅一次，回调同上 | `ipcRenderer.once` + 包装 | 同上（派发一次即退订） |
+ * | `bridge.off(channel, listener)` | 退订（**listener 是原始函数**，不是包装后的） | `ipcRenderer.removeListener` | 用原始 listener 作 key，**真的退订** |
+ * | `bridge.offAll(channel)` | 退订该通道全部 | `ipcRenderer.removeAllListeners` | 清空该通道订阅表 |
  *
  * ⚠️ 默认路径是**桌面**：Electron 的两个构建（dev / prod）resolve 到这里后原样走 `./desktop.js`，
  * webpack 的 `resolve.alias` / `DefinePlugin` 一律没被动过，桌面产物逐字节同源。

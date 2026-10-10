@@ -162,9 +162,13 @@ module.exports = {
         resource.request = resource.request.replace(/[\\/]index\.js$/, '/web.js')
       },
     ),
-    // 关键差异 4.7（阶段 3 / 线 D）：渲染层 IPC 传输层的**构建期**替换。
+    // 关键差异 4.7（阶段 3 / 线 D 建立；**P0-1 起改指向真实原生桥**）：渲染层 IPC 传输层的
+    // **构建期**替换。
     // `src/common/platform/ipcBridge/index.js` 默认是桌面的 electron `ipcRenderer` 透传；
-    // web/Android 换成同目录的 `web.js`（占位实现，调用即抛错 —— 阶段 3-5 接原生桥）。
+    // web/Android 换成同目录的 `capacitor.js` —— Capacitor 插件 `RainMusicIpc` 的单入口信封协议
+    // （`post({id,kind,channel,args})` / 原生事件 `ipcMessage`），见该文件头。
+    // 原生实现：`android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicIpcPlugin.java`
+    // （在 `MainActivity.onCreate` 里 `registerPlugin` 注册）。
     //
     // 为什么必须换掉：不换的话 `rendererIpc.ts → electron` 会让 npm 包
     // `node_modules/electron` 被整包打进产物（它顶层就用 `__dirname`，而 web 目标里
@@ -182,7 +186,7 @@ module.exports = {
     new webpack.NormalModuleReplacementPlugin(
       /(^|[\\/])@?common[\\/]platform[\\/]ipcBridge([\\/]index\.js)?$/,
       resource => {
-        resource.request = '@common/platform/ipcBridge/web'
+        resource.request = '@common/platform/ipcBridge/capacitor'
       },
     ),
     // 关键差异 4.8（阶段 3 / 线 D）：渲染层"裸 ipcRenderer"入口的构建期替换。

@@ -21,6 +21,15 @@
  * ⚠️ 本文件**只存在于 web / Capacitor 产物**（构建期 `NormalModuleReplacementPlugin` 替换，
  * 见 `build-config/renderer/webpack.config.web.js` 的"关键差异 4.7"）。
  * 桌面 bundle 里既没有本文件，也没有任何 `@capacitor/*`。
+ *
+ * ## P0-1 之后的定位（本文件仍**保持**"调用即抛错"，不要改成空实现）
+ *
+ * 阶段 P0-1 起，web / Capacitor 构建的"关键差异 4.7"改指向 `./capacitor.js`
+ * （**真实原生桥**：Capacitor 插件 + 单入口信封协议），因此本文件**不再**是 web 产物的
+ * 传输实现，而是保留下来作为：
+ * 1. "这个环境里没有原生插件"时最诚实的失败形状（`./capacitor.js` 在找不到插件时抛出的
+ *    错误文案也含同一句"尚未实现"，让 `@renderer/platform/ipcFallback` 的归类保持不变）；
+ * 2. 本层契约表的参照实现（`./index.js` 的表以它为准）。
  */
 
 /**
