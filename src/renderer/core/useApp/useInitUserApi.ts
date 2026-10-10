@@ -1,6 +1,10 @@
 import { onBeforeUnmount, watch } from '@common/utils/vueTools'
 import { useI18n } from '@renderer/plugins/i18n'
 import { onUserApiStatus, getUserApiList, sendUserApiRequest as sendUserApiRequestRemote, userApiRequestCancel, onShowUserApiUpdateAlert } from '@renderer/utils/ipc'
+// 这个 composable 在 **App.vue setup() 的同步段**里被调（`useApp` → `useDataInit.ts:25`），
+// 所以下面两条 `onUserApi*` 订阅必须走"可跳过"的降级入口（阻塞点 #8）。
+import { subscribeSkippable } from '@renderer/platform/ipcFallback/subscribe'
+import { WIN_MAIN_RENDERER_EVENT_NAME } from '@common/ipcNames'
 import { openUrl } from '@common/utils/electron'
 import { qualityList, userApi } from '@renderer/store'
 import { appSetting } from '@renderer/store/setting'
@@ -22,7 +26,9 @@ const sendUserApiRequest: typeof sendUserApiRequestRemote = async(data) => {
 export default () => {
   const t = useI18n()
 
-  const rUserApiStatus = onUserApiStatus(({ params: { status, message, apiInfo } }) => {
+  // `winMain_user_api_status` — 契约归类 (A)：自定义音源的加载/失败状态广播，
+  // Android 侧必须由原生桥补上（`ipc-contract.md` §4.1「自定义源」）。
+  const rUserApiStatus = subscribeSkippable(WIN_MAIN_RENDERER_EVENT_NAME.user_api_status, 'A', () => onUserApiStatus(({ params: { status, message, apiInfo } }) => {
     // console.log({ status, message, apiInfo })
     userApi.status = status
     userApi.message = message
@@ -140,9 +146,10 @@ export default () => {
       }
     }
     if (!window.rain.apiInitPromise[1]) window.rain.apiInitPromise[2](status)
-  })
+  }))
 
-  const rUserApiShowUpdateAlert = onShowUserApiUpdateAlert(({ params: { name, log, updateUrl } }) => {
+  // `winMain_user_api_show_update_alert` — 契约归类 (A)：同「自定义源」组。
+  const rUserApiShowUpdateAlert = subscribeSkippable(WIN_MAIN_RENDERER_EVENT_NAME.user_api_show_update_alert, 'A', () => onShowUserApiUpdateAlert(({ params: { name, log, updateUrl } }) => {
     if (updateUrl) {
       void dialog({
         message: `${t('user_api__update_alert', { name })}\n${log}`,
@@ -163,7 +170,7 @@ export default () => {
         confirmButtonText: t('ok'),
       })
     }
-  })
+  }))
 
   onBeforeUnmount(() => {
     rUserApiStatus()

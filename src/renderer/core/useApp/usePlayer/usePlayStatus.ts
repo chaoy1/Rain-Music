@@ -1,5 +1,9 @@
 import { onBeforeUnmount, watch } from '@common/utils/vueTools'
 import { sendPlayerStatus, onPlayerAction } from '@renderer/utils/ipc'
+// 这个 composable 在 **App.vue setup() 的同步段**里被调（`useApp` → `usePlayer/index.ts:15`），
+// 所以下面那条 `onPlayerAction` 订阅必须走"可跳过"的降级入口（阻塞点 #8）。
+import { subscribeSkippable } from '@renderer/platform/ipcFallback/subscribe'
+import { WIN_MAIN_RENDERER_EVENT_NAME } from '@common/ipcNames'
 // import store from '@renderer/store'
 
 import { playMusicInfo, musicInfo } from '@renderer/store/player/state'
@@ -67,7 +71,10 @@ export default () => {
   //   buttons.lockLrc = setting.desktopLyric.isLock
   //   setButtons()
   // }
-  const rTaskbarThumbarClick = onPlayerAction(async({ params: { action, data } }) => {
+  // `winMain_player_action_on_button_click` — 契约归类 (B)：任务栏缩略图按钮是桌面专有能力
+  // （`ipc-contract.md` §4.2），Android 侧不注册。通道缺失时这条订阅被跳过并留下告警，
+  // 返回的取消订阅函数仍是可调用的空操作（`onBeforeUnmount` 会调用它）。
+  const rTaskbarThumbarClick = subscribeSkippable(WIN_MAIN_RENDERER_EVENT_NAME.player_action_on_button_click, 'B', () => onPlayerAction(async({ params: { action, data } }) => {
     switch (action) {
       case 'play':
         play()
@@ -111,7 +118,7 @@ export default () => {
       //   updateSetting()
       //   break
     }
-  })
+  }))
   watch(() => playProgress.nowPlayTime, (newValue, oldValue) => {
     // console.log(playProgress.nowPlayTime, newValue, oldValue)
     // if (newValue.toFixed(2) === oldValue.toFixed(2)) return

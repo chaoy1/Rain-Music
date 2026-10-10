@@ -154,6 +154,20 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | **实测证据（阶段 3 / 线 F，强制重挂载探针）** | 在页面主世界对同一个 app 实例做"改 `app.config.errorHandler` + `warnHandler`、包 `console.error` / `console.warn`、清空 `#root`、再 `app.mount(root)`"，得到：`app._instance === null`（**根组件实例从未创建**）、`proxy.subTree === null`（**渲染产物为空**）、`afterMountChildren = 0`、`#root` 的 `outerHTML` 只有 `<div id="root" style="display:none" data-v-app=""></div>`；而 `errorHandler` / `warnHandler` / `console.error` / `console.warn` 四条钩子**一条都没触发**。`require.context` 注册的 39 个组件也确实在 `app._context.components` 里（`RouterLink` / `BaseMusicList` / …），说明 `initPlugins` + `mountComponents` 是成功的 |
 | **为什么它不是 #7 没修对** | #7 的验收点是"`app.mount()` 这一行到底有没有被执行到"。本节的证据是**执行到了**：`#root` 上的 `data-v-app=""` 只有 `app.mount()` 会写；更直接的证据是 `main.ts:101` 的 `Set lang zh-cn` 出现在渲染进程 console 里（那行在 `app.mount()` 之前 28 行，同一个 `.then` 回调里）。所以 #7 的改动**按自己的验收标准已经通过**，挡住画面的是**另一条通道**：Vue 的挂载/渲染没有产出 |
 | **需要什么才能过** | 把"根组件 setup 是否真的被调用"与"`App.vue` 的编译产物是否被 `createApp` 拿到"两件事分别证伪。**下一步的最小实验**（本轮未做，避免超出"最小任务"范围）：① 用同一个页面里的 Vue，`createApp({ render: () => h('div', 'x') }).mount(容器)` 做对照 —— 若对照也不渲染，问题在 Vue 运行时/构建模式，不在业务组件；② 若对照能渲染，则逐个短路 `main.ts:127-128`（`initPlugins` / `mountComponents`）与 `App.vue` 的 `useApp()`，找出让根组件 setup 静默不产出的那一个。注意 `App.vue` 的模板**确实在产物里**（`app-chrome` / `wallpaper-layer` / `data-mobile-title-bar` 字符串各出现 1 次，`__name` 出现 39 次），所以**不是**"模板没编进去" |
+| **根因（阶段 3 / 线 G 已确证）** | `App.vue` 的 `setup()` 是**同步**执行的，而它的同步调用图里有 **9 处无条件调用平台通道**的地方（清单见 §4.6）；这些通道在 web / Capacitor 侧是**刻意做成"调用/访问即抛错"**的占位实现 ⇒ 异常穿出 `setup()` ⇒ Vue 的 `handleError` 只打一条 `console.error(err)`、**不经过 `window.onerror`**（所以那时"uncaught 0 条"并不等于"没有异常"）⇒ 根组件的 setup 结果没被采纳 ⇒ 空注释 vnode。**这是 #3 的同类遗漏**：#3 修掉了 `registerEvents()` 的顶层注册，这一条是 `useApp()` 的同步调用图 |
+| **状态** | **已修**（阶段 3 / 线 G）：9 处全部改用 `src/renderer/platform/ipcFallback/subscribe.ts` 的同一套降级入口。实测 `#root.childElementCount = 3` / `display: block`，侧栏、播放栏、`#app-chrome` 全部渲染（§4.6） |
+
+### 阻塞点 #9 —— `getEnvParams()` 的 rejection 没有人接，挂载后**整段初始化**不执行（#7 的同构遗漏）
+
+| 列 | 内容 |
+| --- | --- |
+| **具体错误** | `Unhandled (in promise) Error: …被调用的通道：invoke("common_get_env_params")`。**没有同步异常**：`app.mount('#root')` 已经执行、界面已经渲染（这正是它现在才暴露出来的原因 —— #8 修好之前根本走不到这里），但 `useApp/index.ts:52` 的 `void getEnvParams().then(async(envParams) => { … })` **既没有 `.catch` 也没有 `else`** ⇒ `.then` 回调一整段不执行 |
+| **触发源码位置** | `src/renderer/core/useApp/index.ts:52` 的 `void getEnvParams().then(...)`（`getEnvParams` = `src/renderer/utils/ipc.ts` → `common_get_env_params`）。同一处 `.then` 里被跳过的还有：`applyWallpaper()`、`getViewPrevState()` + `router.replace()`、`initData()`（我的列表 / 下载列表）、`initPlayer()`、`handleEnvParams()`（启动参数）、`initDeeplink()`、`initStatusbarLyric()`、`sendInited()`、`handleListAutoUpdate()` |
+| **归类** | **(A) 必须重写**（通道本身；`docs/android/ipc-contract.md` §4.1「设置 / 环境 / 初始化握手」，`common_get_env_params` 在其中） |
+| **难度** | 小（**接线**，与 #7 的修法逐字同构）+ 大（真正的原生桥） |
+| **为什么它和 #7 是同一个形状** | #7 是"挂载依赖的数据拿不到 ⇒ `app.mount()` 永不执行"；这一条是"挂载后初始化依赖的数据拿不到 ⇒ 初始化永不执行"。两者都只需要在**取值点**显式降级（`platform/ipcFallback` 的 `invokeWithFallback`），页面从"全白"变成"出来了但列表/播放器是空的" |
+| **需要什么才能过** | 两条路，**只能选一条**：① `useApp/index.ts:52` 在取值点显式降级（拿不到 `envParams` 就用"没有 cmdParams / 没有 wallpaper / 没有 deeplink"的空对象继续，并保证 `initData()` / `initPlayer()` / `sendInited()` 仍然执行）；② 原生桥真正实现 `common_get_env_params`。①是**本轮就已经在用的那一层**（与 #7 的 `/src/renderer/main.ts:82` 完全同构） |
+| **状态** | **未修**（本轮按任务书"下一条 (A) 类不要修"只记录） |
 
 ### 阻塞点 #4 —— `@common/utils/electron` 直接 import Electron 的 `shell` / `clipboard`（探针）
 
@@ -331,6 +345,79 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 
 ---
 
+### 4.6 已修 #8（阶段 3 / 线 G）：`setup()` 同步调用图上的 9 处平台通道逐条降级 —— **strict 环境首次挂载成功**
+
+**改动**：新增 `src/renderer/platform/ipcFallback/subscribe.ts`（把原先散在
+`event/index.ts:129-134` 与 `useEventListener.ts` 里的"可跳过取值 / 订阅"收敛成**唯一实现**：
+`invokeSkippable` / `subscribeSkippable` / `reportChannelSkipped`），然后把
+`App.vue setup()` **同步调用图**里所有"无条件、同步调用平台通道"的点逐个接到它上面：
+
+| # | 同步调用路径 | 通道 | 归类 | 处理方式 |
+| --- | --- | --- | --- | --- |
+| 1 | `useApp/index.ts:43` → `useEventListener.ts:94` | `winMain_on_config_change` | A | `subscribeSkippable(…, 'A', …)` 降级（跳过订阅，`console.error`） |
+| 2 | `useEventListener.ts:100` | `winMain_focus` | B | `subscribeSkippable(…, 'B', …)`（`console.warn`） |
+| 3 | `useEventListener.ts:103` | `winMain_fullscreen_state` | B | 同上（该通道走裸 `ipcRenderer` Proxy，"访问即抛错" ⇒ `reason=failed`） |
+| 4 | `useEventListener.ts:106` | `common_theme_change` | C | `subscribeSkippable(…, 'C', …)`（`console.error`） |
+| 5 | `useApp/index.ts:44` → `usePlayer/index.ts:14` → `usePlayer.ts:47` → `useLyric.ts:18` → `core/lyric.ts:85 init()` → `:109` | `winMain_process_new_desktop_lyric_client` | B | 跳过订阅；`desktopLyricPort` 保持 `null` ⇒ `sendDesktopLyricInfo()` 是空操作 |
+| 6 | `useApp/index.ts:44` → `usePlayer/index.ts:15` → `usePlayStatus.ts:70` | `winMain_player_action_on_button_click` | B | 跳过订阅；返回的取消订阅函数仍是空操作（`onBeforeUnmount` 会调用） |
+| 7 | `useApp/index.ts:46` → `useDataInit.ts:25` → `useInitUserApi.ts:25` | `winMain_user_api_status` | A | `subscribeSkippable(…, 'A', …)` |
+| 8 | `useInitUserApi.ts:145` | `winMain_user_api_show_update_alert` | A | 同上 |
+| 9 | `useApp/index.ts:47` → `useDeeplink/index.ts:53` | `common_deeplink` | C | `subscribeSkippable(…, 'C', …)`（Android 侧由 `@capacitor/app` 的 `appUrlOpen` 换成同名广播） |
+
+**已确认"不是"setup 期同步抛错**（逐个查过，不改）：`useStatusbarLyric()`（只挂本地
+`window.app_event`）、`useHandleEnvParams()`、`usePlayerDetailTransition()`、
+`usePlayer/*` 与 `plugins/player` 其余 composable（都不 import `@renderer/utils/ipc`）；
+`useSettingSync.ts:15 setWindowSize` / `usePlayStatus.ts` 的三条 `watch` /
+`usePlayer.ts:73 setPowerSaveBlocker`（`isPlay.value === false`）/ `usePlayProgress.ts`
+的 `delaySavePlayInfo` / `useApp/index.ts:67 sendInited` 都在 `watch` 回调、`.then` 或
+事件处理器里，**不在同步段**。`rendererInvoke` 本身是 `async`，同步 throw 会变成
+rejection 而不是同步异常 —— 所以只有 `rendererOn` / `rendererOnce` / `rendererSend` /
+`rendererSendSync` / 裸 `ipcRenderer` 这五类才是"setup 期同步抛错"的来源。
+
+**产物**：`npm run build:web`（`NODE_ENV=production`）**exit 0**，2 warnings（与 §6 门 5 同样两条既有 warning），
+主 bundle `dist-web/renderer.8c3ba79a.js`，**1 114 227 B**。
+
+**实测（strict 环境）**：与 §4.5 完全同一套环境 —— `nodeIntegration:false / contextIsolation:true /
+sandbox:true / webSecurity:true`、无 preload、`http://127.0.0.1:5321/?os=android&osver=14`
+（静态服务器 + **内联注入在 `<head>` 最前**的 Capacitor mock，理由同 §4.5）、
+Electron **42.11.6** / Chrome 148.0.7778.280 / Node 24.19.0、窗口 412x915
+（本机当前缩放 ⇒ 截图 618x1373）。
+
+| 项 | 实测值 |
+| --- | --- |
+| 平台判定 | `window.Capacitor` 存在、`getPlatform() === 'android'`、`isNativePlatform() === true`；`<html>` class = **`android android-14 transparent`** |
+| **`#root.childElementCount`** | **3**（`#wallpaper-layer` / `#container` / `#icons`）⇒ **P0 已过** |
+| `#root` 的 `display` | **`block`**（不再是 `none`；`App.vue` 的 `onMounted` 已经跑到） |
+| `#root` 的 `outerHTML`（前 2 000 字符） | `<div id="root" style="display: block;" data-v-app=""><div id="wallpaper-layer" class=""></div> <div id="container" class="view-container"><div id="app-chrome" class=""><div class="Muf8X" id="left" data-glass="">…`（后面是完整的侧栏 `<ul>`） |
+| `window.onerror`（uncaught） | **0 条** |
+| `unhandledrejection` | **3 条**（全部是 (A) 类数据通道，**均不阻断挂载**）：① ② ③ 见下 |
+| `console.error` | **7 条** = 5 条是本次新增的降级痕迹（`winMain_on_config_change` / `common_theme_change` / `winMain_user_api_status` / `winMain_user_api_show_update_alert` / `common_deeplink`）+ 2 条既有失败（`invoke("winMain_fullscreen_state")`、`invoke("winMain_get_data")`） |
+| `console.warn` | **22 条** = `ipcFallback` 适配器告警 11 条 + 各调用点的"已跳过"告警 11 条（4 处 B 类 + `winMain_get_hot_key` 取值 + `event/index.ts` 的 4 条 B 类 + `core/lyric.ts` / `usePlayStatus.ts` 各 1 条） |
+| `unhandledrejection` 逐条 | ① `invoke("common_set_app_setting")`（`main.ts:100` 语言写回，**故意保留的诚实失败**，同 §4.5）② `invoke("common_get_env_params")`（**新记录为 #9**）③ `invoke("common_set_app_setting")`（`main.ts:111-118` 的窗口尺寸/标准播放写回） |
+| 侧栏导航文字 | **`["搜索", "歌单", "排行榜", "我的列表", "设置"]`**（`#left a` 的文字，实测有值） |
+| 播放栏文本 | **`"R\nM\n列表循环播放"`**（`#player` 的 `innerText`） |
+| `#app-chrome` / `#left` / `#player` / `#toolbar` / `#view` | **全部存在**（`true`）；`[data-mobile-title-bar]` 也存在 ⇒ 移动端标题栏分支被走到 |
+| `body.innerText`（前 600 字符） | `Rain\nMusic\n搜索\n歌单\n排行榜\n我的列表\n设置\n歌单\nR\nM\n列表循环播放\n15 分钟\n30 分钟\n60 分钟\n自定义时间\n分钟\n开始计时` |
+| 页面元素总数 / 样式表 | 283 / 1 |
+| `capturePage()` PNG | **618 x 1373**，**433 005 B**（对比 §4.5 的 4 893 B 纯白页）；画面是**可辨认的应用界面**：左侧栏 "Rain Music" + 搜索 / 歌单 / 排行榜 / 我的列表 / 设置，顶部标题"歌单"，右侧列表区（空状态），底部播放栏 |
+
+> **一处必须更正的旧判据（重要）**：#8 的"实测证据（阶段 3 / 线 F）"里把
+> `root.__vue_app__._instance === null` 当作"根组件实例从未创建"的证据 —— 这在
+> **production 构建里不成立**：Vue 的 `app.mount()` 只在 `__DEV__` 或
+> `__FEATURE_PROD_DEVTOOLS__` 下才写 `app._instance`，本仓库的 web 产物是
+> `NODE_ENV=production`，所以**修好之后它依然是 `null`**（本次实测确认）。
+> 判断"有没有渲染"必须看 **DOM**（`#root.childElementCount` / `#app-chrome` / `#left` 的 `innerText`），
+> 不要看 `_instance` / `subTree`。
+
+> **结论**：**#8 已修，strict 环境的"首次挂载"验收点达成** —— `#root.childElementCount = 3`、
+> `display: block`、侧栏 / 播放栏 / 移动端标题栏占位全部渲染，`window.onerror` 0 条。
+> 页面**不再是全白**，但**仍是"半空壳"**：`getEnvParams()` 的 rejection 没人接（**#9**），
+> 所以"我的列表 / 下载列表 / 播放器 / 深链 / `sendInited`"这一整段初始化没有执行。
+> 这与 §5 探针骨架的结论一致：剩下的都是 (A) 类**数据通道**（#6 / #9），
+> 不再是"挂不上"，而是"挂上了但某些数据是空的"。
+
+---
+
 ## 5. 探针产物（"宽容桥"下渲染出的移动端骨架）
 
 探针里 `#root` 的实测状态：`childElementCount = 5`、`display: block`、
@@ -345,11 +432,16 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 ## 6. 验收门结果
 
 > 本节的表在**阶段 3 / 线 D**（`renderer.191c7a47.js`）跑过一次；下面的数字已在
-> **阶段 3 / 线 E-2**（`renderer.0e3fc0c8.js`，1 113 515 B）重跑并更新，两轮结论一致。
+> **阶段 3 / 线 E-2**（`renderer.0e3fc0c8.js`，1 113 515 B）重跑并更新，两轮结论一致；
+> **阶段 3 / 线 G**（`renderer.8c3ba79a.js`，1 114 227 B）又全量重跑一次，门 1~6 结果不变，
+> **门 7 由"未达成"变为"达成"**。
 
-**最终交付状态的实测行为**：strict 环境下 `window.onerror` **0 条**、`console.error` **0 条**、
-`unhandledrejection` **1 条**（只剩 `invoke("common_get_app_setting")`，见 #7），
-`#root` 仍为 `childElementCount = 0 / display: none` —— #3 已修，**但页面挂不上，原因换成了 #7**。
+**最终交付状态的实测行为（阶段 3 / 线 G 更新）**：strict 环境下 `window.onerror` **0 条**、
+`unhandledrejection` **3 条**（`common_set_app_setting` ×2 + **`common_get_env_params`**，见 #7 / #9）、
+`console.error` **7 条**（5 条是本次新增的降级痕迹 + 2 条既有失败）、
+`console.warn` **22 条**，而 **`#root` 为 `childElementCount = 3` / `display: block`**
+（侧栏"搜索 / 歌单 / 排行榜 / 我的列表 / 设置"、播放栏、`#app-chrome` 全部渲染）——
+**#3 / #7 / #8 均已修，"首次挂载"达成**；剩下的失败集中在 (A) 类数据通道（#6 / **#9**）。
 改动前的 `__dirname is not defined` 与 `node_modules/electron` 已**完全消失**
 （可复现：改动前 1 111 921 B 的 `renderer.fef2a351.js` 里含该包，改动后不含）。
 
@@ -361,7 +453,7 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | 4 | `node build-config/pack.js` | **exit 0** |
 | 5 | `npm run build:web`（`NODE_ENV=production`） | **exit 0**，2 warnings（都是既有的：`url` polyfill 缺 `pathToFileURL` / `URL`） |
 | 6 | `npm.cmd run test:surfaces` + `npm.cmd run test:window-controls` | **均 exit 0**；`surfaces` 88 PASS / 0 FAIL；`window-controls` 6/6 PASS |
-| 7 | strict 环境**实测挂载成功** | ⚠️ **未达成，但失败点前移了一格**：`#3` 已修（同步抛错 0 条）、`#7` 已修（降级告警 + `Set lang zh-cn` 证明 `.then` 回调执行到 `app.mount('#root')`、`#root` 拿到 `data-v-app=""`），**但 Vue 一个 DOM 都没渲染** —— 挡住它的是新记录在案的 **#8**（(A) 类）。实测细节见 §4.5 |
+| 7 | strict 环境**实测挂载成功** | ✅ **达成**（阶段 3 / 线 G）：`#root.childElementCount = 3`、`display = block`、`#app-chrome` / `#left` / `#toolbar` / `#view` / `#player` / `[data-mobile-title-bar]` 全部存在，侧栏导航文字 `["搜索","歌单","排行榜","我的列表","设置"]`、播放栏文本 `"R\nM\n列表循环播放"`、`window.onerror` **0 条**、PNG 618x1373（433 005 B，可辨认的应用界面）。细节与逐条数据见 §4.6 |
 
 补充实测（阶段 3 / 线 D 时按当时要求额外跑，用来确认桌面没被改坏）：
 
@@ -406,6 +498,13 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
   `dump.cjs`、`out/`，Electron 的 `userData` 也重定向到 `out/userdata`），**跑完已删除**；
   仓库内没有任何临时加载脚本或服务器。清理同样只按自己记录的 PID（`taskkill /PID <pid> /T /F`），
   没有按映像名杀过任何进程。
+- 阶段 3 / 线 G 的临时件在 `%TEMP%\rain-mount\`（`app/main.cjs` + `app/inject.js` +
+  `app/package.json` + `run.cmd` + `out/`，`userData` 同样重定向到 `out/userdata`），
+  **跑完已删除**；仓库内没有任何临时加载脚本或服务器。启动脚本把 `ELECTRON_RUN_AS_NODE`
+  清掉后再以**应用目录**（含 `package.json`）启动 `node_modules/electron/dist/electron.exe`，
+  并用 `cmd /c run.cmd` 等待（PowerShell 的 `&` 不等 GUI 子系统进程；本机环境块里同时存在
+  `no_proxy` / `NO_PROXY` 会让 `Start-Process` 直接报"已添加项"，所以两者都不用）。
+  清理只按 `out/electron.pid`（由加载脚本自己写入的**主进程 PID**）→ `taskkill /PID <pid> /T /F`。
 
 ---
 
@@ -416,8 +515,14 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 > **阶段 3 / 线 E-2 的更新**：#3 的"注册期同步抛错"已经在**渲染层**解决（逐条容错，见 §4.4），
 > 所以 P0-2 里"热键/窗口聚焦类通道必须存在，否则 `registerEvents()` 同步抛错"这一条
 > **不再是挂载的前提**；真正卡住挂载的现在是 **P0-4**。
+>
+> **阶段 3 / 线 G 的更新（P0 已完成）**：#7（P0-4）与 #8（P0-5）都已修，
+> `App.vue setup()` 同步调用图上的 **9 处**平台通道全部逐条降级（§4.6），
+> strict 环境**首次挂载成功**（`#root.childElementCount = 3`）。下面 P0 表里
+> **P0-1 / P0-2 / P0-3 仍然是"真机能用"的前提**（它们决定"数据是不是空的"），
+> 但**不再是"页面能不能出来"的前提** —— 页面已经出得来了。
 
-### P0 · 让 `app.mount('#root')` 能执行到
+### P0 · 让 `app.mount('#root')` 能执行到（阶段 3 / 线 G：本条已达成）
 
 | 序 | 项 | 对应阻塞点 | 落点 | 难度 |
 | --- | --- | --- | --- | --- |
@@ -425,7 +530,9 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | P0-2 | **启动期必需通道**：`common_get_app_setting`、`common_set_app_setting`、`winMain_get_hot_key`、`winMain_set_hot_key_config`、`winMain_key_down`、`winMain_focus`、`winMain_on_config_change`、`winMain_get_data`、`common_get_env_params`。其中热键与窗口聚焦类在 Android 首版**允许降级为空实现** | #3 · #6 · #7 | 原生侧 handler，逐条对照 `docs/android/ipc-contract.md` 的"B 可直接移除"标记 | 大 |
 | P0-3 | **存储落点**：设置的同步读 / 异步写（Android 只有异步 API，需要"预热内存快照 + 异步回写"） | #7 · #6 | `src/main/platform/storage/adapter.android.ts` 的骨架已有，需接线 `@capacitor/preferences` | 大 |
 | P0-4 | **`getSetting()` 的降级接线**：`src/renderer/main.ts:82` 已改为 `invokeWithFallback(...)`，**已修**（阶段 3 / 线 F，见 §4.5）：`common_get_app_setting` 取不到时用 `@common/defaultSetting` 继续挂载，`.then` 回调确实执行到 `app.mount('#root')` | #7（已修） | 已完成 | 小 |
-| **P0-5** | **Vue 挂载/渲染不产出**：`app.mount('#root')` 执行了、`#root` 被认领，但根组件实例为 `null`、`subTree` 为 `null`、DOM 为空，且无任何异常/告警。**这是当前唯一挡住画面的点**（P0-4 完成后接替它） | #8 | 先做"同页面 `createApp({render})` 对照 + 逐个短路 `initPlugins` / `mountComponents` / `App.vue#useApp`"的最小实验，再决定落点 | 中（定位）+ 待定（修复面） |
+| **P0-5** | **Vue 挂载/渲染不产出**：根因确证为 `App.vue setup()` 同步调用图上的 9 处平台通道同步抛错（详见 §4.6 的清单），已**逐条降级** | #8（已修） | 已完成：新增 `src/renderer/platform/ipcFallback/subscribe.ts`，9 处调用点接上它 | 已完成 |
+| **P0-6** | **`getEnvParams()` 的降级接线**：`useApp/index.ts:52` 的 `void getEnvParams().then(...)` 没有 `.catch` ⇒ `.then` 回调整段（列表数据 / 播放器 / 深链 / `sendInited`）不执行，页面"出来了但是空的"。**这是 #8 修好之后新暴露出来的第一个点** | #9 | `src/renderer/core/useApp/index.ts:52`，与 `main.ts:82` 的 #7 修法逐字同构（`invokeWithFallback` + 空 `envParams` 兜底） | 小 |
+| **P0-7** | **`invoke("winMain_get_data")` 的接线**（`useDataInit` 链） | #6 | 同 P0-6，需要按数据形状逐个决定"空值怎么继续" | 中 |
 
 ### P1 · 让页面不是"空壳"
 
@@ -497,6 +604,17 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
    > "卡在同步抛错"。修完 #3 之后 `window.onerror` 可以是 **0 条**，但页面依然全白 ——
    > 因为挡住挂载的是**未处理的 promise rejection**（#7）。所以这三样必须一起看：
    > `window.onerror`、`unhandledrejection`、`#root`。
+   >
+   > ⚠️ **补充判据 2（阶段 3 / 线 G 实测得出）**：
+   > 1. **不要**用 `#root.__vue_app__._instance`（或 `subTree`）判断"有没有渲染" ——
+   >    production 构建下它**恒为 `null`**，修好之后也一样（见 §4.6 的更正）。
+   >    只看 DOM：`childElementCount`、`#app-chrome`、`#left` 的 `innerText`。
+   > 2. `console.error` / `console.warn` 里带 `[renderer/platform/ipcFallback]` 且写着
+   >    "已跳过…（reason=unsupported|failed）"的行，是**正常的降级痕迹**（"不假装成功"的
+   >    可观测证据），不是故障；要看的是 `unhandledrejection` 与 `window.onerror`。
+   > 3. `app.mount('#root')` 之后 `#root` 的 `display` 由 `App.vue` 的 `onMounted` 从
+   >    `none` 改成 `block` —— 所以 `display: none` 是"`onMounted` 没跑到"的证据，
+   >    它比 `data-v-app=""` 更能说明问题（后者只要 `app.mount()` 被调用就会写上）。
 
 ---
 
@@ -532,3 +650,18 @@ strict 环境跑到阻塞点 #3 就再也上不去（(A) 类，本轮不修）�
 | `docs/android/web-runtime-blockers.md` | 修改（#7 标为已修并补 §4.5 实测；新增 #8；更新 §6 门 7 / §8 的 P0-4 与新增 P0-5 / 本表） |
 | **`src/**`** | **未改**（线 F 只做验收与记录，任务书明确"不要改任何 src 文件"、"下一条 (A) 类不要修"） |
 | 临时加载器（`%TEMP%\rain-strict\`：`app/main.cjs` + `app/package.json` + `launch.ps1` + `dump.cjs` + `out/`） | 仓库外，**跑完已删除**（见 §7） |
+
+### 阶段 3 / 线 G（#8 修复 + 首次挂载验收）
+
+| 文件 | 状态 |
+| --- | --- |
+| `src/renderer/platform/ipcFallback/subscribe.ts` | **新增**（把 `event/index.ts` 与 `useEventListener.ts` 里两份重复的"可跳过取值 / 订阅"收敛成唯一实现：`invokeSkippable` / `subscribeSkippable` / `reportChannelSkipped`；本文件**不做**构建期替换，只依赖已被替换的 `invokeWithFallback`） |
+| `src/renderer/event/index.ts` | 修改（删除本地的 `FallbackInfo` / `reportChannelSkipped` / `invokeSkippable` / `resolveAfterRegister` / `subscribe`，改用共享实现；**调用序列、时机、参数逐字未变**；#3 的论证保留并补一句指向共享模块） |
+| `src/renderer/core/useApp/useEventListener.ts` | 修改（4 条订阅改走 `subscribeSkippable`；本地的 `subscribe` 删除） |
+| `src/renderer/core/lyric.ts` | 修改（`init()` 里的 `onNewDesktopLyricProcess` 改走 `subscribeSkippable`，通道 `winMain_process_new_desktop_lyric_client`，B 类） |
+| `src/renderer/core/useApp/usePlayer/usePlayStatus.ts` | 修改（`onPlayerAction`，通道 `winMain_player_action_on_button_click`，B 类） |
+| `src/renderer/core/useApp/useInitUserApi.ts` | 修改（`onUserApiStatus` + `onShowUserApiUpdateAlert`，A 类） |
+| `src/renderer/core/useApp/useDeeplink/index.ts` | 修改（`onDeeplink`，通道 `common_deeplink`，C 类） |
+| `docs/android/web-runtime-blockers.md` | 修改（#8 标为已修并补 §4.6 实测与"9 处清单"；新增 #9；更新 §6 门 7 / §7 / §8 / §10 / 本表） |
+| `build-config/renderer/webpack.config.web.js` | **未改**（4.10 的正则以 `$` 结尾，只替换裸说明符 `@renderer/platform/ipcFallback`，新增的 `…/subscribe` 不受影响 —— 已在产物里实测） |
+| 临时加载器（`%TEMP%\rain-mount\`：`app/main.cjs` + `app/inject.js` + `app/package.json` + `run.cmd` + `out/`） | 仓库外，**跑完已删除**（见 §7） |

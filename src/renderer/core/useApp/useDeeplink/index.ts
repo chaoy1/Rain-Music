@@ -1,5 +1,9 @@
 import { onBeforeUnmount } from '@common/utils/vueTools'
 import { clearEnvParamsDeeplink, focusWindow, onDeeplink } from '@renderer/utils/ipc'
+// 这个 composable 在 **App.vue setup() 的同步段**里被调（`useApp/index.ts:47`），
+// 所以下面那条 `onDeeplink` 订阅必须走"可跳过"的降级入口（阻塞点 #8）。
+import { subscribeSkippable } from '@renderer/platform/ipcFallback/subscribe'
+import { CMMON_EVENT_NAME } from '@common/ipcNames'
 
 import { useDialog } from './utils'
 import useMusicAction from './useMusicAction'
@@ -50,7 +54,9 @@ export default () => {
     }
   }
 
-  const rDeeplink = onDeeplink(async({ params: link }) => {
+  // `common_deeplink` — 契约归类 (C)：Android 侧由 `@capacitor/app` 的 `appUrlOpen`
+  // （+ Manifest Intent filter）换成同名广播（`ipc-contract.md` §4.3）。
+  const rDeeplink = subscribeSkippable(CMMON_EVENT_NAME.deeplink, 'C', () => onDeeplink(async({ params: link }) => {
     console.log(link)
     if (!isInited) return
     clearEnvParamsDeeplink()
@@ -60,7 +66,7 @@ export default () => {
       showErrorDialog(err.message)
       focusWindow()
     }
-  })
+  }))
 
   onBeforeUnmount(() => {
     rDeeplink()

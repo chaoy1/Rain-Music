@@ -7,6 +7,11 @@ import { markRawList } from '@common/utils/vueTools'
 import { appSetting } from '@renderer/store/setting'
 import { PLAY_RAINLRC, SHOW_LYRIC_ROMA, SHOW_LYRIC_TRANSLATION, SWAP_LYRIC_TRANSLATION_AND_ROMA } from '@common/constants'
 import { onNewDesktopLyricProcess } from '@renderer/utils/ipc'
+// `init()` 会被 `usePlayer/useLyric.ts:18` 在 **App.vue setup() 的同步段**里调用
+// （`useApp` → `usePlayer` → `useLyric`），所以下面那条订阅必须走"可跳过"的降级入口，
+// 否则 web/Capacitor 侧它会同步抛错并把整个根组件 setup 打断（阻塞点 #8）。
+import { subscribeSkippable } from '@renderer/platform/ipcFallback/subscribe'
+import { WIN_MAIN_RENDERER_EVENT_NAME } from '@common/ipcNames'
 
 const getCurrentTime = () => {
   return getPlayerCurrentTime() * 1000
@@ -106,7 +111,11 @@ export const init = () => {
     // offset: 80,
   })
 
-  onNewDesktopLyricProcess(({ event }) => {
+  // `winMain_process_new_desktop_lyric_client` — 契约归类 (B)：桌面歌词窗口是桌面专有能力
+  // （`ipc-contract.md` §4.2「桌面歌词窗口」组），Android 首版不注册、不广播。
+  // 通道缺失时这条订阅被跳过并留下告警；`desktopLyricPort` 保持 `null`，
+  // `sendDesktopLyricInfo()` 于是成为空操作 —— 与桌面端"没有歌词窗口"时的行为一致。
+  subscribeSkippable(WIN_MAIN_RENDERER_EVENT_NAME.process_new_desktop_lyric_client, 'B', () => onNewDesktopLyricProcess(({ event }) => {
     console.log('onNewDesktopLyricProcess')
     const [port] = event.ports
     desktopLyricPort = port
@@ -122,7 +131,7 @@ export const init = () => {
     port.onmessageerror = (event) => {
       console.log('onmessageerror', event)
     }
-  })
+  }))
 }
 
 export const setLyricOffset = (offset: number) => {
