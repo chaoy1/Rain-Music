@@ -126,6 +126,12 @@ public class RainMusicIpcPlugin extends Plugin {
         // 一条都不在这里注册 —— 下一刀再做。
         RainMusicListChannels.register(this);
 
+        // P0-2 第五刀：歌单内歌曲的**纯读**通道（player_list_music_check_exist /
+        // player_list_music_get_list_ids，落点 = SQLite 的 my_list_music_info 表）。
+        // 同族的写侧（list_music_add / move / remove / update / update_position / overwrite / clear）
+        // 与"读里带写"的 player_list_music_get 一条都不在这里注册 —— 各自留给下一刀。
+        RainMusicListMusicChannels.register(this);
+
         Logger.info(
             TAG,
             "IPC 传输桥已加载：plugin=" + PLUGIN_NAME + ", event=" + EVENT_NAME +

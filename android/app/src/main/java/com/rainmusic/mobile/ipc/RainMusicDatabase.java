@@ -121,9 +121,9 @@ import com.getcapacitor.Logger;
  *       **任何 SQL 都不在它里面执行**（否则就变成了把整条读路径串行化）。
  *       写 {@code CapacitorStorage} 那份 SharedPreferences 的锁是另一把
  *       （{@link RainMusicStoreLock#WRITE_LOCK}，第三刀引入），两者毫无关系。</li>
- *   <li><b>本刀不需要任何锁 / 不需要额外 synchronized（只读）</b>，依据逐条：
+ *   <li><b>第四刀 / 第五刀的通道都不需要任何锁 / 不需要额外 synchronized（只读）</b>，依据逐条：
  *       <ul>
- *         <li>本刀**没有任何 read-modify-write**：SQL 只有一条 {@code SELECT}。
+ *         <li>这些通道**没有任何 read-modify-write**：SQL 只有一条 {@code SELECT}。
  *             第三刀之所以必须共用一把锁，是因为它的写是"读整份文本 → 改一个键 → 写回整份"，
  *             并发的两次写会丢掉一次；这里不存在这种复合写；</li>
  *         <li>并发的两个 {@code SELECT} 之间**没有共享可变状态**：每次调用都新开一个
@@ -138,9 +138,9 @@ import com.getcapacitor.Logger;
  *       </ul></li>
  *   <li><b>事务</b>：单条 {@code SELECT} 在 SQLite 里本来就是隐式的读事务，读通道**不开显式事务**。
  *       唯一的写是建表那一次，{@link Helper#onCreate} 自己开了事务（见那里的注释）。</li>
- *   <li><b>游标</b>：调用方（{@link RainMusicListChannels}）在 {@code finally} 里 {@code close()}，
- *       两条路径（正常 / 抛错）都不漏。长命游标会让 Android 的连接池把写连接一直占着，
- *       所以"读完就关"是硬要求，不是风格问题。</li>
+ *   <li><b>游标</b>：调用方（{@link RainMusicListChannels} / {@link RainMusicListMusicChannels}）
+ *       在 {@code finally} 里 {@code close()}，两条路径（正常 / 抛错）都不漏。长命游标会让 Android
+ *       的连接池把写连接一直占着，所以"读完就关"是硬要求，不是风格问题。</li>
  *   <li><b>WAL 本刀不开</b>：桌面开了 {@code journal_mode = WAL}（{@code db.ts:52}），
  *       但 WAL 的意义是"读写并发"，而本刀只读；并且契约已把插件的 WAL 能力登记为**未核实**
  *       （{@code native-bridge-needs.md:433}），在这里单方面把库切成 WAL 会给线 A 埋一个
@@ -148,11 +148,12 @@ import com.getcapacitor.Logger;
  * </ol>
  *
  * <h2>不假装成功</h2>
- * {@link #open} 只做两件事，两件都会**抛错而不是返回空**：
+ * {@link #open(Context, String...)} 只做两件事，两件都会**抛错而不是返回空**：
  * <ol>
  *   <li>打不开（文件损坏 / 不是 SQLite 库 / 没有权限 / 迁移抛错）⇒
  *       {@code IllegalStateException}（带 {@code getDatabasePath()} 的绝对路径与原始 {@code SQLiteException}）；</li>
- *   <li>打开了但没有 {@link #TABLE_MY_LIST} ⇒ {@code IllegalStateException}，明确写"表缺失"。
+ *   <li>打开了但**调用方点名要读的表**不在（第四刀是 {@link #TABLE_MY_LIST}，第五刀是
+ *       {@link #TABLE_MY_LIST_MUSIC_INFO}）⇒ {@code IllegalStateException}，明确写"表缺失"。
  *       ⚠️ 这里**绝不**返回一个空库当成"用户没有歌单"：那会把"桥/库坏了"伪装成"歌单空了"。</li>
  * </ol>
  * 两种异常都从 handler 里抛出去，P0-1 会包成 {@code ok:false, code=IPC_HANDLER_FAILED}
@@ -201,6 +202,13 @@ final class RainMusicDatabase {
 
     /** 迁移元数据表（{@code tables.ts:120-127}）。桌面用它存 {@code version}（{@code db.ts:15}）。 */
     static final String TABLE_DB_INFO = "db_info";
+
+    /**
+     * 歌单内歌曲表（{@code tables.ts:139-150}）。P0-2 **第五刀**的两条只读通道
+     * （{@code player_list_music_check_exist} / {@code player_list_music_get_list_ids}，
+     * 见 {@link RainMusicListMusicChannels}）读它。
+     */
+    static final String TABLE_MY_LIST_MUSIC_INFO = "my_list_music_info";
 
     /** {@code db_info} 的两列（{@code db.ts:15} 的 INSERT 用的就是这两个名字）。 */
     static final String COLUMN_FIELD_NAME = "field_name";
@@ -418,13 +426,41 @@ final class RainMusicDatabase {
     // ------------------------------------------------------------------ 打开
 
     /**
-     * 打开数据库并确认本刀要读的表在。
+     * 打开数据库并确认第四刀要读的表（{@link #TABLE_MY_LIST}）在。
+     *
+     * <p>这是 {@link #open(Context, String...)} 的一个薄包装：**签名与语义一个字都没改**
+     * （第四刀的 {@link RainMusicListChannels} 与它的用例都按这个签名调）。第五刀那条新的
+     * 只读通道读的是另一张表，所以走下面那个可变参数的重载。
      *
      * @return 可用的 {@link SQLiteDatabase}（进程级缓存，**不要 close**：桌面同样把连接留到进程退出）
      * @throws IllegalStateException 打不开（含首次建表失败 / 版本迁移抛错），或 {@link #TABLE_MY_LIST} 缺失。
      *                               两种情况都**不返回空**：那会把"库坏了"伪装成"用户没有歌单"。
      */
     static SQLiteDatabase open(Context context) {
+        return open(context, TABLE_MY_LIST);
+    }
+
+    /**
+     * 打开数据库并确认 **{@code requiredTables} 里的每一张表都在**。
+     *
+     * <p><b>为什么是"调用方点名要读哪些表"、而不是统一要求那 9 张表全在</b>（第五刀加这个重载时定的）：
+     * <ol>
+     *   <li>一个通道只需要它真正读的那张表存在。要求更多，就会因为一张**它根本不读**的表缺失
+     *       而让它失败 —— 那是本机测不出来、真机上又没必要的假失败；</li>
+     *   <li>反过来，"我读的那张表不在"必须**大声失败**：那说明这份库不是本应用建的、或者已经损坏
+     *       （见 {@link #requireTable}）。所以检查不是可选的，只是"查哪些表"由调用方给；</li>
+     *   <li>桌面在对标点上也不是全表检查：读通道在桌面能跑，靠的是**启动期**的一次
+     *       {@code verifyDB}（{@code verifyDB.ts:5-16}）加上 each statement 在自己准备时抛错。
+     *       Android 侧没有启动钩子，于是"准备语句时才发现表不在"这件事被提前到 {@link #open}
+     *       里用一个便宜的只读查询做掉（理由见类注释「不假装成功」最后一段）。</li>
+     * </ol>
+     *
+     * @param requiredTables 本次调用真正要读的表名（可以一个都不给，那就只做"能打开"这一件事）
+     * @return 可用的 {@link SQLiteDatabase}（进程级缓存，**不要 close**）
+     * @throws IllegalStateException 打不开（含首次建表失败 / 版本迁移抛错），或某张表缺失。
+     *                               两种情况都**不返回空**：那会把"库坏了"伪装成"数据是空的"。
+     */
+    static SQLiteDatabase open(Context context, String... requiredTables) {
         String path = databasePath(context);
         SQLiteDatabase db;
         try {
@@ -439,7 +475,11 @@ final class RainMusicDatabase {
                 ex
             );
         }
-        requireTable(db, path, TABLE_MY_LIST);
+        if (requiredTables != null) {
+            for (String table : requiredTables) {
+                requireTable(db, path, table);
+            }
+        }
         return db;
     }
 
