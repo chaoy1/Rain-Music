@@ -129,8 +129,14 @@ public class RainMusicIpcPlugin extends Plugin {
         // P0-2 第五刀：歌单内歌曲的**纯读**通道（player_list_music_check_exist /
         // player_list_music_get_list_ids，落点 = SQLite 的 my_list_music_info 表）。
         // 同族的写侧（list_music_add / move / remove / update / update_position / overwrite / clear）
-        // 与"读里带写"的 player_list_music_get 一条都不在这里注册 —— 各自留给下一刀。
+        // 一条都不在这里注册 —— 各自留给下一刀。
         RainMusicListMusicChannels.register(this);
+
+        // P0-2 第六刀：读歌单内歌曲（player_list_music_get，落点 = my_list_music_info
+        // LEFT JOIN my_list_music_info_order）。**只做纯读**：桌面那一支在 listId='default' 时会去重
+        // 并**写回**库（modules/list/index.ts:195-202），本刀不做（做了会把"读失败"与"写失败"压到
+        // 同一个 ok 上、无法分辨）；检出重复时只打一条节流警告。写回 + 快照留给下一刀。
+        RainMusicListMusicGetChannels.register(this);
 
         Logger.info(
             TAG,
