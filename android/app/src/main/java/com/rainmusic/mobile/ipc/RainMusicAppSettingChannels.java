@@ -140,8 +140,14 @@ public final class RainMusicAppSettingChannels {
      * 两个并发的 `common_set_app_setting` 会互相覆盖 → **静默丢设置**。
      * 桌面版不会遇到（Electron 主进程单线程 + 同步写）。
      * 这与阶段 2b 给 Android 写路径定的规矩是同一件事（`adapter.android.ts` 的 `enqueueWrite` 串行化）。
+     *
+     * <p>⚠️ P0-2 第三刀起，本字段是 {@link RainMusicStoreLock#WRITE_LOCK} 的**别名**，也就是与
+     * `winMain_save_data`（读-改-写 `rain:store:data`）**共用同一个对象**：两个通道写的是同一份
+     * `CapacitorStorage` 文件，而 `commit()` 落盘的是**整份 map 的快照**，各自一把锁挡不住
+     * **跨 key** 的丢更新（为什么、依据、边界都写在 {@link RainMusicStoreLock} 的类注释里，这里不重复）。
+     * **不要**把它改回 `new Object()` —— 那等于把锁拆成两把，而缺陷是静默的。
      */
-    private static final Object WRITE_LOCK = new Object();
+    private static final Object WRITE_LOCK = RainMusicStoreLock.WRITE_LOCK;
 
     private RainMusicAppSettingChannels() {}
 

@@ -117,8 +117,8 @@ public class RainMusicIpcPlugin extends Plugin {
         // 不会静默。
         RainMusicAppSettingChannels.register(this);
 
-        // P0-2 第二刀：渲染层键值存储的读通道（winMain_get_data）。
-        // 与上一行同一处、同一时序理由：必须在渲染层第一次 invoke 之前完成注册。
+        // P0-2 第二刀 + 第三刀：渲染层键值存储的读/写通道（winMain_get_data / winMain_save_data）。
+        // 与上一行同一处、同一时序理由：必须在渲染层第一次 invoke/send 之前完成注册。
         RainMusicDataChannels.register(this);
 
         Logger.info(

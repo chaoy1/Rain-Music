@@ -70,16 +70,19 @@ test('通道名字面量必须等于 ipcNames.ts 生成的真实通道名（写�
   assert.equal(javaConstant(channelsJava, 'CHANNEL_ON_CONFIG_CHANGE'), EXPECTED_ON_CONFIG_CHANGE)
 
   // 常量算出来了还要真的拿去注册 —— 覆盖掉常量但忘了 register 的话，真机上依然是"未注册"。
-  assert.match(channelsJava, /register\(\s*CHANNEL_GET\s*,/)
-  assert.match(channelsJava, /register\(\s*CHANNEL_SET\s*,/)
+  // ⚠️ 与下面那条一样**必须去掉注释再匹配**（同一个假通过类：把这两行注释掉，用整份源码匹配依然通过）。
+  const channelsCode = stripJavaComments(channelsJava)
+  assert.match(channelsCode, /register\(\s*CHANNEL_GET\s*,/)
+  assert.match(channelsCode, /register\(\s*CHANNEL_SET\s*,/)
 })
 
 test('这一刀只注册两条通道（范围守卫：顺手做别的通道会在本用例变红）', () => {
-  const registrations = channelsJava.match(/RainMusicIpcHandlers\.register\(/g) ?? []
+  // ⚠️ 数注册也要去注释：把 register(...) 整行注释掉之后，数整份源码会**依然得到 2**（注释里就有）。
+  const registrations = stripJavaComments(channelsJava).match(/RainMusicIpcHandlers\.register\(/g) ?? []
   assert.equal(registrations.length, 2, '本文件只应注册 common_get_app_setting / common_set_app_setting')
 
   // P0-1 的插件里不应该出现设置通道的"就地实现"（实现必须都在本文件里）。
-  assert.doesNotMatch(pluginJava, /RainMusicIpcHandlers\.register\(/)
+  assert.doesNotMatch(stripJavaComments(pluginJava), /RainMusicIpcHandlers\.register\(/)
 })
 
 test('存储落点必须与阶段 2b 一致：key = rain:store:config_v2，prefs 文件 = CapacitorStorage', () => {
@@ -93,7 +96,16 @@ test('存储落点必须与阶段 2b 一致：key = rain:store:config_v2，prefs
 })
 
 test('注册必须发生在 RainMusicIpcPlugin.load() 里；MainActivity 仍先 registerPlugin 再 super.onCreate()', () => {
-  assert.match(pluginJava, /RainMusicAppSettingChannels\.register\(this\)/, 'load() 里必须注册，否则真机 IPC_CHANNEL_UNSUPPORTED')
+  // ⚠️ 这里**必须**去掉注释再匹配：`RainMusicIpcPlugin.java` 的注释里就写着这一行，
+  // 用整份源码匹配的话，把 `RainMusicAppSettingChannels.register(this);` 整行注释掉
+  // **用例依然通过** —— 而那正是真机上 `IPC_CHANNEL_UNSUPPORTED` 的形状（漏注册不会静默，
+  // 但"用例假绿"会让它一直漏到真机）。同一个坑第二刀在 `RainMusicDataChannels.register(this)`
+  // 上已经踩过一次，写法照 `android-data-channels.test.cjs` 的 stripJavaComments。
+  assert.match(
+    stripJavaComments(pluginJava),
+    /RainMusicAppSettingChannels\.register\(this\)/,
+    'load() 里必须注册，否则真机 IPC_CHANNEL_UNSUPPORTED（注释掉不算）',
+  )
 
   // 只看代码、不看注释（注释里就写着这句话，见 stripJavaComments 的说明）。
   const code = stripJavaComments(activityJava)
