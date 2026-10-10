@@ -109,6 +109,14 @@ public class RainMusicIpcPlugin extends Plugin {
     @Override
     public void load() {
         RainMusicIpcHandlers.setEmitter((channel, args) -> emitEvent(channel, args));
+
+        // P0-2 第一刀：设置通道的原生实现（common_get_app_setting / common_set_app_setting）。
+        // 注册必须在这里、且发生在渲染层第一次 invoke 之前 —— load() 是 Capacitor 建 Bridge 时同步调的
+        // （PluginHandle.loadInstance()：先 setBridge 再 load），满足这个时序。
+        // 未注册的通道会被 dispatch() 立刻回 IPC_CHANNEL_UNSUPPORTED，所以漏注册 = 真机上直白的坏，
+        // 不会静默。
+        RainMusicAppSettingChannels.register(this);
+
         Logger.info(
             TAG,
             "IPC 传输桥已加载：plugin=" + PLUGIN_NAME + ", event=" + EVENT_NAME +
