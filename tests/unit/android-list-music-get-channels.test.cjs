@@ -1,6 +1,11 @@
 /**
- * Android 移植 · **P0-2 第六刀（`player_list_music_get`，歌单内歌曲的纯读通道）**
+ * Android 移植 · **P0-2 第六刀 + 第七刀-A（`player_list_music_get`）**
  * 的契约 / 接线 / 落点 / 范围回归网。
+ *
+ * ⚠️ 第六刀那一版是**纯读**；第七刀-A 把 `default` 分支上的"去重合并 + 单事务写回 + 失败冒泡"
+ * 补在**同一个通道文件**里，所以本文件里第 9 / 10 两条（纯读守卫、"本刀不做写回"）被改写成
+ * **写守卫**与"只做那一半"。行为层面的证据（真 JVM + 手写假 SQLite 跑这一刀的控制流）在
+ * `tests/unit/android-playback-queue-merge.test.cjs` 里，本文件只做源码形状 / 落点 / 接线 / 范围。
  *
  * ⚠️ 先写清楚这个文件**做不到**什么：本机没有 Android SDK（`docs/android-port-plan.md` §0），
  * 它**没有在 Android 上跑过任何东西**，也**没有真的开过 SQLite** —— 所以它**不能**证明这条通道
@@ -31,11 +36,13 @@
  * 7. **参数语义**：缺参数 ⇒ 抛错；类型不对 ⇒ 抛错；`null` ⇒ 不查库直接 `[]`；
  * 8. **不假装成功**：库打不开 / 表缺失 / 查询失败 / meta 坏 ⇒ 抛错，代码里没有
  *    "catch 之后返回空数组"的退路；游标在 `finally` 里关；
- * 9. **纯读守卫**：本文件里**没有**任何 INSERT / UPDATE / DELETE / 建表 / 显式事务 / `execSQL` /
- *    `compileStatement`；唯一"像写"的东西是一条**节流警告**；
- * 10. **本刀不做写回**：`dedupePlaybackQueue` + `overwriteMusicInfo` + 快照 +
- *     `resolvePlaybackQueueRestoreIndex` / `completePlaybackQueueRestore` 一条都没实现
- *     （但它们**必须**能在桌面的源码里被指出来 —— 那是下一刀的活）；
+ * 9. **写守卫**：写只发生在 `default` 的那一个分支里（`overwriteDefaultQueue`）—— 四条写语句
+ *    （DELETE ×2 + INSERT ×2）与 `statements.ts` 逐字一致、整段在**同一个事务**里；
+ *    非 `default` 的调用**一条写语句都不发**（普通歌单 / temp 永不合并）；
+ * 10. **第七刀-A 只做那一半**：`dedupePlaybackQueue` + 单事务写回 + "返回去重后的列表"**已经做了**；
+ *     `db_info` 快照（`queueStartupRestorePending` / `playback_queue_startup_restore`）+
+ *     `resolvePlaybackQueueRestoreIndex` / `completePlaybackQueueRestore` **仍然一个都没有**
+ *     （第七刀-B；桌面那半条链必须能在源码里被指出来）；
  * 11. **范围守卫**：本刀只注册**这 1 条**通道；第五刀的文件仍然只有 2 条、第四刀仍然只有 1 条
  *     （老文件冻结，一行都没改）；
  * 12. **注册真的被调用**：`RainMusicIpcPlugin.load()` 里调 `RainMusicListMusicGetChannels.register(this)`，
@@ -111,6 +118,8 @@ const getCodeNoStrings = stripJavaStrings(getCode)
 const dbCode = stripJavaComments(dbJava)
 
 const { PLAYER_EVENT_NAME } = load('src/common/ipcNames.ts', {}, {})
+/** 桌面那把 `dedupePlaybackQueue` —— 下面那个原生替身与期望值都用它（与 Java 侧同源）。 */
+const { dedupePlaybackQueue } = load('src/common/utils/playbackQueue.ts', {}, {})
 
 const CHANNEL = PLAYER_EVENT_NAME.list_music_get
 const TABLE_MUSIC_INFO = 'my_list_music_info'
@@ -202,11 +211,19 @@ test('JS 侧零改动：桥是通道无关的，渲染层与主进程的两头�
   // 渲染层的调用点与"读缓存"分支都在（本刀不碰 JS）。
   assert.match(rendererListManageTs, /if \(allMusicList\.has\(listId\)\) return allMusicList\.get\(listId\)!/)
   assert.match(rendererListManageTs, /return setMusicList\(listId, list\)/)
-  // ㊙️ 本刀敢"只读、不写回"的**唯一**依据：渲染层读 default 时自己会去重。
+  // ㊙️ 写回失败时渲染层**不缓存**：setMusicList 在 await **之后** ⇒ reject 会让它根本不被调用
+  // （所以下一次 invoke 必然重新查库；如果 Java 侧吞掉写回错误、返回去重后的列表，这里就会缓存一份
+  // 库里并不存在的列表，缓存与库永久分叉）。
+  assert.match(
+    rendererListManageTs,
+    /const list = await rendererInvoke<string, Rain\.Music\.MusicInfo\[\]>\(PLAYER_EVENT_NAME\.list_music_get, listId\)\s*\n\s*return setMusicList\(listId, list\)/,
+    'setMusicList 必须在 await 之后（reject 时不被调用 ⇒ 那条 invoke 的结果不会被缓存）',
+  )
+  // 渲染层读 default 时自己也会去重（与 Java 侧的去重同源：src/common/utils/playbackQueue.ts）。
   assert.match(
     listManageActionTs,
     /if \(listId == LIST_IDS\.DEFAULT\) musicList = dedupePlaybackQueue\(musicList\)/,
-    '渲染层的去重没了 ⇒ 本刀不写回就会让界面看到重复（那时必须重新评估）',
+    '渲染层的去重没了 ⇒ "界面所见与桌面一致"这条论证要重新核',
   )
 })
 
@@ -283,10 +300,14 @@ test('meta 必须解析成 JSON 对象（桌面那一句是 JSON.parse），不�
   // Java：走 new JSONObject(text)（与 RainMusicDataChannels / RainMusicAppSettingChannels 同款）。
   assert.match(getCode, /private static Object parseMeta\(String musicId, String text\)/)
   assert.match(getCode, /return new JSONObject\(text\);/)
-  assert.match(getCode, /item\.put\(COLUMN_META, parseMeta\(id, cursor\.getString\(metaIndex\)\)\)/)
+  // 每一行都解析（含即将被删掉的重复行）⇒ 行模型持有的是**对象**，组装 JSON 与写回都从它出发。
+  assert.match(getCode, /parseMeta\(id, cursor\.getString\(metaIndex\)\)/)
+  assert.match(getCode, /item\.put\(COLUMN_META, meta\);/)
   // 绝不许"原样回传"（那是 TEXT，渲染层拿到的是字符串）。
   assert.ok(!/item\.put\(COLUMN_META, jsonValue\(/.test(getCode), 'meta 不许走 jsonValue（那是给可空字符串列的）')
   assert.ok(!/item\.put\(COLUMN_META, cursor\.getString\(metaIndex\)\)/.test(getCode), 'meta 不许原样回传')
+  // 写回时 meta 走的就是那个对象重新序列化出来的文本（桌面是 JSON.stringify(info.meta)）。
+  assert.match(getCode, /String metaText\(\) \{\s*return String\.valueOf\(meta\);/)
 
   // NULL 列：与桌面 JSON.parse(null) ⇒ null 逐字等价（NOT NULL 列被写坏时的行为）。
   assert.match(getCode, /if \(text == null\) \{[\s\S]{0,900}?return JSONObject\.NULL;/)
@@ -325,20 +346,26 @@ test('一行 = 六个键 id/name/singer/source/interval/meta（没有 listId、�
     assert.equal(javaConstant(getJava, constant), value)
   }
   // interval 是 string | null ⇒ NULL 走 jsonValue（不然 org.json 的 put(name, null) 会**删键**）。
-  assert.match(getCode, /item\.put\(COLUMN_INTERVAL, jsonValue\(cursor\.getString\(intervalIndex\)\)\)/)
+  assert.match(getCode, /item\.put\(COLUMN_INTERVAL, jsonValue\(interval\)\)/)
+  // 写回时 interval 原样传给绑定数组（NULL ⇒ SQL NULL）。
+  assert.match(getCode, /return new Object\[\] \{ id, listId, name, singer, source, interval, metaText\(\) \};/)
   assert.match(getCode, /private static Object jsonValue\(Object value\)/)
   assert.match(getCode, /return value == null \? JSONObject\.NULL : value/)
   assert.match(read('src/common/types/music.d.ts'), /interval: string \| null/)
   assert.match(read('src/common/types/music.d.ts'), /meta: MusicInfoMetaBase/)
 })
 
-test('返回的顺序就是 SQL 结果顺序（不许在 Java 侧去重 / 排序 / 分组）', () => {
-  const loop = getCode.slice(getCode.indexOf('while (cursor.moveToNext())'), getCode.indexOf('} catch (IllegalStateException'))
-  assert.deepEqual([...loop.matchAll(/musics\.put\(([^;]*)\)/g)].map(match => match[1].trim()), ['item'])
-  assert.ok(!/new TreeSet|new HashSet|Collections\.sort|Arrays\.sort/.test(getCode), '不许在 Java 侧去重 / 排序')
-  // ⚠️ 但**去重判定**是另一回事：default 列上要算一次（只为了警告），那条路不改返回值。
-  assert.match(getCode, /RainMusicPlaybackQueueKey\.findDuplicates\(rows\)/)
-  assert.match(getJava, /照常返回原始行/)
+test('返回的顺序就是 SQL 结果顺序（Java 侧不重排；只有 default 那条写回会**删**重复行）', () => {
+  // 组装 JSON 是"按读到的顺序逐行 put"，中间没有任何排序 / 分组。
+  assert.match(getCode, /while \(cursor\.moveToNext\(\)\) \{/)
+  assert.match(getCode, /for \(MusicInfoRow row : rows\) \{\s*if \(dropped != null && dropped\.contains\(row\.keyRow\)\) continue;\s*array\.put\(row\.toJson\(\)\);/)
+  assert.ok(!/new TreeSet|new HashSet|Collections\.sort|Arrays\.sort/.test(getCode), '不许在 Java 侧重排 / 分组')
+  // ⚠️ 去重判定是另一回事：default 上要算一次，而它**只删**（保留第一条）、不排序。
+  assert.match(getCode, /RainMusicPlaybackQueueKey\.findDuplicates\(keyRows\)/)
+  assert.match(getJava, /保留第一条完整记录/)
+  assert.match(getJava, /不重新排序/)
+  // 桌面的 dedupe 也是 filter（保序），两边同形。
+  assert.match(read('src/common/utils/playbackQueue.ts'), /return musics\.filter\(music => \{/)
 })
 
 // ---------------------------------------------------------------------------
@@ -365,31 +392,60 @@ test('参数形状：裸字符串；缺参数 / 类型不对 ⇒ 抛错；null �
 })
 
 // ---------------------------------------------------------------------------
-// 纯读 / 范围 / 不假装成功
+// 写守卫 / 范围 / 不假装成功
 // ---------------------------------------------------------------------------
 
-test('纯读守卫：本文件里没有任何写 SQL、建表、显式事务或原生写入口', () => {
-  for (const forbidden of ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'REPLACE']) {
-    assert.ok(
-      !new RegExp(`\\b${forbidden}\\b`).test(getCodeNoStrings),
-      `只读通道里不该出现 ${forbidden}（写回留给下一刀）`,
-    )
-  }
-  for (const forbidden of ['execSQL', 'compileStatement', 'beginTransaction', 'setTransactionSuccessful', 'endTransaction', 'rawQueryWithFactory', 'insert(', 'update(', 'delete(']) {
-    assert.ok(!getCodeNoStrings.includes(forbidden), `只读通道里不该出现 ${forbidden}`)
-  }
+test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueue），且四条写语句各只出现一次', () => {
+  // 写入口只有四个 SQL 常量 + 一次 execSQL 调用点；它们必须**全部**落在 overwriteDefaultQueue 里。
+  const writeMethod = getCode.slice(
+    getCode.indexOf('private static void overwriteDefaultQueue('),
+    getCode.indexOf('private static String writeBackFailureMessage('),
+  )
+  assert.ok(writeMethod.length > 0, '找不到 overwriteDefaultQueue')
+  const execSqlCalls = [...getCode.matchAll(/db\.execSQL\(([A-Z_]+)/g)].map(match => match[1])
+  assert.deepEqual(execSqlCalls, [
+    'SQL_DELETE_MUSIC_INFO_BY_LIST_ID',
+    'SQL_DELETE_MUSIC_ORDER_BY_LIST_ID',
+    'SQL_INSERT_MUSIC_INFO',
+    'SQL_INSERT_MUSIC_ORDER',
+  ], '写语句只有这四条，且顺序 = dbHelper.ts:340-349')
+  assert.equal(
+    (writeMethod.match(/db\.execSQL\(/g) ?? []).length, 4,
+    '四条 execSQL 必须都在这一个方法里（读路径上一条写语句都不许有）',
+  )
+  // 除了这个方法，别处不许出现 execSQL / compileStatement（"读通道顺手写库"是这一刀唯一的写面）。
+  const outside = getCode.replace(writeMethod, '')
+  assert.ok(!outside.includes('execSQL'), 'overwriteDefaultQueue 之外不许有 execSQL')
+  assert.ok(!getCode.includes('compileStatement'), '不用编译语句（与既有几刀同一形状）')
+  assert.ok(!getCode.includes('rawQueryWithFactory'), '不自己开查询工厂')
+
+  // 事务：三段式，且只有一处（整段写回是**一个**事务）。
+  assert.equal((getCode.match(/db\.beginTransaction\(\)/g) ?? []).length, 1)
+  assert.equal((getCode.match(/db\.setTransactionSuccessful\(\)/g) ?? []).length, 1)
+  assert.equal((getCode.match(/db\.endTransaction\(\)/g) ?? []).length, 1)
+  assert.match(writeMethod, /db\.beginTransaction\(\);[\s\S]*?finally \{[\s\S]*?db\.endTransaction\(\);/,
+    'endTransaction 必须在 finally 里（异常路径也要结束事务，否则连接一直被占着）')
+  assert.match(writeMethod, /db\.setTransactionSuccessful\(\);\s*commitStarted = true;/)
+
+  // 触发条件：default + 去重真删掉了元素；没有重复时**一条写语句都不发**。
+  assert.match(getCode, /if \(!LIST_ID_DEFAULT\.equals\(listId\)\) \{\s*return readListMusics\(context, listId, false\);/)
+  assert.match(getCode, /List<RainMusicPlaybackQueueKey\.MusicRow> duplicates =\s*RainMusicPlaybackQueueKey\.findDuplicates\(keyRows\);/)
+  assert.match(getCode, /if \(!duplicates\.isEmpty\(\)\) \{/)
+  assert.match(getCode, /if \(dropped == null\) \{[\s\S]{0,200}?return musics;/)
+
   // 唯一的数据库入口是 RainMusicDatabase（不另开库、不 new Helper）。
   assert.ok(!getCode.includes('SQLiteOpenHelper'), '不许另开 helper')
   assert.ok(!getCode.includes('getSharedPreferences'), '这不走 SharedPreferences')
   // 不广播任何东西：这条通道没有"变更通知"这种出口。
-  assert.ok(!getCode.includes('emit'), '读通道不广播')
+  assert.ok(!getCode.includes('emit'), '这条通道不广播')
   // 游标在 finally 里关（两条路径都不漏）。
   assert.equal((getCode.match(/finally \{\s*if \(cursor != null\) cursor\.close\(\);/g) ?? []).length, 1)
-  // 唯一的写 SQL 面在 RainMusicDatabase 的 onCreate 里（本刀一行都没改它）。
+  // 进程级连接不关、也不碰 DB 层的私有单例。
   assert.ok(!getCode.includes('RainMusicDatabase.helper'))
+  assert.ok(!/RainMusicDatabase[\s\S]{0,80}?\.close\(\)/.test(getCode), '不许关掉进程级连接')
 })
 
-test('本刀**不做**默认列的去重写回：桌面那条链必须能在源码里被指出来（给下一刀）', () => {
+test('第七刀-A 只做"去重 + 写回"那一半：db_info 快照与恢复标志一个都没有（第七刀-B）', () => {
   // 桌面的写回：dedupePlaybackQueue → overwriteMusicInfo（含 db_info 快照 + 删 + 插、同一个事务）。
   assert.match(listIndexTs, /export const getListMusics = async\(listId: string\): Promise<Rain\.Music\.MusicInfo\[\]>/)
   assert.match(listIndexTs, /const merged = dedupePlaybackQueue\(targetList\)/)
@@ -399,6 +455,10 @@ test('本刀**不做**默认列的去重写回：桌面那条链必须能在源�
   assert.match(dbHelperTs, /export const overwriteMusicInfo = async\(listId: string, musicInfos: Rain\.DBService\.MusicInfo\[\], startupRestoreSnapshot\?: QueueRestoreRecord\[\]\)/)
   assert.match(dbHelperTs, /INSERT INTO db_info \(field_name, field_value\) VALUES \(\?, \?\)/)
   assert.match(dbHelperTs, /QUEUE_RESTORE_SNAPSHOT_KEY = 'playback_queue_startup_restore'/)
+  // 桌面那三步（本刀做的）就在同一个事务里。
+  assert.match(dbHelperTs, /await musicInfoDeleteByListIdStatement\.run\(listId\)/)
+  assert.match(dbHelperTs, /await musicInfoOrderDeleteByListIdStatement\.run\(listId\)/)
+  assert.match(dbHelperTs, /await db\.transaction\(/)
   assert.match(listIndexTs, /let queueStartupRestorePending = true/)
   assert.match(listIndexTs, /export const resolvePlaybackQueueRestoreIndex/)
   assert.match(listIndexTs, /export const completePlaybackQueueRestore/)
@@ -408,21 +468,27 @@ test('本刀**不做**默认列的去重写回：桌面那条链必须能在源�
   const constantsTs = read('src/common/constants.ts')
   assert.match(constantsTs, /DEFAULT: 'default'/)
 
-  // Java 侧：这三样**一个都没有**（本刀范围外）。
-  // ⚠️ 必须去掉注释**与字符串字面量**再查：类注释里故意写着这些名字（讲"桌面会做、本刀不做"），
-  // 而且那条脏队列警告的消息里也点名了 `overwriteMusicInfo`（那是给人看的话，不是实现）。
+  // Java 侧：快照与那两个收尾函数**一个都没有**（本刀范围外）。
+  // ⚠️ 必须去掉注释**与字符串字面量**再查：类注释里故意写着这些名字（讲"桌面会做、本刀不做"）。
   for (const forbidden of [
-    'overwriteMusicInfo', 'queueStartupRestorePending', 'resolvePlaybackQueueRestoreIndex',
+    'queueStartupRestorePending', 'resolvePlaybackQueueRestoreIndex',
     'completePlaybackQueueRestore', 'playback_queue_startup_restore', 'toDBMusicInfo',
+    'QUEUE_RESTORE_SNAPSHOT_KEY', 'TABLE_DB_INFO',
   ]) {
-    assert.ok(!getCodeNoStrings.includes(forbidden), `本刀不该出现 ${forbidden}（那是下一刀）`)
+    assert.ok(!getCodeNoStrings.includes(forbidden), `本刀不该出现 ${forbidden}（那是第七刀-B）`)
   }
+  // 也**不许**在事务里插一句写 db_info（那是快照那一刀的形状）。
+  assert.ok(!/INSERT INTO[^;]*db_info/.test(getCodeNoStrings), 'transaction 里只许有那四条语句')
+  // 快照这件事必须在注释与日志里被点名"没做"（否则读代码的人会以为已经对齐了桌面）。
+  assert.match(getJava, /第七刀-B/)
+  assert.match(getJava, /本刀\*\*不含\*\* db_info/)
+
   // 模块级缓存也没有：每次读都真的查库（桌面会先查 musicLists 缓存）。
   for (const forbidden of ['musicLists', 'userLists', 'rawPoss']) {
     assert.ok(!getCode.includes(forbidden), `不许照抄桌面那套模块级缓存（${forbidden}）`)
   }
-  // 但"不动缓存"这件事本身有语义差别，注释里必须写明（Android 每次读都反映库的真实内容）。
-  assert.match(getJava, /android 本刀\*\*只读、不写回\*\*|Android 本刀\*\*只读、不写回\*\*/)
+  // "不动缓存"本身是一处有意的语义差别，注释里必须写明。
+  assert.match(getJava, /没有 \{@code musicLists\} 模块级缓存/)
 })
 
 test('范围守卫：本刀只注册 1 条；第五刀的文件仍然只有 2 条、第四刀仍然只有 1 条（老文件冻结）', () => {
@@ -487,66 +553,90 @@ test('注册必须发生在 RainMusicIpcPlugin.load() 里；MainActivity 仍先 
   assert.ok(registerPlugin < superOnCreate, 'registerPlugin 必须在 super.onCreate() 之前')
 })
 
-test('不假装成功：库打不开 / 表缺失 / 查询失败都抛错，代码里没有"返回空数组"的退路', () => {
+test('不假装成功：库打不开 / 表缺失 / 查询失败 / **写回失败**都抛错，代码里没有"返回空数组 / 返回去重后的列表"的退路', () => {
   // 库打不开：消息与第四 / 第五刀逐字一致（同一个入口）。
   assert.match(dbCode, /throw new IllegalStateException\(\s*"打不开数据库 " \+ path/)
   assert.match(dbCode, /里没有表/)
   assert.match(dbCode, /这不是本应用建的库/)
-  // 唯一的 catch：第一条出路就是 throw（不是"先给个空数组"）。
+  // 三个 catch，第一条出路都是 throw（不是"先给个空数组"）。
   assert.match(getCode, /catch \(Exception ex\) \{\s*throw new IllegalStateException\(/)
   assert.match(getCode, /catch \(IllegalStateException ex\) \{\s*throw ex;/)
   assert.ok(!/catch[\s\S]{0,300}?return new JSONArray\(\)/.test(getCode), '不许吞异常返回空数组')
   assert.ok(!/catch\s*\([^)]*\)\s*\{\s*\}/.test(getCode), '不许空 catch')
+  assert.ok(!/catch[\s\S]{0,400}?return merged;/.test(getCode), '不许吞掉写回错误却返回去重后的列表（缓存与库会永久分叉）')
   // 失败消息里必须点名表名 + 那句"不假装"。
   assert.match(getCode, /private static String readFailureMessage\(String sql, Exception ex\)/)
   assert.match(getJava, /不会\*\*返回空数组假装「这个歌单是空的」/)
   // 被吞掉的只有"已经点过名的 meta 错误"（rethrow），别的都包上表名与 SQL。
-  assert.equal((getCode.match(/catch \(/g) ?? []).length, 3, 'readBareString 之外只应有这两个 catch')
+  assert.equal((getCode.match(/catch \(/g) ?? []).length, 4,
+    'readBareString 之外应有四个 catch：读的两个（rethrow meta 错 / 包成读失败）、写回的一个、parseMeta 的一个')
+  // 写回失败有**自己**的消息（不许被 readFailureMessage 包成"读失败"，那正是第六刀当时的顾虑）。
+  assert.match(getCode, /private static String writeBackFailureMessage\(/)
+  assert.match(getCode, /writeBackFailureMessage\(listId, readCount, kept\.size\(\), duplicateCount, commitStarted, ex\)/)
+  for (const phrase of ['读到 ', ' 行成功', '写回失败', '已回滚', '库仍是写回前的 ', '行**']) {
+    assert.ok(getJava.includes(phrase), `写回失败的消息里必须点名「${phrase}」`)
+  }
+  assert.match(getJava, /提交阶段/)
+  assert.match(getJava, /不会\*\*吞掉写回错误/)
 })
 
 // ---------------------------------------------------------------------------
-// 脏队列警告（判定细节见 android-playback-queue-key.test.cjs）
+// 合并日志（判定细节见 android-playback-queue-key.test.cjs；行为见 android-playback-queue-merge.test.cjs）
 // ---------------------------------------------------------------------------
 
-test('脏队列警告：只在 default 上判、节流、点名"桌面会写回而本刀没有"', () => {
-  // 只在 default 上收集 & 判定。
-  assert.match(getCode, /LIST_ID_DEFAULT\.equals\(listId\) \? new ArrayList<>\(\) : null/)
-  assert.match(getCode, /if \(!LIST_ID_DEFAULT\.equals\(listId\)\) return;/)
+test('合并警告：只在 default 上判、节流、说的是"已去重写回"（那条"只读不写回"的临时 warn 必须没了）', () => {
   assert.equal(javaConstant(getJava, 'LIST_ID_DEFAULT'), 'default')
-  assert.match(getCode, /warnIfDefaultQueueLooksDirty\(listId, queueRows, musics\.length\(\)\)/)
   // 判定用的是与 JS 逐字节相同的那份键（不是就地又写一套）。
-  assert.match(getCode, /RainMusicPlaybackQueueKey\.findDuplicates\(rows\)/)
+  assert.match(getCode, /RainMusicPlaybackQueueKey\.findDuplicates\(keyRows\)/)
   assert.match(getCode, /new RainMusicPlaybackQueueKey\.MusicRow\(id, name, singer\)/)
-  // 节流：共享一个闸门 + 分开的一个（meta NULL）。
-  assert.match(getCode, /private static final RainMusicLogThrottle DIRTY_QUEUE_WARN =\s*new RainMusicLogThrottle\(DIRTY_QUEUE_WARN_WINDOW_MS\)/)
-  assert.match(getCode, /DIRTY_QUEUE_WARN\.shouldLog\(signature, System\.currentTimeMillis\(\)\)/)
-  assert.match(getCode, /private static final long DIRTY_QUEUE_WARN_WINDOW_MS = 60_000L/)
+  // 节流：一个合并警告的闸门 + 分开的一个（meta NULL）。
+  assert.match(getCode, /private static final RainMusicLogThrottle QUEUE_MERGED_WARN =\s*new RainMusicLogThrottle\(QUEUE_MERGED_WARN_WINDOW_MS\)/)
+  assert.match(getCode, /QUEUE_MERGED_WARN\.shouldLog\(signature, System\.currentTimeMillis\(\)\)/)
+  assert.match(getCode, /private static final long QUEUE_MERGED_WARN_WINDOW_MS = 60_000L/)
   assert.match(getCode, /private static final RainMusicLogThrottle META_NULL_WARN =/)
   // 签名包含"行数 / 重复数 / 前几条重复的键" ⇒ 队列变了会立刻再报。
-  assert.match(getCode, /signature = dirtyQueueSignature\(listId, total, duplicates\)/)
+  assert.match(getCode, /signature = queueMergedSignature\(listId, readCount, duplicates\)/)
   assert.match(getCode, /builder\.append\(listId\)\.append\('\|'\)\.append\(total\)\.append\('\|'\)\.append\(duplicates\.size\(\)\)/)
-  // 是 warn（不是 debug），并且真的是一条"点名"的日志。
+  // 是 warn（不是 debug），说话的内容必须是"已经写回"，而不是"库还是脏的"。
   assert.match(getCode, /Logger\.warn\(\s*TAG,/)
   assert.match(getJava, /默认播放队列/)
-  assert.match(getJava, /只读、不写回/)
-  assert.match(getJava, /overwriteMusicInfo/)
+  assert.match(getJava, /已按桌面的规则去重/)
+  assert.match(getJava, /在\*\*同一个事务\*\*里写回/)
+  // 那条临时警告（说 Android 只读、库还是脏的）必须已经不在 —— 留着它就说谎。
+  // ⚠️ 类注释里**故意**引用了它一次（讲"它被替换掉了"），所以这里只看**注释之外**的字符串字面量。
+  const stringLiterals = [...getCode.matchAll(/"((?:\\.|[^"\\])*)"/g)].map(match => match[1])
+  for (const stale of ['只读、不写回', '写回**未做**', '检出重复时只打一条节流警告']) {
+    assert.ok(!stringLiterals.some(text => text.includes(stale)), `运行期的日志里不许再有"${stale}"（它会说谎）`)
+  }
+  assert.ok(!getCodeNoStrings.includes('只读、不写回'), '那段临时警告的实现/消息不许还在')
+  assert.ok(getJava.includes('它现在会说谎'), '类注释里必须写明那条临时警告为什么被换掉')
   assert.match(getJava, /本条警告节流/)
-  assert.match(getJava, /logcat 是本刀唯一的可观测面/)
-  // ⚠️ 警告不能反过来影响返回值：它在 return 之前、但用的是**已经组装好的**数组。
-  assert.ok(
-    getCode.indexOf('warnIfDefaultQueueLooksDirty(') < getCode.indexOf('return musics;'),
-    '警告要在返回之前（读成功之后）',
-  )
-  assert.match(getCode, /return musics;/)
-  // 只有一条 warn 出口（不许在别处又刷一条）。
-  assert.equal((getCode.match(/Logger\.warn\(/g) ?? []).length, 2, '两处 warn：meta 为 NULL、脏队列')
+  assert.match(getJava, /logcat 是原生侧唯一/)
+  // 调用点在写回**成功之后**（失败会抛出去，不该先报一条"已写回"）。
+  const mergeCall = getCode.indexOf('warnQueueMerged(listId, rows.size(), kept.size(), dropped);')
+  const writeCall = getCode.indexOf('overwriteDefaultQueue(db, listId, kept, rows.size(), duplicateCount);')
+  assert.ok(writeCall > -1 && mergeCall > writeCall, '警告必须在写回成功之后')
+  assert.match(getCode, /return merged;/)
+  // 只有两处 warn：meta 为 NULL、合并成功。
+  assert.equal((getCode.match(/Logger\.warn\(/g) ?? []).length, 2, '两处 warn：meta 为 NULL、合并成功')
 })
 
-test('并发：没有数据锁；唯一的跨调用可变状态就是那两个日志闸门', () => {
-  // 没有任何 synchronized（闸门在 RainMusicLogThrottle 里，本文件不自己加锁）。
-  assert.equal((getCode.match(/synchronized/g) ?? []).length, 0, '通道自己不拿锁')
-  assert.ok(!getCode.includes('new Object()'), '通道不自己造锁')
-  assert.ok(!getCode.includes('WRITE_LOCK'), '这条通道与第三刀那把 SharedPreferences 写锁无关')
+test('并发：一把只护 default 去重写回的专用锁（从 SELECT 之前开始），非 default 不进锁', () => {
+  // 只有一个 synchronized，锁是一个 private static final 的专用对象（不是 WRITE_LOCK、不是 DB 的单例）。
+  assert.equal((getCode.match(/synchronized/g) ?? []).length, 1, '这条通道只该有一处 synchronized')
+  assert.match(getCode, /private static final Object DEFAULT_QUEUE_MERGE_LOCK = new Object\(\);/)
+  assert.match(getCode, /synchronized \(DEFAULT_QUEUE_MERGE_LOCK\) \{\s*return readListMusics\(context, listId, true\);/)
+  assert.ok(!getCode.includes('WRITE_LOCK'), '这条通道与第三刀那把 SharedPreferences 写锁无关（不许混用）')
+  assert.ok(!getCode.includes('RainMusicStoreLock'), '不许引用 SharedPreferences 那把锁')
+  // 临界区必须包含**读**（在 readListMusics 里 SELECT → 判重 → 删 → 插都在锁内），
+  // 否则两次并发读会各自读到脏队列、各写一遍。
+  assert.ok(
+    getCode.indexOf('synchronized (DEFAULT_QUEUE_MERGE_LOCK)') < getCode.indexOf('db.rawQuery(SQL_MUSIC_BY_LIST_ID'),
+    '锁必须在 SELECT 之前拿到（临界区含读，不只含写）',
+  )
+  // 非 default 走的是不进锁的纯读分支。
+  const before = getCode.slice(0, getCode.indexOf('synchronized (DEFAULT_QUEUE_MERGE_LOCK)'))
+  assert.match(before, /return readListMusics\(context, listId, false\);/)
   // 唯一的非 final 静态字段：没有（可变状态全在闸门对象里）。
   const mutableStatics = [...getCode.matchAll(/\bprivate static\s+(?!final\b)(?:volatile\s+)?([A-Za-z_][\w.<>[\]]*)\s+(\w+)\s*=/g)]
     .map(match => match[2])
@@ -554,7 +644,7 @@ test('并发：没有数据锁；唯一的跨调用可变状态就是那两个�
   // 闸门自己是有锁的（两条线程同时读也不会把节流打穿）。
   assert.match(stripJavaComments(throttleJava), /synchronized boolean shouldLog\(String signature, long nowMs\)/)
   // 连接不关（桌面同样把连接留到进程退出）。
-  assert.ok(!/RainMusicDatabase[\s\S]{0,80}?\.close\(\)/.test(getCode), '读通道不许关掉进程级连接')
+  assert.ok(!/RainMusicDatabase[\s\S]{0,80}?\.close\(\)/.test(getCode), '这条通道不许关掉进程级连接')
   // 关键键类不含 Android 类型 ⇒ 本机能用真 JVM 跑它（见另一个测试文件）。
   assert.ok(!/^import\s+(android|com\.getcapacitor|org\.json)\./m.test(keyJava), 'Key 类必须只依赖 JDK')
   assert.ok(!/^import\s+(android|com\.getcapacitor|org\.json)\./m.test(throttleJava), 'Throttle 类必须只依赖 JDK')
@@ -752,11 +842,22 @@ test('用 javac + 手写替身把本刀的文件（含没改过的 DB / 注册�
  * - 参数是**裸字符串** `listId`（Java `readBareString`）；缺参数 / 类型不对 ⇒ reject；
  *   `null` ⇒ 不查库直接 `[]`（Java 在 `open()` 之前短路）；
  * - 返回 `MusicInfo[]`（`meta` 是**对象**）；
- * - 库打不开 / 表缺失 / 查询失败 / meta 坏 ⇒ reject，**绝不** resolve 成 `[]`。
+ * - 库打不开 / 表缺失 / 查询失败 / meta 坏 ⇒ reject，**绝不** resolve 成 `[]`；
+ * - **第七刀-A**：`listId === 'default'` 且**去重真删掉了元素**时（Java `findDuplicates` 非空），
+ *   按桌面的 `dedupePlaybackQueue` 去重、把模型改成去重后的样子（等价于那次事务写回）并返回**去重后**
+ *   的列表；写回失败（`options.writeFailure`）⇒ reject，消息同时点名"读到 N 行成功"与"写回失败"
+ *   （**绝不** resolve 成去重后的列表 —— 那会让渲染层缓存一份库里并不存在的列表）；
+ * - 非 `default` 一律原样返回（普通歌单 / temp 永不合并）。
  */
 const makeNativeListMusicGet = (options = {}) => {
-  const state = { rows: options.rows ?? [], failure: options.failure ?? null }
+  const state = {
+    rows: (options.rows ?? []).map(row => ({ ...row })),
+    failure: options.failure ?? null,
+    writeFailure: options.writeFailure ?? false,
+    merges: 0,
+  }
   const native = {
+    state,
     postCalls: [],
     notifies: 0,
     unregisteredSends: [],
@@ -791,7 +892,32 @@ const makeNativeListMusicGet = (options = {}) => {
       if (state.failure === 'missing-table') { failed('数据库 … 里没有表 "my_list_music_info"：这不是本应用建的库，或者它已经损坏。'); return Promise.resolve({ accepted: true }) }
       if (state.failure === 'query-failed') { failed('读 "my_list_music_info" 失败（SELECT … ORDER BY O."order" ASC）：no such table: my_list_music_info_order。'); return Promise.resolve({ accepted: true }) }
       if (state.failure === 'bad-meta') { failed(CHANNEL + '：music id="m-1" 的 "meta" 列不是合法的 JSON 对象'); return Promise.resolve({ accepted: true }) }
-      accept(state.rows.filter(row => row.listId === listId).map(({ listId: _listId, ...music }) => music))
+
+      // Java `readListMusics()` 的读：只有这个 listId 的行，顺序 = 传进来的顺序（= SQL 的结果顺序）。
+      const readRows = state.rows.filter(row => row.listId === listId).map(({ listId: _listId, ...music }) => music)
+      if (listId === 'default') {
+        // Java：findDuplicates 非空才写回。
+        const merged = dedupePlaybackQueue(readRows)
+        if (merged.length !== readRows.length) {
+          if (state.writeFailure) {
+            failed(
+              CHANNEL + '：默认播放队列的去重写回失败（"listId"="default"，落点 my_list_music_info / my_list_music_info_order）。' +
+              '**读到 ' + readRows.length + ' 行成功**（这一步没有出错），去重要删掉 ' + (readRows.length - merged.length) +
+              ' 条重复、留下 ' + merged.length + ' 条，但**写回失败**：注入的写失败。**已回滚**（同一个事务里的 DELETE ×2 / INSERT ×2×' +
+              merged.length + ' 全部撤销，未标记成功 ⇒ endTransaction 回滚）⇒ **库仍是写回前的 ' + readRows.length + ' 行**。' +
+              '本通道**不会**吞掉写回错误、把「读到了但没修好」伪装成一次成功的读。',
+            )
+            return Promise.resolve({ accepted: true })
+          }
+          // 写回成功：模型变成去重后的样子（等价于"两张表全删 + 逐条插回"）。
+          state.merges++
+          state.rows = state.rows.filter(row => row.listId !== listId)
+            .concat(merged.map(music => ({ ...music, listId })))
+          accept(merged)
+          return Promise.resolve({ accepted: true })
+        }
+      }
+      accept(readRows)
       return Promise.resolve({ accepted: true })
     },
     addListener(eventName, listener) {
@@ -891,4 +1017,61 @@ test('本刀没有注册别的通道：invoke 同族写通道拿到 IPC_CHANNEL_
   assert.equal(error.code, 'IPC_CHANNEL_UNSUPPORTED')
   assert.deepEqual(native.unregisteredSends, [writeChannel])
   assert.equal(native.notifies, 1, '读通道不广播')
+})
+
+// ---------------------------------------------------------------------------
+// 第七刀-A 在 JS 侧的可观察行为（替身按 Java 的控制流实现，不是 Java 行为验证）
+// ---------------------------------------------------------------------------
+
+/** default 的三行、其中两行按去重键重复（m-2 与 m-1 的名字/歌手只差大小写）。 */
+const DEFAULT_ROWS = [
+  { listId: 'default', id: 'm-1', name: 'Song One', singer: 'Singer A', source: 'wy', interval: null, meta: { n: 1 } },
+  { listId: 'default', id: 'm-2', name: 'song one', singer: 'singer a', source: 'kg', interval: null, meta: { n: 2 } },
+  { listId: 'default', id: 'm-3', name: 'Other', singer: 'X', source: 'tx', interval: '03:00', meta: {} },
+]
+
+test('default 有重复 ⇒ resolve **去重后的**列表；第二次 invoke 不会再合并（库已经干净）', async() => {
+  const { mod, native } = setup({ rows: DEFAULT_ROWS })
+  assert.equal(DEFAULT_ROWS.length, 3)
+  const expected = dedupePlaybackQueue(DEFAULT_ROWS.map(({ listId: _listId, ...music }) => music)).map(music => music.id)
+  assert.deepEqual(expected, ['m-1', 'm-3'], '期望值由真实现算出来')
+
+  const first = await mod.bridge.invoke(CHANNEL, 'default')
+  assert.deepEqual(first.map(music => music.id), expected, '返回的必须是去重后的列表（桌面 :201 的 targetList = merged）')
+  assert.equal(native.state.merges, 1, '第一次读要写回一次')
+
+  // 第二次读：库里已经干净 ⇒ 不再合并（等价于桌面"缓存已热"的那一半语义）。
+  const second = await mod.bridge.invoke(CHANNEL, 'default')
+  assert.deepEqual(second.map(music => music.id), expected)
+  assert.equal(native.state.merges, 1, '第二次读不该再写一遍（没有重复了）')
+  assert.equal(native.notifies, 2, '两次 invoke 两条应答（没有广播）')
+})
+
+test('default 写回失败 ⇒ reject（**不是** resolve 去重后的列表），消息同时点名两半', async() => {
+  const { mod, native } = setup({ rows: DEFAULT_ROWS, writeFailure: true })
+  const error = await mod.bridge.invoke(CHANNEL, 'default').then(
+    () => { throw new Error('不应该 resolve：吞掉写回错误就会让渲染层缓存一份库里并不存在的列表') },
+    err => err,
+  )
+  assert.equal(error.code, 'IPC_HANDLER_FAILED')
+  assert.equal(error.channel, CHANNEL)
+  assert.match(error.message, /读到 3 行成功/)
+  assert.match(error.message, /写回失败/)
+  assert.match(error.message, /已回滚/)
+  assert.match(error.message, /库仍是写回前的 3 行/)
+  assert.match(error.message, /不会\*\*吞掉写回错误/)
+  // 库没被改动（回滚）⇒ 模型还是三行。
+  assert.equal(native.state.rows.length, 3)
+  assert.equal(native.state.merges, 0)
+})
+
+test('非 default（用户歌单）有同样的重复 ⇒ 原样返回全部行、一次合并都不发生', async() => {
+  const rows = DEFAULT_ROWS.map(row => ({ ...row, listId: 'list-1' }))
+  const { mod, native } = setup({ rows })
+  const musics = await mod.bridge.invoke(CHANNEL, 'list-1')
+  assert.deepEqual(musics.map(music => music.id), ['m-1', 'm-2', 'm-3'],
+    '普通歌单永不合并：连重复都要原样返回（去重只属于 default）')
+  assert.equal(native.state.merges, 0)
+  // 模型也没被动过。
+  assert.equal(native.state.rows.length, 3)
 })

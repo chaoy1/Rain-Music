@@ -136,6 +136,12 @@ public class RainMusicIpcPlugin extends Plugin {
         // LEFT JOIN my_list_music_info_order）。**只做纯读**：桌面那一支在 listId='default' 时会去重
         // 并**写回**库（modules/list/index.ts:195-202），本刀不做（做了会把"读失败"与"写失败"压到
         // 同一个 ok 上、无法分辨）；检出重复时只打一条节流警告。写回 + 快照留给下一刀。
+        //
+        // ⚠️ P0-2 第七刀-A 已经把上面"写回"那一半补在**同一个通道文件**里了（default 分支：
+        // 去重 + 单事务写回 + 失败冒泡；写回失败的消息会同时点名"读到 N 行成功"与"写回失败"，
+        // 所以第六刀当时那条"分辨不出"的理由不再成立）。**db_info 快照**仍然没做，留给第七刀-B。
+        // 于是下面这一行的注册点名不变（同一条通道），行为变了 —— 见
+        // RainMusicListMusicGetChannels 的类注释「本刀做的是桌面那四行里的哪几行」。
         RainMusicListMusicGetChannels.register(this);
 
         Logger.info(
