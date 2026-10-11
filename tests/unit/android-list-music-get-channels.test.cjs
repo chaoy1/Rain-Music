@@ -1,10 +1,12 @@
 /**
- * Android 移植 · **P0-2 第六刀 + 第七刀-A（`player_list_music_get`）**
+ * Android 移植 · **P0-2 第六刀 + 第七刀-A + 第七刀-B（`player_list_music_get`）**
  * 的契约 / 接线 / 落点 / 范围回归网。
  *
  * ⚠️ 第六刀那一版是**纯读**；第七刀-A 把 `default` 分支上的"去重合并 + 单事务写回 + 失败冒泡"
- * 补在**同一个通道文件**里，所以本文件里第 9 / 10 两条（纯读守卫、"本刀不做写回"）被改写成
- * **写守卫**与"只做那一半"。行为层面的证据（真 JVM + 手写假 SQLite 跑这一刀的控制流）在
+ * 补在**同一个通道文件**里；第七刀-B 再补上那个事务的**第一步**：**条件**插入一份"合并前身份快照"
+ * （`db_info.playback_queue_startup_restore`，对齐 `dbHelper.ts:337-339`）。所以本文件里第 9 / 10 两条
+ * （写守卫、"只做那一半"）被改写成**五条写语句**与"哪一半做了、哪一半仍不做"。行为层面的证据
+ * （真 JVM + 手写假 SQLite 跑这两刀的控制流，含快照的时序 / 条件 / 回滚）在
  * `tests/unit/android-playback-queue-merge.test.cjs` 里，本文件只做源码形状 / 落点 / 接线 / 范围。
  *
  * ⚠️ 先写清楚这个文件**做不到**什么：本机没有 Android SDK（`docs/android-port-plan.md` §0），
@@ -36,13 +38,15 @@
  * 7. **参数语义**：缺参数 ⇒ 抛错；类型不对 ⇒ 抛错；`null` ⇒ 不查库直接 `[]`；
  * 8. **不假装成功**：库打不开 / 表缺失 / 查询失败 / meta 坏 ⇒ 抛错，代码里没有
  *    "catch 之后返回空数组"的退路；游标在 `finally` 里关；
- * 9. **写守卫**：写只发生在 `default` 的那一个分支里（`overwriteDefaultQueue`）—— 四条写语句
- *    （DELETE ×2 + INSERT ×2）与 `statements.ts` 逐字一致、整段在**同一个事务**里；
- *    非 `default` 的调用**一条写语句都不发**（普通歌单 / temp 永不合并）；
- * 10. **第七刀-A 只做那一半**：`dedupePlaybackQueue` + 单事务写回 + "返回去重后的列表"**已经做了**；
- *     `db_info` 快照（`queueStartupRestorePending` / `playback_queue_startup_restore`）+
- *     `resolvePlaybackQueueRestoreIndex` / `completePlaybackQueueRestore` **仍然一个都没有**
- *     （第七刀-B；桌面那半条链必须能在源码里被指出来）；
+ * 9. **写守卫**：写只发生在 `default` 的那一个分支里（`overwriteDefaultQueue`）—— 五条写语句
+ *    （快照 INSERT + DELETE ×2 + INSERT ×2）与 `statements.ts` / `dbHelper.ts` 逐字一致、
+ *    整段在**同一个事务**里；非 `default` 的调用**一条写语句都不发**（普通歌单 / temp 永不合并）；
+ * 10. **第七刀-A + 第七刀-B 做了哪一半**：`dedupePlaybackQueue` + 单事务写回 +
+ *    "返回去重后的列表" + **同事务、在两条 DELETE 之前条件插入的 `db_info` 合并前快照**
+ *    （键名/列名逐字对齐桌面与 `tables.ts`）**已经做了**；
+ *    `resolvePlaybackQueueRestoreIndex` / `completePlaybackQueueRestore` **仍然一个都没有**
+ *    （Android 侧没有消费者；桌面那半条链必须能在源码里被指出来），
+ *    而且**没有**照抄 `queueStartupRestorePending`（条件由"库里有没有快照"推导）；
  * 11. **范围守卫**：本刀只注册**这 1 条**通道；第五刀的文件仍然只有 2 条、第四刀仍然只有 1 条
  *     （老文件冻结，一行都没改）；
  * 12. **注册真的被调用**：`RainMusicIpcPlugin.load()` 里调 `RainMusicListMusicGetChannels.register(this)`，
@@ -335,10 +339,20 @@ test('一行 = 六个键 id/name/singer/source/interval/meta（没有 listId、�
   assert.ok(!desktopMap.includes('listId:'), '桌面没有把 listId 放进返回值（SQL 也没选它）')
 
   // Java：六个 put，且键名走常量、与 SQL 的列名一致（两个键名都不许出现）。
-  const puts = [...getCode.matchAll(/item\.put\((COLUMN_[A-Z_]+), /g)].map(match => match[1])
+  // ⚠️ 只看 `toJson()`（返回给渲染层那一行）：第七刀-B 的 `toSnapshotJson()` 也 put 三个键，
+  // 但它不属于"返回值"这件东西（它只有 id/name/singer，见下面单独的一条）。
+  const toJsonBody = getCode.slice(getCode.indexOf('JSONObject toJson() throws JSONException'), getCode.indexOf('JSONObject toSnapshotJson()'))
+  const puts = [...toJsonBody.matchAll(/item\.put\((COLUMN_[A-Z_]+), /g)].map(match => match[1])
   assert.deepEqual(puts, [
     'COLUMN_ID', 'COLUMN_NAME', 'COLUMN_SINGER', 'COLUMN_SOURCE', 'COLUMN_INTERVAL', 'COLUMN_META',
   ])
+  // 第七刀-B 的快照元素：**只有** id / name / singer 三个键（顺序也一样，对齐 index.ts:198 那个 map）。
+  const snapshotBody = getCode.slice(getCode.indexOf('JSONObject toSnapshotJson() throws JSONException'), getCode.indexOf('String metaText()'))
+  assert.deepEqual(
+    [...snapshotBody.matchAll(/item\.put\((COLUMN_[A-Z_]+), /g)].map(match => match[1]),
+    ['COLUMN_ID', 'COLUMN_NAME', 'COLUMN_SINGER'],
+    '快照里每个元素只有 id / name / singer（source / interval / meta 不进快照）',
+  )
   for (const [constant, value] of [
     ['COLUMN_ID', 'id'], ['COLUMN_NAME', 'name'], ['COLUMN_SINGER', 'singer'],
     ['COLUMN_SOURCE', 'source'], ['COLUMN_INTERVAL', 'interval'], ['COLUMN_META', 'meta'],
@@ -395,23 +409,25 @@ test('参数形状：裸字符串；缺参数 / 类型不对 ⇒ 抛错；null �
 // 写守卫 / 范围 / 不假装成功
 // ---------------------------------------------------------------------------
 
-test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueue），且四条写语句各只出现一次', () => {
-  // 写入口只有四个 SQL 常量 + 一次 execSQL 调用点；它们必须**全部**落在 overwriteDefaultQueue 里。
+test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueue），且五条写语句各只出现一次', () => {
+  // 写入口只有五个 SQL 常量 + 五次 execSQL 调用点；它们必须**全部**落在 overwriteDefaultQueue 里。
   const writeMethod = getCode.slice(
     getCode.indexOf('private static void overwriteDefaultQueue('),
     getCode.indexOf('private static String writeBackFailureMessage('),
   )
   assert.ok(writeMethod.length > 0, '找不到 overwriteDefaultQueue')
-  const execSqlCalls = [...getCode.matchAll(/db\.execSQL\(([A-Z_]+)/g)].map(match => match[1])
+  // ⚠️ 允许 `execSQL(` 与语句常量之间有空白（快照那一句参数较长，Java 侧换行了）。
+  const execSqlCalls = [...getCode.matchAll(/db\.execSQL\(\s*([A-Z_]+)/g)].map(match => match[1])
   assert.deepEqual(execSqlCalls, [
+    'SQL_INSERT_QUEUE_RESTORE_SNAPSHOT',
     'SQL_DELETE_MUSIC_INFO_BY_LIST_ID',
     'SQL_DELETE_MUSIC_ORDER_BY_LIST_ID',
     'SQL_INSERT_MUSIC_INFO',
     'SQL_INSERT_MUSIC_ORDER',
-  ], '写语句只有这四条，且顺序 = dbHelper.ts:340-349')
+  ], '写语句只有这五条（第七刀-B 加了快照那条），且顺序 = dbHelper.ts:337-349')
   assert.equal(
-    (writeMethod.match(/db\.execSQL\(/g) ?? []).length, 4,
-    '四条 execSQL 必须都在这一个方法里（读路径上一条写语句都不许有）',
+    (writeMethod.match(/db\.execSQL\(/g) ?? []).length, 5,
+    '五条 execSQL 必须都在这一个方法里（读路径上一条写语句都不许有）',
   )
   // 除了这个方法，别处不许出现 execSQL / compileStatement（"读通道顺手写库"是这一刀唯一的写面）。
   const outside = getCode.replace(writeMethod, '')
@@ -427,6 +443,19 @@ test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueu
     'endTransaction 必须在 finally 里（异常路径也要结束事务，否则连接一直被占着）')
   assert.match(writeMethod, /db\.setTransactionSuccessful\(\);\s*commitStarted = true;/)
 
+  // ⚠️ 第七刀-B：快照那一句必须在 `beginTransaction()` **之后**（同一事务）、两条 DELETE **之前**
+  // （它记的是**合并前**的身份；放到 DELETE 之后记的就是合并后的了）。
+  assert.ok(
+    writeMethod.indexOf('db.beginTransaction();') < writeMethod.indexOf('SQL_INSERT_QUEUE_RESTORE_SNAPSHOT'),
+    '快照必须在 beginTransaction() 之后发出（同一事务）',
+  )
+  assert.ok(
+    writeMethod.indexOf('SQL_INSERT_QUEUE_RESTORE_SNAPSHOT') < writeMethod.indexOf('SQL_DELETE_MUSIC_INFO_BY_LIST_ID'),
+    '快照必须在两条 DELETE **之前**',
+  )
+  assert.match(writeMethod, /if \(!hasQueueRestoreSnapshot\(db\)\) \{[\s\S]{0,200}?SQL_INSERT_QUEUE_RESTORE_SNAPSHOT/,
+    '"仅在 db_info 里还没有快照时"这个条件必须真的写在那一句外面')
+
   // 触发条件：default + 去重真删掉了元素；没有重复时**一条写语句都不发**。
   assert.match(getCode, /if \(!LIST_ID_DEFAULT\.equals\(listId\)\) \{\s*return readListMusics\(context, listId, false\);/)
   assert.match(getCode, /List<RainMusicPlaybackQueueKey\.MusicRow> duplicates =\s*RainMusicPlaybackQueueKey\.findDuplicates\(keyRows\);/)
@@ -438,14 +467,15 @@ test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueu
   assert.ok(!getCode.includes('getSharedPreferences'), '这不走 SharedPreferences')
   // 不广播任何东西：这条通道没有"变更通知"这种出口。
   assert.ok(!getCode.includes('emit'), '这条通道不广播')
-  // 游标在 finally 里关（两条路径都不漏）。
-  assert.equal((getCode.match(/finally \{\s*if \(cursor != null\) cursor\.close\(\);/g) ?? []).length, 1)
+  // 游标在 finally 里关（两条路径都不漏）：读歌单那条 + 快照存在性检查那条（第七刀-B 的第二个游标）。
+  assert.equal((getCode.match(/finally \{\s*if \(cursor != null\) cursor\.close\(\);/g) ?? []).length, 2,
+    '两个游标（读行、查快照在不在）都要在 finally 里关')
   // 进程级连接不关、也不碰 DB 层的私有单例。
   assert.ok(!getCode.includes('RainMusicDatabase.helper'))
   assert.ok(!/RainMusicDatabase[\s\S]{0,80}?\.close\(\)/.test(getCode), '不许关掉进程级连接')
 })
 
-test('第七刀-A 只做"去重 + 写回"那一半：db_info 快照与恢复标志一个都没有（第七刀-B）', () => {
+test('第七刀-A + 第七刀-B：快照那一半也补上了（同事务、条件插入），只有两个收尾函数仍然不做', () => {
   // 桌面的写回：dedupePlaybackQueue → overwriteMusicInfo（含 db_info 快照 + 删 + 插、同一个事务）。
   assert.match(listIndexTs, /export const getListMusics = async\(listId: string\): Promise<Rain\.Music\.MusicInfo\[\]>/)
   assert.match(listIndexTs, /const merged = dedupePlaybackQueue\(targetList\)/)
@@ -468,20 +498,47 @@ test('第七刀-A 只做"去重 + 写回"那一半：db_info 快照与恢复标�
   const constantsTs = read('src/common/constants.ts')
   assert.match(constantsTs, /DEFAULT: 'default'/)
 
-  // Java 侧：快照与那两个收尾函数**一个都没有**（本刀范围外）。
-  // ⚠️ 必须去掉注释**与字符串字面量**再查：类注释里故意写着这些名字（讲"桌面会做、本刀不做"）。
-  for (const forbidden of [
-    'queueStartupRestorePending', 'resolvePlaybackQueueRestoreIndex',
-    'completePlaybackQueueRestore', 'playback_queue_startup_restore', 'toDBMusicInfo',
-    'QUEUE_RESTORE_SNAPSHOT_KEY', 'TABLE_DB_INFO',
+  // Java 侧：**第七刀-B 已经把快照那一半补上了**（第七刀-A 时这里是一条"一个都没有"的守卫）。
+  // 快照的三件东西必须在：键名常量、存在性查询、快照 INSERT，而且**列名/表名逐字对齐 tables.ts**。
+  assert.equal(
+    javaConstant(getJava, 'QUEUE_RESTORE_SNAPSHOT_KEY'),
+    dbHelperTs.match(/QUEUE_RESTORE_SNAPSHOT_KEY = '([^']*)'/)[1],
+    '快照的 field_name 必须与桌面逐字一致（跨 worker 的持久数据）',
+  )
+  // 表名走 RainMusicDatabase 的常量（不新加字符串字面量），列名写死在 SQL 文本里（同库 SQL_INSERT_SCHEMA_VERSION 的做法）。
+  assert.match(getCode, /RainMusicDatabase\.TABLE_DB_INFO/)
+  const dbInfoDdl = tablesTs.match(/tables\.set\('db_info',\s*`([\s\S]*?)`\)/)[1]
+  assert.deepEqual(
+    [...dbInfoDdl.matchAll(/"(\w+)"\s+(INTEGER|TEXT|REAL|BLOB)/g)].map(match => match[1]),
+    ['id', 'field_name', 'field_value'],
+    'tables.ts:120-127 的 db_info 列清单变了 → 快照那两句要重新核',
+  )
+  for (const [name, expected] of [
+    ['SQL_SELECT_QUEUE_RESTORE_SNAPSHOT', ['field_value', 'main', 'db_info', 'field_name']],
+    ['SQL_INSERT_QUEUE_RESTORE_SNAPSHOT', ['main', 'db_info', 'field_name', 'field_value']],
   ]) {
-    assert.ok(!getCodeNoStrings.includes(forbidden), `本刀不该出现 ${forbidden}（那是第七刀-B）`)
+    assert.deepEqual(
+      [...javaTextBlock(getJava, name).matchAll(/"(\w+)"/g)].map(match => match[1]),
+      expected,
+      `${name} 的表/列名必须逐字对齐 tables.ts:120-127（**不许**新加列，也不许碰自增主键 id）`,
+    )
   }
-  // 也**不许**在事务里插一句写 db_info（那是快照那一刀的形状）。
-  assert.ok(!/INSERT INTO[^;]*db_info/.test(getCodeNoStrings), 'transaction 里只许有那四条语句')
-  // 快照这件事必须在注释与日志里被点名"没做"（否则读代码的人会以为已经对齐了桌面）。
+  // 桌面那两句（出处）逐字钉住（改了桌面就该回来看这两句）。
+  assert.match(dbHelperTs, /SELECT field_value FROM db_info WHERE field_name = \?/)
+  assert.match(dbHelperTs, /INSERT INTO db_info \(field_name, field_value\) VALUES \(\?, \?\)/)
+
+  // 仍然**不做**的那一半：两个收尾函数（Android 侧没有消费者）。
+  // ⚠️ 必须去掉注释**与字符串字面量**再查：类注释里故意写着这些名字（讲"桌面有、本刀不做"）。
+  for (const forbidden of ['resolvePlaybackQueueRestoreIndex', 'completePlaybackQueueRestore', 'toDBMusicInfo']) {
+    assert.ok(!getCodeNoStrings.includes(forbidden), `本刀不做 ${forbidden}（Android 侧没有消费者）`)
+  }
+  // 快照写进去之后必须点名"当前没有消费者 / 只写不读"（否则读代码的人会以为已经收尾了）。
   assert.match(getJava, /第七刀-B/)
-  assert.match(getJava, /本刀\*\*不含\*\* db_info/)
+  assert.match(getJava, /只写不读/)
+  assert.match(getJava, /queueStartupRestorePending/, '类注释里必须点名"为什么不用那个进程内标志"')
+  assert.match(getJava, /快照的条件里没有 \{@code queueStartupRestorePending\} 这一半/)
+  // ⚠️ 而且**不许**照抄那个标志：通道里不许出现可变的静态字段（本文件下面那条用例也守着这一点）。
+  assert.ok(!/[A-Za-z]*queueStartupRestorePending\s*=/.test(getCodeNoStrings), '不许真的声明/赋值那个进程内标志')
 
   // 模块级缓存也没有：每次读都真的查库（桌面会先查 musicLists 缓存）。
   for (const forbidden of ['musicLists', 'userLists', 'rawPoss']) {
@@ -572,10 +629,14 @@ test('不假装成功：库打不开 / 表缺失 / 查询失败 / **写回失败
     'readBareString 之外应有四个 catch：读的两个（rethrow meta 错 / 包成读失败）、写回的一个、parseMeta 的一个')
   // 写回失败有**自己**的消息（不许被 readFailureMessage 包成"读失败"，那正是第六刀当时的顾虑）。
   assert.match(getCode, /private static String writeBackFailureMessage\(/)
-  assert.match(getCode, /writeBackFailureMessage\(listId, readCount, kept\.size\(\), duplicateCount, commitStarted, ex\)/)
+  assert.match(getCode, /writeBackFailureMessage\(\s*listId, readCount, kept\.size\(\), duplicateCount, snapshotInserted, commitStarted, ex\s*\)/)
   for (const phrase of ['读到 ', ' 行成功', '写回失败', '已回滚', '库仍是写回前的 ', '行**']) {
     assert.ok(getJava.includes(phrase), `写回失败的消息里必须点名「${phrase}」`)
   }
+  // 第七刀-B：消息还必须如实点名"快照那一句在不在回滚集合里"（两种分支各有一句）。
+  assert.match(getJava, /快照 INSERT/)
+  assert.match(getJava, /本次\*\*没有\*\*发出快照 INSERT/)
+  assert.match(getJava, /db_info 里也不会留下半份快照/)
   assert.match(getJava, /提交阶段/)
   assert.match(getJava, /不会\*\*吞掉写回错误/)
 })
@@ -602,6 +663,11 @@ test('合并警告：只在 default 上判、节流、说的是"已去重写回"
   assert.match(getJava, /默认播放队列/)
   assert.match(getJava, /已按桌面的规则去重/)
   assert.match(getJava, /在\*\*同一个事务\*\*里写回/)
+  // 第七刀-B：这条警告必须点名"这次事务的第一步是 db_info 快照（条件插入）"，以及"快照只写不读"。
+  assert.match(getJava, /四步对齐 src\/main\/worker\/dbService\/modules\/list\/dbHelper\.ts:337-349/)
+  assert.match(getJava, /只在 db_info 里还没有它时插一份/)
+  assert.match(getJava, /这份快照目前\*\*只写不读\*\*/)
+  assert.match(getJava, /没有\*\* queueStartupRestorePending/)
   // 那条临时警告（说 Android 只读、库还是脏的）必须已经不在 —— 留着它就说谎。
   // ⚠️ 类注释里**故意**引用了它一次（讲"它被替换掉了"），所以这里只看**注释之外**的字符串字面量。
   const stringLiterals = [...getCode.matchAll(/"((?:\\.|[^"\\])*)"/g)].map(match => match[1])
@@ -614,7 +680,7 @@ test('合并警告：只在 default 上判、节流、说的是"已去重写回"
   assert.match(getJava, /logcat 是原生侧唯一/)
   // 调用点在写回**成功之后**（失败会抛出去，不该先报一条"已写回"）。
   const mergeCall = getCode.indexOf('warnQueueMerged(listId, rows.size(), kept.size(), dropped);')
-  const writeCall = getCode.indexOf('overwriteDefaultQueue(db, listId, kept, rows.size(), duplicateCount);')
+  const writeCall = getCode.indexOf('overwriteDefaultQueue(db, listId, kept, rows.size(), duplicateCount, restoreSnapshotText);')
   assert.ok(writeCall > -1 && mergeCall > writeCall, '警告必须在写回成功之后')
   assert.match(getCode, /return merged;/)
   // 只有两处 warn：meta 为 NULL、合并成功。
@@ -843,11 +909,12 @@ test('用 javac + 手写替身把本刀的文件（含没改过的 DB / 注册�
  *   `null` ⇒ 不查库直接 `[]`（Java 在 `open()` 之前短路）；
  * - 返回 `MusicInfo[]`（`meta` 是**对象**）；
  * - 库打不开 / 表缺失 / 查询失败 / meta 坏 ⇒ reject，**绝不** resolve 成 `[]`；
- * - **第七刀-A**：`listId === 'default'` 且**去重真删掉了元素**时（Java `findDuplicates` 非空），
- *   按桌面的 `dedupePlaybackQueue` 去重、把模型改成去重后的样子（等价于那次事务写回）并返回**去重后**
- *   的列表；写回失败（`options.writeFailure`）⇒ reject，消息同时点名"读到 N 行成功"与"写回失败"
- *   （**绝不** resolve 成去重后的列表 —— 那会让渲染层缓存一份库里并不存在的列表）；
- * - 非 `default` 一律原样返回（普通歌单 / temp 永不合并）。
+ * - **第七刀-A + 第七刀-B**：`listId === 'default'` 且**去重真删掉了元素**时（Java `findDuplicates` 非空），
+ *   按桌面的 `dedupePlaybackQueue` 去重、把模型改成去重后的样子（等价于那次事务写回：**第一步**是
+ *   "db_info 里还没有这份快照时插一份合并前的 (id,name,singer) 列表"，然后才是 DELETE ×2 + INSERT ×2N）
+ *   并返回**去重后**的列表；写回失败（`options.writeFailure`）⇒ reject，消息同时点名"读到 N 行成功"与
+ *   "写回失败"（**绝不** resolve 成去重后的列表 —— 那会让渲染层缓存一份库里并不存在的列表）；
+ * - 非 `default` 一律原样返回（普通歌单 / temp 永不合并，也**不碰 db_info**）。
  */
 const makeNativeListMusicGet = (options = {}) => {
   const state = {
@@ -855,6 +922,9 @@ const makeNativeListMusicGet = (options = {}) => {
     failure: options.failure ?? null,
     writeFailure: options.writeFailure ?? false,
     merges: 0,
+    // 这一组接线用例只关心"返回什么 / 抛不抛"，所以这里只记"快照写没写"，
+    // 真正的快照形状由 android-playback-queue-merge.test.cjs 的假 SQLite 跑出来。
+    snapshots: [],
   }
   const native = {
     state,
@@ -903,13 +973,18 @@ const makeNativeListMusicGet = (options = {}) => {
             failed(
               CHANNEL + '：默认播放队列的去重写回失败（"listId"="default"，落点 my_list_music_info / my_list_music_info_order）。' +
               '**读到 ' + readRows.length + ' 行成功**（这一步没有出错），去重要删掉 ' + (readRows.length - merged.length) +
-              ' 条重复、留下 ' + merged.length + ' 条，但**写回失败**：注入的写失败。**已回滚**（同一个事务里的 DELETE ×2 / INSERT ×2×' +
-              merged.length + ' 全部撤销，未标记成功 ⇒ endTransaction 回滚）⇒ **库仍是写回前的 ' + readRows.length + ' 行**。' +
+              ' 条重复、留下 ' + merged.length + ' 条，但**写回失败**：注入的写失败。' +
+              '**已回滚**（未标记成功 ⇒ endTransaction 回滚）。这个事务里的写是：db_info 的快照 INSERT' +
+              '（"playback_queue_startup_restore"，在两条 DELETE 之前） + DELETE my_list_music_info / DELETE ' +
+              'my_list_music_info_order / INSERT ×2×' + merged.length + '，**全部撤销** ⇒ ' +
+              '**库仍是写回前的 ' + readRows.length + ' 行**，db_info 里也不会留下半份快照。' +
               '本通道**不会**吞掉写回错误、把「读到了但没修好」伪装成一次成功的读。',
             )
             return Promise.resolve({ accepted: true })
           }
           // 写回成功：模型变成去重后的样子（等价于"两张表全删 + 逐条插回"）。
+          // 第七刀-B：第一步是条件插入合并前的身份快照（这里只记下来，形状由另一个文件守）。
+          state.snapshots.push(readRows.map(({ id, name, singer }) => ({ id, name, singer })))
           state.merges++
           state.rows = state.rows.filter(row => row.listId !== listId)
             .concat(merged.map(music => ({ ...music, listId })))
@@ -1039,6 +1114,12 @@ test('default 有重复 ⇒ resolve **去重后的**列表；第二次 invoke �
   const first = await mod.bridge.invoke(CHANNEL, 'default')
   assert.deepEqual(first.map(music => music.id), expected, '返回的必须是去重后的列表（桌面 :201 的 targetList = merged）')
   assert.equal(native.state.merges, 1, '第一次读要写回一次')
+  // 第七刀-B：那次合并的第一步记了"合并前的 (id,name,singer) 列表"（含 m-2 那条重复）。
+  assert.deepEqual(native.state.snapshots, [[
+    { id: 'm-1', name: 'Song One', singer: 'Singer A' },
+    { id: 'm-2', name: 'song one', singer: 'singer a' },
+    { id: 'm-3', name: 'Other', singer: 'X' },
+  ]])
 
   // 第二次读：库里已经干净 ⇒ 不再合并（等价于桌面"缓存已热"的那一半语义）。
   const second = await mod.bridge.invoke(CHANNEL, 'default')
@@ -1060,9 +1141,10 @@ test('default 写回失败 ⇒ reject（**不是** resolve 去重后的列表）
   assert.match(error.message, /已回滚/)
   assert.match(error.message, /库仍是写回前的 3 行/)
   assert.match(error.message, /不会\*\*吞掉写回错误/)
-  // 库没被改动（回滚）⇒ 模型还是三行。
+  // 库没被改动（回滚）⇒ 模型还是三行，而且**没有留下快照**（第一步的写也一起撤掉）。
   assert.equal(native.state.rows.length, 3)
   assert.equal(native.state.merges, 0)
+  assert.deepEqual(native.state.snapshots, [], '写回失败 ⇒ 连快照都不该留下（同一事务）')
 })
 
 test('非 default（用户歌单）有同样的重复 ⇒ 原样返回全部行、一次合并都不发生', async() => {
@@ -1072,6 +1154,7 @@ test('非 default（用户歌单）有同样的重复 ⇒ 原样返回全部行�
   assert.deepEqual(musics.map(music => music.id), ['m-1', 'm-2', 'm-3'],
     '普通歌单永不合并：连重复都要原样返回（去重只属于 default）')
   assert.equal(native.state.merges, 0)
-  // 模型也没被动过。
+  // 模型也没被动过，db_info 更是一条都没写（非 default 连快照都不碰）。
   assert.equal(native.state.rows.length, 3)
+  assert.deepEqual(native.state.snapshots, [])
 })

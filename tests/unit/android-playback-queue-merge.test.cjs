@@ -1,28 +1,32 @@
 /**
- * Android 移植 · **P0-2 第七刀-A（`player_list_music_get` 的默认列去重写回）** 的
- * **行为**回归网：用真的 `javac` + 真的 `java` 把这一刀的 Java 控制流**跑起来**。
+ * Android 移植 · **P0-2 第七刀-A（`player_list_music_get` 的默认列去重写回）+
+ * 第七刀-B（同事务的"合并前身份快照"）** 的**行为**回归网：用真的 `javac` + 真的 `java`
+ * 把这两刀的 Java 控制流**跑起来**。
  *
  * ⚠️ 先写清楚这个文件**做不到**什么：
  * <ol>
  *   <li>本机没有 Android SDK（`docs/android-port-plan.md` §0），`android.*` / `org.json` /
  *       `com.getcapacitor.Logger` / `RainMusicIpcPlugin` 全部是**手写替身**；
  *   </li>
- *   <li>替身里那个 {@code SQLiteDatabase} 是一个**手写的假 SQLite**（内存里的两张表 + 真的事务
- *       快照/回滚 + 语句记录 + 失败注入）。它**不是** SQLite：它只实现本通道用到的那两条查询
- *       （`sqlite_master` 存在性检查、那条 `LEFT JOIN`）与四条写语句，语义是**照 SQL 写道**的，
- *       不是从 SQLite 借来的。真正的 SQL 行为（绑定、NULL、`ORDER BY` 的并列、文件锁、
- *       事务在真机上的可见性）只能由 CI 的 `gradlew assembleDebug` → 真机运行来证伪；
+ *   <li>替身里那个 {@code SQLiteDatabase} 是一个**手写的假 SQLite**（内存里的三张表 + 真的事务
+ *       快照/回滚 + 语句记录 + 失败注入）。它**不是** SQLite：它只实现本通道用到的那三条查询
+ *       （`sqlite_master` 存在性检查、那条 `LEFT JOIN`、`db_info` 的快照存在性检查）与五条写语句，
+ *       语义是**照 SQL 写道**的，不是从 SQLite 借来的。真正的 SQL 行为（绑定、NULL、`ORDER BY` 的并列、
+ *       文件锁、事务在真机上的可见性）只能由 CI 的 `gradlew assembleDebug` → 真机运行来证伪；
  *   </li>
- *   <li>所以它证明的是"**这一刀的 Java 控制流**在给定 SQL 行为下是对的"：写只在 default 上发生、
- *       四条语句的顺序、整段在同一个事务里、失败会抛且事务回滚、并发下只合并一次。
+ *   <li>所以它证明的是"**这两刀的 Java 控制流**在给定 SQL 行为下是对的"：写只在 default 上发生、
+ *       五条语句的顺序（**快照 INSERT 在两条 DELETE 之前**）、整段在同一个事务里、失败会抛且
+ *       事务回滚（**连快照那一行一起**）、并发下只合并一次、快照只在"库里还没有"时插一次。
  *       它证明不了"真机上也这样"。
  * </ol>
  *
  * <h2>为什么值得写这一组（而不是只做源码断言）</h2>
  * 这一刀的风险全是**控制流**上的：少了 `beginTransaction` 就变成"删了再插、中途失败留下半个歌单"；
  * 把写回的错误吞掉就变成"渲染层缓存一份库里并不存在的列表"；把合并扩大到非 default 就会在用户
- * 自建歌单里**删歌**。这几件事在源码断言下都能靠"改写但保持关键字"骗过去，而在这里会真的变红
- * （见下面「变异自证」的 5 处）。判定全在 JS 侧的断言里，探针只**如实报告**它观察到的东西。
+ * 自建歌单里**删歌**；**把快照放到 DELETE 之后**就变成"记的是合并后的身份"（那份快照永远无法
+ * 还原去重前的行序）；**把快照挪出事务**就会在合并失败时留下一份脏快照（下次读会以为"已经记过"）。
+ * 这几件事在源码断言下都能靠"改写但保持关键字"骗过去，而在这里会真的变红
+ * （见下面「变异自证」的 10 处）。判定全在 JS 侧的断言里，探针只**如实报告**它观察到的东西。
  *
  * <h2>变异自证（每一处都真的把源码改坏跑过一遍，见汇报）</h2>
  * <ol>
@@ -33,15 +37,28 @@
  *       且返回被去重的列表（用户的歌单会少歌）；</li>
  *   <li><b>去并发保护</b>（去掉 `synchronized (DEFAULT_QUEUE_MERGE_LOCK)`）⇒ 并发读 default 时
  *       发生**两次**写回（writeGroups = 2）；</li>
- *   <li><b>DELETE 与 INSERT 顺序颠倒</b>（先插后删）⇒ 语句序列断言变红，且库里最后是空的。</li>
+ *   <li><b>DELETE 与 INSERT 顺序颠倒</b>（先插后删）⇒ 语句序列断言变红，且库里最后是空的；</li>
+ *   <li><b>快照放到两条 DELETE 之后</b>（第七刀-B）⇒ 语句序列断言变红
+ *       （`ins-db-info` 不再排在 `del-info` 之前）；</li>
+ *   <li><b>去掉"仅在不存在时"</b>（无条件插快照）⇒ 预置了快照的场景会多插一行
+ *       （`ins-db-info` 出现两次 / db_info 行数 = 2）；</li>
+ *   <li><b>快照脱离事务</b>（INSERT 挪到 `beginTransaction()` 之前）⇒ 合并失败时那份快照**留在库里**
+ *       （回滚只覆盖事务快照里的表）；</li>
+ *   <li><b>快照内容用合并后的行</b>（只对 `kept` 采集，或先删再采）⇒ 内容断言变红
+ *       （快照里缺了那些被删掉的重复行 ⇒ 还原不了去重前的行序）；</li>
+ *   <li><b>快照只在非 default 上写 / 完全不写</b>（把那一句挪到 `readListMusics` 的纯读分支）⇒
+ *       default 场景没有 `ins-db-info`、db_info 行数 = 0。</li>
  * </ol>
  *
- * <h2>与桌面源码的关系（三条链都是"照抄"，不是"参考"）</h2>
+ * <h2>与桌面源码的关系（四条链都是"照抄"，不是"参考"）</h2>
  * <ul>
  *   <li>合并规则 = `src/common/utils/playbackQueue.ts:10-22` 的 `dedupePlaybackQueue`
  *       —— 本文件直接 `load()` 真的 TS 实现，用它算**期望**；</li>
- *   <li>事务形状 = `dbHelper.ts:340-349`（DELETE ×2 + INSERT ×2N，同一个事务）；</li>
- *   <li>失败语义 = `tests/unit/playback-queue.test.cjs:212-220`（`assert.rejects` + 回滚 + 行数不变）。</li>
+ *   <li>事务形状 = `dbHelper.ts:337-349`（**条件插快照** + DELETE ×2 + INSERT ×2N，同一个事务）；</li>
+ *   <li>快照内容 = `index.ts:198` 的 `targetList.map(({ id, name, singer }) => ({ id, name, singer }))`
+ *       —— 期望值同样由 JS 侧从**去重前**的行算出来；</li>
+ *   <li>失败语义 = `tests/unit/playback-queue.test.cjs:212-220`（`assert.rejects` + 回滚 + 行数不变；
+ *       那一组同时证明"合并失败 ⇒ 行与快照一起回滚，不留脏快照"）。</li>
  * </ul>
  */
 const assert = require('node:assert/strict')
@@ -60,6 +77,7 @@ const read = relative => fs.readFileSync(path.join(ROOT, relative), 'utf8')
 const getJava = read(path.join(JAVA_REL_DIR, 'RainMusicListMusicGetChannels.java'))
 const statementsTs = read('src/main/worker/dbService/modules/list/statements.ts')
 const dbHelperTs = read('src/main/worker/dbService/modules/list/dbHelper.ts')
+const tablesTs = read('src/main/worker/dbService/tables.ts')
 
 /** 桌面那把 `dedupePlaybackQueue` 的唯一出处（本文件用它算期望值）。 */
 const { dedupePlaybackQueue } = load('src/common/utils/playbackQueue.ts', {}, {})
@@ -102,7 +120,7 @@ const runToFile = (command, args, cwd, logFile) => {
 // 1. SQL：四条写语句 + 那条读语句都必须与桌面逐字一致（不需要 JDK）
 // ---------------------------------------------------------------------------
 
-test('四条写语句逐字对齐 statements.ts（只把具名参数换成 ?），列清单与列顺序一字不改', () => {
+test('五条写语句逐字对齐 statements.ts / dbHelper.ts（只把具名参数换成 ?），列清单与列顺序一字不改', () => {
   // 桌面的四处出处先钉住（引用没写错文件 / 行）。
   const insertMusicInfo = statementsTs.match(
     /createMusicInfoInsertStatement[\s\S]*?db\.prepare<\[Rain\.DBService\.MusicInfo\]>\(`([\s\S]*?)`\)/,
@@ -149,19 +167,72 @@ test('四条写语句逐字对齐 statements.ts（只把具名参数换成 ?）�
   assert.equal((javaTextBlock(getJava, 'SQL_DELETE_MUSIC_INFO_BY_LIST_ID').match(/\?/g) ?? []).length, 1)
   assert.equal((javaTextBlock(getJava, 'SQL_DELETE_MUSIC_ORDER_BY_LIST_ID').match(/\?/g) ?? []).length, 1)
 
-  // 桌子那四步的顺序（DELETE info → DELETE order → INSERT info → INSERT order）在源码里的形状。
+  // ---- 第七刀-B：db_info 的两句（存在性检查 + 快照 INSERT）----
+  // 句子的"出处"是 dbHelper.ts:28 / :338；**列名**的出处是 tables.ts:120-127（db_info 的 DDL）。
+  const dbInfoDdl = tablesTs.match(/tables\.set\('db_info',\s*`([\s\S]*?)`\)/)[1]
+  const dbInfoColumns = [...dbInfoDdl.matchAll(/"(\w+)"\s+(INTEGER|TEXT|REAL|BLOB)/g)].map(match => match[1])
+  assert.deepEqual(dbInfoColumns, ['id', 'field_name', 'field_value'], 'tables.ts 的 db_info 列清单变了 → 本刀的列名要重新核')
+
+  const desktopSnapshotSelect = dbHelperTs.match(/prepare\('(SELECT [^']*FROM db_info WHERE field_name = \?)'\)/)[1]
+  const desktopSnapshotInsert = dbHelperTs.match(/prepare\('(INSERT INTO db_info \(field_name, field_value\) VALUES \(\?, \?\))'\)/)[1]
+  const javaSnapshotSelect = javaTextBlock(getJava, 'SQL_SELECT_QUEUE_RESTORE_SNAPSHOT')
+  const javaSnapshotInsert = javaTextBlock(getJava, 'SQL_INSERT_QUEUE_RESTORE_SNAPSHOT')
+
+  // 列清单与列顺序：从两句 SQL 里各抽出字段名，必须与 tables.ts 的 DDL 逐个相同（顺序也算）。
+  const selectColumns = [...javaSnapshotSelect.matchAll(/"(\w+)"/g)].map(match => match[1])
+  assert.deepEqual(
+    selectColumns,
+    ['field_value', 'main', 'db_info', 'field_name'],
+    'SQL_SELECT_QUEUE_RESTORE_SNAPSHOT 只许出现 db_info 的那三列/表名（列名逐字对齐 tables.ts:120-127）',
+  )
+  const insertColumns = [...javaSnapshotInsert.matchAll(/"(\w+)"/g)].map(match => match[1])
+  assert.deepEqual(
+    insertColumns,
+    ['main', 'db_info', 'field_name', 'field_value'],
+    'SQL_INSERT_QUEUE_RESTORE_SNAPSHOT 的列清单必须是 ("field_name", "field_value")、**不动**自增主键 "id"',
+  )
+  // 与桌面那两句的"语义"逐字相同：表名 db_info + 两个列名 + 参数个数。
+  for (const [javaSql, desktopSql, label] of [
+    [javaSnapshotSelect, desktopSnapshotSelect, '快照存在性检查'],
+    [javaSnapshotInsert, desktopSnapshotInsert, '快照 INSERT'],
+  ]) {
+    const columnsOf = sql => [...sql.matchAll(/"(\w+)"/g)].map(match => match[1]).filter(name => name !== 'main')
+    const desktopColumns = [...desktopSql.matchAll(/(\w+)/g)].map(match => match[1]).filter(name => ['db_info', 'field_name', 'field_value'].includes(name))
+    assert.deepEqual(columnsOf(javaSql), [...new Set(desktopColumns)], `${label} 的表/列名与 dbHelper.ts 那一句对不上`)
+    assert.equal((javaSql.match(/\?/g) ?? []).length, (desktopSql.match(/\?/g) ?? []).length, `${label} 的参数个数对不上`)
+  }
+  // 键名：与桌面 `QUEUE_RESTORE_SNAPSHOT_KEY` 逐字相同（键对不上 = 没有快照）。
+  assert.match(dbHelperTs, /QUEUE_RESTORE_SNAPSHOT_KEY = 'playback_queue_startup_restore'/)
+  assert.equal(
+    getJava.match(/String\s+QUEUE_RESTORE_SNAPSHOT_KEY\s*=\s*"([^"]*)"/)[1],
+    dbHelperTs.match(/QUEUE_RESTORE_SNAPSHOT_KEY = '([^']*)'/)[1],
+    'db_info 的 field_name 必须与桌面逐字一致（这是一份跨 worker 的持久数据）',
+  )
+
+  // 桌子那五步的顺序（快照 INSERT → DELETE info → DELETE order → INSERT info → INSERT order）在源码里的形状。
   const code = stripJavaComments(getJava)
   const body = code.slice(
     code.indexOf('private static void overwriteDefaultQueue('),
     code.indexOf('private static String writeBackFailureMessage('),
   )
-  const sequence = [...body.matchAll(/execSQL\((SQL_[A-Z_]+)/g)].map(match => match[1])
+  // ⚠️ 允许 `execSQL(` 与语句常量之间有空白：快照那一句的参数较长，Java 侧换行了。
+  const sequence = [...body.matchAll(/execSQL\(\s*(SQL_[A-Z_]+)/g)].map(match => match[1])
   assert.deepEqual(sequence, [
+    'SQL_INSERT_QUEUE_RESTORE_SNAPSHOT',
     'SQL_DELETE_MUSIC_INFO_BY_LIST_ID',
     'SQL_DELETE_MUSIC_ORDER_BY_LIST_ID',
     'SQL_INSERT_MUSIC_INFO',
     'SQL_INSERT_MUSIC_ORDER',
-  ], '写回的语句顺序必须与 dbHelper.ts:340-349 一致（先两张表全删，再按 order 逐条插）')
+  ], '写回的语句顺序必须与 dbHelper.ts:337-349 一致（先条件插快照，再两张表全删，再按 order 逐条插）')
+  // ⚠️ 快照那一句必须在**第一条 DELETE 之前**、且在条件里（"仅在不存在时"）。
+  assert.ok(
+    body.indexOf('execSQL(SQL_INSERT_QUEUE_RESTORE_SNAPSHOT') < body.indexOf('execSQL(SQL_DELETE_MUSIC_INFO_BY_LIST_ID'),
+    '快照必须在两条 DELETE **之前**插入：它记的是合并前的身份（放到后面记的就是合并后的了）',
+  )
+  assert.match(body, /if \(!hasQueueRestoreSnapshot\(db\)\) \{\s*db\.execSQL\(\s*SQL_INSERT_QUEUE_RESTORE_SNAPSHOT,/)
+  // 存在性检查走的是 rawQuery + moveToFirst（只判行在不在，与桌面 `!await getPlaybackQueueRestoreSnapshot()` 同形）。
+  assert.match(code, /db\.rawQuery\(\s*SQL_SELECT_QUEUE_RESTORE_SNAPSHOT,\s*new String\[\] \{ QUEUE_RESTORE_SNAPSHOT_KEY \}\s*\)/)
+  assert.match(code, /return cursor\.moveToFirst\(\);/)
   // INSERT info 的绑定数组必须按那句 SQL 的列清单给（id, listId, name, singer, source, interval, meta）。
   assert.match(body, /db\.execSQL\(SQL_INSERT_MUSIC_INFO, row\.insertArgs\(listId\)\);/)
   assert.match(code, /return new Object\[\] \{ id, listId, name, singer, source, interval, metaText\(\) \};/)
@@ -242,16 +313,21 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>那条 {@code LEFT JOIN my_list_music_info_order … ORDER BY O."order" ASC}：逐行按
  *       {@code (listId, musicInfoId)} 找 order 记录（一对多时按 SQL 的语义**展开成多行**，
  *       没有匹配时 {@code order} 为 NULL），再按 {@code order ASC}（NULL 最前）**稳定**排序；</li>
- *   <li>四条写语句（DELETE 两张表的 listId / INSERT 两条记录），并记下顺序；</li>
+ *   <li>{@code db_info} 的**第三张表**（{@code field_name} / {@code field_value}）与那一句
+ *       {@code SELECT "field_value" FROM "main"."db_info" WHERE "field_name"=?}
+ *       —— 第七刀-B 的条件插入要读它（只判行在不在，见 Java 的 {@code hasQueueRestoreSnapshot}）；</li>
+ *   <li>五条写语句（DELETE 两张表的 listId / INSERT 两条记录 / INSERT db_info 快照），并记下顺序；</li>
  *   <li>事务：{@code beginTransaction} 拍快照、{@code setTransactionSuccessful} 标记、
  *       {@code endTransaction} 未标记则回滚（与 SQLite 的语义一致）；事务之间**串行**（真 SQLite
- *       的主连接也是同一时刻只跑一个事务）；</li>
+ *       的主连接也是同一时刻只跑一个事务）。⚠️ 事务快照**包含第三张表** —— 这正是"快照那一行
+ *       也必须跟着回滚"能被本文件证明的原因；</li>
  *   <li>失败注入：第 N 条写语句抛错（{@code failAt}）、提交阶段抛错（{@code failOnEndTransaction}）；</li>
  *   <li>并发闸门（{@code gateEnabled}）：那条 SELECT 会等第二个读者到齐（最多 750ms）——
  *       用来把"两次并发读都读到脏队列"这个交错**确定性地**造出来，见 JS 侧的并发用例。</li>
  * </ul>
  *
- * <p>⚠️ 它**不是** SQLite：列类型、绑定、NULL、并列排序、文件锁全都没有真实现。
+ * <p>⚠️ 它**不是** SQLite：列类型、绑定、NULL、并列排序、文件锁、{@code db_info."id"} 的自增
+ * 全都没有真实现（这里只存 {@code field_name} / {@code field_value} 两列，不建模主键）。
  * 这里证明的是"Java 控制流 + 我写下的这套 SQL 语义"，不是"真机上的 SQLite"。
  */
 public class SQLiteDatabase {
@@ -292,8 +368,20 @@ public class SQLiteDatabase {
         }
     }
 
+    /** {@code db_info} 的一行（本文件只建模那两列；真表还有一个自增主键 {@code id}）。 */
+    public static final class DbInfo {
+        public final String fieldName;
+        public final String fieldValue;
+
+        DbInfo(String fieldName, String fieldValue) {
+            this.fieldName = fieldName;
+            this.fieldValue = fieldValue;
+        }
+    }
+
     public final List<Info> infos = new ArrayList<>();
     public final List<Order> orders = new ArrayList<>();
+    public final List<DbInfo> dbInfos = new ArrayList<>();
     /** 每一条写语句的名字 + 主键，按执行顺序（用来断言语句顺序与"一条都没发"）。 */
     public final List<String> ops = new ArrayList<>();
     public int transactionCount = 0;
@@ -307,6 +395,7 @@ public class SQLiteDatabase {
     private final ReentrantLock transactionLock = new ReentrantLock();
     private List<Info> txInfos = null;
     private List<Order> txOrders = null;
+    private List<DbInfo> txDbInfos = null;
     private boolean txMarked = false;
     private final CountDownLatch gate = new CountDownLatch(2);
     private volatile boolean gateDisarmed = false;
@@ -321,8 +410,27 @@ public class SQLiteDatabase {
         synchronized (modelLock) { orders.add(new Order(listId, musicInfoId, order)); }
     }
 
+    /** 预置一行 {@code db_info}（JS 侧用它造"库里已经有快照"的场景）。 */
+    public void addDbInfo(String fieldName, String fieldValue) {
+        synchronized (modelLock) { dbInfos.add(new DbInfo(fieldName, fieldValue)); }
+    }
+
     public int modelCount() {
         synchronized (modelLock) { return infos.size(); }
+    }
+
+    /** {@code db_info} 的行数（第七刀-B：正常情况下是 0 或 1）。 */
+    public int dbInfoCount() {
+        synchronized (modelLock) { return dbInfos.size(); }
+    }
+
+    /** {@code field_name|field_value}（用来断言快照的内容，不去解析 JSON）。 */
+    public List<String> dbInfoRows() {
+        synchronized (modelLock) {
+            List<String> rows = new ArrayList<>();
+            for (DbInfo info : dbInfos) rows.add(info.fieldName + "|" + info.fieldValue);
+            return rows;
+        }
     }
 
     /** {@code id|order|meta|name|singer|source|interval}（interval 为 SQL NULL 时是 "-"；meta 为 SQL NULL 时是 "-"）。 */
@@ -355,6 +463,17 @@ public class SQLiteDatabase {
             List<String[]> rows = new ArrayList<>();
             rows.add(new String[] { selectionArgs[0] });
             return new FakeCursor(Arrays.asList("name"), rows);
+        }
+        if (sql.contains("FROM \"main\".\"db_info\"")) {
+            // 第七刀-B 的快照存在性检查：只回答"有没有这一行"（列清单与 Java 的那句一致）。
+            String fieldName = selectionArgs[0];
+            List<String[]> rows = new ArrayList<>();
+            synchronized (modelLock) {
+                for (DbInfo info : dbInfos) {
+                    if (info.fieldName.equals(fieldName)) rows.add(new String[] { info.fieldValue });
+                }
+            }
+            return new FakeCursor(Arrays.asList("field_value"), rows);
         }
         if (sql.contains("LEFT JOIN my_list_music_info_order")) {
             gate();
@@ -394,6 +513,7 @@ public class SQLiteDatabase {
         if (failAt > 0 && ops.size() + 1 == failAt) {
             throw new SQLiteException("注入的写失败（第 " + failAt + " 条写语句：" + normalized + "）");
         }
+        boolean dbInfoTable = normalized.contains("\"db_info\"");
         boolean orderTable = normalized.contains("my_list_music_info_order");
         if (normalized.startsWith("DELETE")) {
             String listId = (String) bindArgs[0];
@@ -415,7 +535,11 @@ public class SQLiteDatabase {
         }
         if (normalized.startsWith("INSERT")) {
             synchronized (modelLock) {
-                if (orderTable) {
+                if (dbInfoTable) {
+                    // 第七刀-B：INSERT INTO "main"."db_info" ("field_name", "field_value") VALUES (?, ?)
+                    dbInfos.add(new DbInfo((String) bindArgs[0], (String) bindArgs[1]));
+                    ops.add("ins-db-info:" + bindArgs[0]);
+                } else if (orderTable) {
                     orders.add(new Order((String) bindArgs[0], (String) bindArgs[1], ((Number) bindArgs[2]).intValue()));
                     ops.add("ins-order:" + bindArgs[1]);
                 } else {
@@ -436,6 +560,9 @@ public class SQLiteDatabase {
         synchronized (modelLock) {
             txInfos = new ArrayList<>(infos);
             txOrders = new ArrayList<>(orders);
+            // ⚠️ 事务快照**必须**包含 db_info：否则"合并失败 ⇒ 快照那一行也回滚"就证明不了
+            // （真 SQLite 的事务覆盖同一连接上的所有表）。
+            txDbInfos = new ArrayList<>(dbInfos);
         }
         txMarked = false;
         transactionCount++;
@@ -455,6 +582,7 @@ public class SQLiteDatabase {
         } finally {
             txInfos = null;
             txOrders = null;
+            txDbInfos = null;
             transactionLock.unlock();
         }
     }
@@ -467,6 +595,8 @@ public class SQLiteDatabase {
             infos.addAll(txInfos);
             orders.clear();
             orders.addAll(txOrders);
+            dbInfos.clear();
+            dbInfos.addAll(txDbInfos);
         }
     }
 
@@ -944,6 +1074,9 @@ public final class RainMusicQueueMergeProbe {
                     parts[7].equals("-") ? null : parts[7]);
             } else if (key.equals("order")) {
                 db.addOrder(parts[1], parts[2], Integer.parseInt(parts[3]));
+            } else if (key.equals("snapshot")) {
+                // 预置一行 db_info（第七刀-B：造"库里已经有快照"的场景）。
+                db.addDbInfo(parts[1], parts[2]);
             } else if (key.equals("failAt")) {
                 db.failAt = Integer.parseInt(parts[1]);
             } else if (key.equals("failKind")) {
@@ -974,6 +1107,10 @@ public final class RainMusicQueueMergeProbe {
         report.append("writeGroups\t").append(db.writeGroups).append('\n');
         report.append("modelCount\t").append(db.modelCount()).append('\n');
         for (String row : db.modelRows()) report.append("modelRow\t").append(row).append('\n');
+        // 第七刀-B：db_info 的行数 + 每一行（field_name|field_value），以及快照那一条语句发了几次。
+        report.append("dbInfoCount\t").append(db.dbInfoCount()).append('\n');
+        for (String row : db.dbInfoRows()) report.append("dbInfoRow\t").append(row).append('\n');
+        report.append("snapshotInserts\t").append(countInserts(db.ops, "ins-db-info:")).append('\n');
         for (String message : Logger.messages("WARN")) report.append("warn\t").append(flatten(message)).append('\n');
         report.append("infoLog\t").append(flatten(Logger.lastInfo())).append('\n');
     }
@@ -1070,6 +1207,13 @@ public final class RainMusicQueueMergeProbe {
         return value.replace("\r", " ").replace("\n", " ");
     }
 
+    /** 数一数某类写语句发了几次（第七刀-B：快照那一条必须是 0 或 1）。 */
+    private static int countInserts(List<String> ops, String prefix) {
+        int count = 0;
+        for (String op : ops) if (op.startsWith(prefix)) count++;
+        return count;
+    }
+
     private static final class FakeContext extends android.content.Context {
         @Override public android.content.Context getApplicationContext() { return this; }
         @Override public File getDatabasePath(String name) {
@@ -1100,6 +1244,19 @@ after(() => {
 const infoLine = (id, listId, name, singer, source, interval, meta) =>
   ['info', id, listId, name, singer, source, interval === null ? '-' : interval, meta === null ? '-' : meta].join('\t')
 const orderLine = (listId, musicInfoId, order) => ['order', listId, musicInfoId, String(order)].join('\t')
+/** 场景文件的一行：snapshot（第七刀-B）—— 预置一行 db_info。 */
+const snapshotLine = (fieldName, fieldValue) => ['snapshot', fieldName, fieldValue].join('\t')
+
+/** 桌面 `QUEUE_RESTORE_SNAPSHOT_KEY`（`dbHelper.ts:24`）：用例里不重复写死，从源码里读。 */
+const SNAPSHOT_KEY = dbHelperTs.match(/QUEUE_RESTORE_SNAPSHOT_KEY = '([^']*)'/)[1]
+
+/**
+ * 第七刀-B 的**期望快照文本**：桌面 `index.ts:198` 的
+ * `targetList.map(({ id, name, singer }) => ({ id, name, singer }))` + `JSON.stringify(...)`。
+ *
+ * ⚠️ 入参必须是**去重前**的行（桌面那个 `targetList` 就是去重前读到的全部行）。
+ */
+const expectedSnapshot = rows => JSON.stringify(rows.map(({ id, name, singer }) => ({ id, name, singer })))
 
 /**
  * 那条 `LEFT JOIN … ORDER BY O."order" ASC` 在 JS 侧的**同一份语义**（期望值要用它）：
@@ -1265,15 +1422,32 @@ test('default 有重复 ⇒ 去重 + 单事务写回：语句顺序、写回的 
       '返回值必须只有那六个键（没有 listId、没有 order）')
   })
 
-  // 2) 语句顺序 = dbHelper.ts:340-349（两张表全删 → 按 order 逐条插）。
-  const expectedOps = ['del-info', 'del-order']
+  // 2) 语句顺序 = dbHelper.ts:337-349（**先条件插快照** → 两张表全删 → 按 order 逐条插）。
+  const expectedOps = [`ins-db-info:${SNAPSHOT_KEY}`, 'del-info', 'del-order']
   kept.forEach(music => expectedOps.push(`ins-info:${music.id}`, `ins-order:${music.id}`))
   assert.deepEqual(first(section, 'ops').split(','), expectedOps,
-    '写语句的顺序/条数必须与 dbHelper.ts:340-349 一致（先两张表全删，再逐条 INSERT info + INSERT order）')
+    '写语句的顺序/条数必须与 dbHelper.ts:337-349 一致（先条件插快照，再两张表全删，再逐条 INSERT info + INSERT order）')
 
   // 3) 一个事务、一次合并。
-  assert.equal(first(section, 'txCount'), '1', '整段写回必须只开一个事务')
+  assert.equal(first(section, 'txCount'), '1', '整段写回（含快照）必须只开一个事务')
   assert.equal(first(section, 'writeGroups'), '1')
+
+  // 3b) 第七刀-B：**合并前**的快照 = 去重前的 (id, name, singer) 列表，**只插了一行**。
+  assert.equal(first(section, 'snapshotInserts'), '1', '同一次合并里快照只许插一次')
+  assert.equal(first(section, 'dbInfoCount'), '1', 'db_info 里只该有这一行快照')
+  assert.deepEqual(lines(section, 'dbInfoRow'), [`${SNAPSHOT_KEY}|${expectedSnapshot(joined)}`],
+    '快照内容必须是**合并前**的 (id, name, singer) 列表（桌面 index.ts:198），含那些马上被删掉的重复行')
+  // 快照里**不许**出现 source / interval / meta（桌面那个 map 只挑三列），也不许出现 listId。
+  const snapshotText = lines(section, 'dbInfoRow')[0].slice(SNAPSHOT_KEY.length + 1)
+  assert.equal(snapshotText, expectedSnapshot(joined))
+  assert.deepEqual(
+    JSON.parse(snapshotText).map(record => Object.keys(record)),
+    joined.map(() => ['id', 'name', 'singer']),
+    '快照里每个元素只有 id / name / singer 三个键（顺序也是这三个）',
+  )
+  // 它与"返回给渲染层的那份"**不同**：去重前的 6 行 vs 去重后的 3 行。
+  assert.equal(JSON.parse(snapshotText).length, joined.length)
+  assert.notEqual(JSON.parse(snapshotText).length, kept.length)
 
   // 4) 库里的最终状态 = kept，且 order 重新编号成 0..N-1（桌面 toDBMusicInfo 的 offset + index）。
   const modelRows = lines(section, 'modelRow')
@@ -1295,9 +1469,14 @@ test('default 有重复 ⇒ 去重 + 单事务写回：语句顺序、写回的 
   assert.match(warns[0], /里有 3 条重复（共 6 行）/)
   assert.match(warns[0], /6 → 3 行/)
   assert.ok(!/只读、不写回/.test(warns[0]), '那条说谎的临时 warn 必须已经不在')
-  assert.match(warns[0], /db_info/, '必须点名"快照还没做"这件事')
+  assert.match(warns[0], /db_info/, '必须点名 db_info 那份快照（它现在是这次事务的第一步）')
+  assert.match(warns[0], /playback_queue_startup_restore/, '必须点名快照的键名')
+  assert.match(warns[0], /只在 db_info 里还没有它时插一份/, '必须说清"仅在不存在时"这个条件')
+  assert.match(warns[0], /queueStartupRestorePending/, '必须点名"没有那个进程内标志"这处差异')
   assert.ok(!/只读/.test(first(section, 'infoLog')), 'register 的日志不该还说"写回未做"')
   assert.match(first(section, 'infoLog'), /第七刀-A/)
+  assert.match(first(section, 'infoLog'), /第七刀-B/)
+  assert.ok(!/快照仍未做/.test(first(section, 'infoLog')), 'register 的日志不该还说"快照没做"')
 })
 
 // ---------------------------------------------------------------------------
@@ -1335,6 +1514,10 @@ test('非 default（用户歌单 / temp）：同样的重复也一条写语句�
   assert.equal(first(section, 'writeGroups'), '0')
   assert.equal(first(section, 'modelCount'), String(infos.length), '库必须一行都没变')
   assert.equal(lines(section, 'modelRow').length, infos.length)
+  // 第七刀-B：非 default 连 db_info 都不许碰（快照只属于 default 的合并）。
+  assert.equal(first(section, 'dbInfoCount'), '0')
+  assert.equal(first(section, 'snapshotInserts'), '0')
+  assert.deepEqual(lines(section, 'dbInfoRow'), [])
   assert.deepEqual(lines(section, 'warn'), [], '非 default 不该有合并日志')
 })
 
@@ -1351,13 +1534,13 @@ const FAIL_INFOS = [
 ]
 const FAIL_ORDERS = [['default', 'f-1', 0], ['default', 'f-2', 1], ['default', 'f-3', 2], ['default', 'f-4', 3]]
 
-test('写回失败（第 3 条写语句就炸）⇒ 整条 ok:false：消息同时点名"读到 N 行成功"与"写回失败"，且事务回滚', { skip: SKIP_REASON }, () => {
+test('写回失败（第 4 条写语句就炸）⇒ 整条 ok:false：消息同时点名"读到 N 行成功"与"写回失败"，且事务回滚（**快照也一起回滚**）', { skip: SKIP_REASON }, () => {
   const report = runScenarios([
     '### write-fails',
     ...FAIL_INFOS.map(row => infoLine(...row)),
     ...FAIL_ORDERS.map(row => orderLine(...row)),
     'failKind\tnone',
-    'failAt\t3', // del-info(1) → del-order(2) → 第一条 INSERT info(3) 抛错
+    'failAt\t4', // 快照 INSERT(1) → del-info(2) → del-order(3) → 第一条 INSERT info(4) 抛错
     'gate\tfalse',
     'listId\tdefault',
   ])
@@ -1366,13 +1549,17 @@ test('写回失败（第 3 条写语句就炸）⇒ 整条 ok:false：消息同�
   assert.equal(first(section, 'errorClass'), 'java.lang.IllegalStateException')
   const message = first(section, 'errorMessage')
 
-  // 五件必须点名的事：读到 N 行成功 / 写回失败 / 已回滚 / 库仍是 N 行 / 原始异常。
+  // 六件必须点名的事：读到 N 行成功 / 写回失败 / 已回滚 / 库仍是 N 行 / 快照那一句在回滚集合里 / 原始异常。
   assert.match(message, /读到 4 行成功/)
   assert.match(message, /写回失败/)
   assert.match(message, /已回滚/)
   assert.match(message, /库仍是写回前的 4 行/)
   assert.match(message, /注入的写失败/)
   assert.match(message, /不会\*\*吞掉写回错误/)
+  // 第七刀-B：快照那一句已经发出（它在两条 DELETE 之前）⇒ 消息必须说它也在回滚集合里。
+  assert.match(message, /快照 INSERT/)
+  assert.match(message, new RegExp(SNAPSHOT_KEY))
+  assert.ok(!/本次\*\*没有\*\*发出快照 INSERT/.test(message), '快照已经发过了，消息不许说没发')
   // 它**不许**被包成"读失败"（那正是第六刀当时不肯做写回的理由）。
   assert.ok(!message.includes('读 "my_list_music_info" 失败'), `写回失败不能被误报成读失败：${message}`)
 
@@ -1383,8 +1570,48 @@ test('写回失败（第 3 条写语句就炸）⇒ 整条 ok:false：消息同�
     FAIL_INFOS.map(([id, , name, singer, source, interval, meta], index) =>
       [id, index, JSON.stringify(JSON.parse(meta)), name, singer, source, interval ?? '-'].join('|')),
   )
+  // ⚠️ 第七刀-B 的关键：**不留脏快照**（快照 INSERT 明明已经发出去了，回滚必须把它一起撤掉）。
+  assert.equal(first(section, 'snapshotInserts'), '1', '快照那一句确实发出去了（否则这条断言证明不了什么）')
+  assert.equal(first(section, 'dbInfoCount'), '0', '合并失败 ⇒ 快照那一行必须跟着回滚，不留脏快照')
+  assert.deepEqual(lines(section, 'dbInfoRow'), [])
+
   assert.equal(first(section, 'txCount'), '1', '失败路径也必须只开一个事务（那次事务负责回滚）')
   assert.deepEqual(lines(section, 'warn'), [], '失败不该同时又打一条"已写回"的 warn（那会让 logcat 说谎）')
+})
+
+test('快照那一句自己失败（第 1 条写语句就炸）⇒ 整次合并失败：行一行都没动、db_info 里也没有留下快照', { skip: SKIP_REASON }, () => {
+  const report = runScenarios([
+    '### snapshot-fails',
+    ...FAIL_INFOS.map(row => infoLine(...row)),
+    ...FAIL_ORDERS.map(row => orderLine(...row)),
+    'failKind\tnone',
+    'failAt\t1', // 第 1 条写语句就是快照 INSERT
+    'gate\tfalse',
+    'listId\tdefault',
+  ])
+  const section = report['snapshot-fails']
+  assert.equal(first(section, 'result'), 'error',
+    '快照插入失败必须让整次合并失败（同一事务 ⇒ 一起回滚；与桌面 dbHelper.ts:337-339 位置相同）')
+  const message = first(section, 'errorMessage')
+  assert.match(message, /读到 4 行成功/)
+  assert.match(message, /写回失败/)
+  assert.match(message, /已回滚/)
+  assert.match(message, /库仍是写回前的 4 行/)
+  assert.match(message, /注入的写失败/)
+  // 失败发生在快照那一句上 ⇒ 消息必须如实说"本次没有发出快照 INSERT"，而不是硬说它在回滚集合里。
+  assert.match(message, /本次\*\*没有\*\*发出快照 INSERT/)
+  // 库：一行都没动（连 DELETE 都没轮到），db_info 里也没有快照。
+  assert.equal(first(section, 'modelCount'), '4')
+  assert.deepEqual(
+    lines(section, 'modelRow'),
+    FAIL_INFOS.map(([id, , name, singer, source, interval, meta], index) =>
+      [id, index, JSON.stringify(JSON.parse(meta)), name, singer, source, interval ?? '-'].join('|')),
+  )
+  assert.equal(first(section, 'writeGroups'), '0', '连 del-info 都没发出去')
+  assert.equal(first(section, 'dbInfoCount'), '0')
+  assert.equal(first(section, 'snapshotInserts'), '0')
+  assert.equal(first(section, 'txCount'), '1', '事务已经开了（快照那句就在里面），由它回滚')
+  assert.deepEqual(lines(section, 'warn'), [])
 })
 
 test('提交阶段失败（endTransaction 抛）⇒ 消息**不**声称"已回滚 / 库仍是 N 行"（那会是一句无法证明的话）', { skip: SKIP_REASON }, () => {
@@ -1405,6 +1632,7 @@ test('提交阶段失败（endTransaction 抛）⇒ 消息**不**声称"已回�
   assert.match(message, /提交阶段/)
   assert.ok(!message.includes('已回滚'), '提交阶段失败时不能声称已经回滚')
   assert.ok(!/库仍是写回前的/.test(message), '提交阶段失败时不能声称库还是 N 行')
+  assert.ok(!/db_info 里也不会留下半份快照/.test(message), '提交阶段失败时同样不能声称"没有留下脏快照"')
 })
 
 test('并发两次读 default：只合并**一次**（第二次读到的是已经干净的行）', { skip: SKIP_REASON }, () => {
@@ -1431,9 +1659,22 @@ test('并发两次读 default：只合并**一次**（第二次读到的是已�
     '并发下必须只合并一次（专用锁从 SELECT 之前开始）；=2 说明两次读都拿到脏队列、各写了一遍')
   assert.equal(first(section, 'txCount'), '1', '只有一次写回 ⇒ 只开一个事务')
   assert.deepEqual(first(section, 'ops').split(','), [
+    `ins-db-info:${SNAPSHOT_KEY}`,
     'del-info', 'del-order', 'ins-info:c-1', 'ins-order:c-1', 'ins-info:c-3', 'ins-order:c-3',
   ])
   assert.equal(first(section, 'modelCount'), '2')
+  // 第七刀-B 的并发要求：同一次合并里快照只插一次（两把读被锁排成先后 ⇒ 后到的看见快照就跳过）。
+  assert.equal(first(section, 'snapshotInserts'), '1', '并发下快照也只许插一行')
+  assert.equal(first(section, 'dbInfoCount'), '1')
+  // 写进去的是"第一次读到的合并前列表"（顺序 = 那一次 SELECT 的行序，含那条重复的 c-2）。
+  assert.deepEqual(
+    lines(section, 'dbInfoRow'),
+    [`${SNAPSHOT_KEY}|${expectedSnapshot([
+      { id: 'c-1', name: 'Song', singer: 'Singer' },
+      { id: 'c-2', name: 'song', singer: 'singer' },
+      { id: 'c-3', name: 'Other', singer: 'X' },
+    ])}`],
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1459,6 +1700,7 @@ test('**将被删掉的**重复行 meta 是坏的 ⇒ 整条读失败（桌面�
   assert.match(first(section, 'errorMessage'), /不是合法的 JSON 对象/)
   assert.equal(first(section, 'ops'), '', '读都失败了，一条写语句都不该发')
   assert.equal(first(section, 'modelCount'), '2', '库必须一行都没变')
+  assert.equal(first(section, 'dbInfoCount'), '0', '读失败时连快照都不该写（那一句在写回事务里）')
 })
 
 test('NULL 列：interval 为 SQL NULL ⇒ 返回 JSON null 且写回绑 NULL；meta 为 SQL NULL ⇒ 写回文本 "null"', { skip: SKIP_REASON }, () => {
@@ -1484,6 +1726,16 @@ test('NULL 列：interval 为 SQL NULL ⇒ 返回 JSON null 且写回绑 NULL；
   // 写回：interval 绑 NULL（模型里是 "-"），meta 写作文本 "null"（模型里是 null 这个 4 字面量）——
   // 后者正是桌面的 JSON.stringify(null) ⇒ "null"。
   assert.deepEqual(lines(section, 'modelRow'), ['n-1|0|null|Song|Singer|wy|-'])
+  // 第七刀-B：快照取的是"读到的行"（含被删掉的 n-2），**不是**合并后的那一行。
+  assert.deepEqual(
+    lines(section, 'dbInfoRow'),
+    [`${SNAPSHOT_KEY}|${expectedSnapshot([
+      { id: 'n-1', name: 'Song', singer: 'Singer' },
+      { id: 'n-2', name: 'song', singer: 'singer' },
+    ])}`],
+    'NULL 列不影响快照：它是合并前的 (id,name,singer) 列表（两行都在）',
+  )
+  assert.equal(first(section, 'snapshotInserts'), '1')
 })
 
 test('随机语料（确定性种子）180 行：Java 去重后的返回值与库里写的行 == JS dedupePlaybackQueue 的结果', { skip: SKIP_REASON }, () => {
@@ -1543,4 +1795,75 @@ test('随机语料（确定性种子）180 行：Java 去重后的返回值与�
     const meta = returnedRows[index].slice(returnedRows[index].indexOf('|meta=') + 6)
     assert.deepEqual(JSON.parse(meta), JSON.parse(music.metaText), `第 ${index} 行的 meta 值与读到的不一致`)
   })
+  // 第七刀-B：180 行的语料上，快照也必须等于"去重前的 (id,name,singer) 列表"。
+  // ⚠️ 这里比的是 **JSON 语义**（不是文本）：语料里有全角/中日文/不间断空格，JS 与 org.json 的
+  // 转义取舍在文本层面不保证逐字节相同（见 Java 类注释「未验证」第 1 条）。
+  assert.equal(first(section, 'snapshotInserts'), '1')
+  assert.equal(first(section, 'dbInfoCount'), '1')
+  const snapshotRow = lines(section, 'dbInfoRow')[0]
+  assert.ok(snapshotRow.startsWith(`${SNAPSHOT_KEY}|`), snapshotRow)
+  assert.deepEqual(
+    JSON.parse(snapshotRow.slice(SNAPSHOT_KEY.length + 1)),
+    JSON.parse(expectedSnapshot(joined)),
+    '快照必须等于去重前的 (id,name,singer) 列表（顺序也算）',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// 7. 第七刀-B：快照的"仅在不存在时"（条件的那一半）
+// ---------------------------------------------------------------------------
+
+/**
+ * 这一组的语料与上面同一批失败用例（4 行 1 条重复），只多一件事：**预置一行 db_info**。
+ *
+ * 它要证明的是 {@code !hasQueueRestoreSnapshot(db)} 那个条件真的在生效：
+ * 库里已经有快照 ⇒ **不再插**、也**不覆盖**（桌面 `dbHelper.ts:337` 的
+ * `!await getPlaybackQueueRestoreSnapshot()`；本文件用"库里有没有"代替 `queueStartupRestorePending`）。
+ */
+test('db_info 里已经有快照 ⇒ 这次合并不插第二份、也不覆盖已有那一行（条件的那一半）', { skip: SKIP_REASON }, () => {
+  const existing = JSON.stringify([{ id: 'old-1', name: 'Old', singer: 'Previous' }])
+  const report = runScenarios([
+    '### snapshot-exists',
+    ...FAIL_INFOS.map(row => infoLine(...row)),
+    ...FAIL_ORDERS.map(row => orderLine(...row)),
+    snapshotLine(SNAPSHOT_KEY, existing),
+    'failKind\tnone',
+    'failAt\t0',
+    'gate\tfalse',
+    'listId\tdefault',
+  ])
+  const section = report['snapshot-exists']
+  assert.equal(first(section, 'result'), 'ok', `合并不该失败：${optionalFirst(section, 'errorMessage')}`)
+  // 合并本身照旧发生（去重 + 写回），只是不再写快照。
+  assert.equal(first(section, 'writeGroups'), '1')
+  assert.equal(first(section, 'modelCount'), '3')
+  assert.deepEqual(first(section, 'ops').split(','), [
+    'del-info', 'del-order',
+    'ins-info:f-1', 'ins-order:f-1', 'ins-info:f-3', 'ins-order:f-3', 'ins-info:f-4', 'ins-order:f-4',
+  ], '已经有快照 ⇒ 写语句里**不该**有 ins-db-info')
+  // 关键：快照还是原来那一行（既没重复、也没被这次合并的身份覆盖）。
+  assert.equal(first(section, 'snapshotInserts'), '0')
+  assert.equal(first(section, 'dbInfoCount'), '1')
+  assert.deepEqual(lines(section, 'dbInfoRow'), [`${SNAPSHOT_KEY}|${existing}`])
+})
+
+test('db_info 里别的键（version 行）不算"已经有快照"⇒ 该插还是要插（条件是按 field_name 判的）', { skip: SKIP_REASON }, () => {
+  const report = runScenarios([
+    '### snapshot-other-key',
+    ...FAIL_INFOS.map(row => infoLine(...row)),
+    ...FAIL_ORDERS.map(row => orderLine(...row)),
+    snapshotLine('version', '4'), // 真实的库里就有这一行（migrate.ts:86-108 读它）
+    'failKind\tnone',
+    'failAt\t0',
+    'gate\tfalse',
+    'listId\tdefault',
+  ])
+  const section = report['snapshot-other-key']
+  assert.equal(first(section, 'result'), 'ok', `合并不该失败：${optionalFirst(section, 'errorMessage')}`)
+  assert.equal(first(section, 'snapshotInserts'), '1', 'version 行不是快照 ⇒ 这一次必须插')
+  assert.equal(first(section, 'dbInfoCount'), '2')
+  assert.deepEqual(lines(section, 'dbInfoRow').sort(), [
+    `${SNAPSHOT_KEY}|${expectedSnapshot(FAIL_INFOS.map(([id, , name, singer]) => ({ id, name, singer })))}`,
+    'version|4',
+  ].sort(), 'version 行必须原样留着，快照另起一行')
 })

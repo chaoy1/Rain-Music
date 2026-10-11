@@ -17,20 +17,22 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Android 移植 · **P0-2 第七刀-A**：{@code player_list_music_get} 的
- * **默认播放队列去重合并 + 单事务写回 + 失败冒泡**。
+ * Android 移植 · **P0-2 第七刀-A + 第七刀-B（快照那一半）**：{@code player_list_music_get} 的
+ * **默认播放队列去重合并 + 单事务写回（第一步 = 合并前的 {@code db_info} 身份快照）+ 失败冒泡**。
  *
- * <p>第六刀那一版是**纯读**（检出重复只打一条节流警告）；这一刀把缺的那半补上，
- * 但**只补那一半**：{@code db_info} 的恢复快照、以及
- * {@code resolvePlaybackQueueRestoreIndex} / {@code completePlaybackQueueRestore} 这一对收尾函数
- * 属于第七刀-B，本文件里**一个都不出现**。
+ * <p>第六刀那一版是**纯读**（检出重复只打一条节流警告）。第七刀-A 补上"去重 + 删 + 插"那一半；
+ * 第七刀-B 再补**同一个事务的第一步**：在两条 DELETE **之前**、**条件**插入一份"合并前身份快照"
+ * （对齐 {@code dbHelper.ts:337-339}）。仍然**不做**的是
+ * {@code resolvePlaybackQueueRestoreIndex} / {@code completePlaybackQueueRestore} 这一对收尾函数 ——
+ * 它们的消费者在桌面主进程 {@code winMain/rendererEvent/data.ts}，Android 侧还没有对应的那一支；
+ * 也就是说这份快照在 Android 侧**目前只写不读**（见「快照」与「与桌面的语义差异」）。
  *
  * <pre>
  * player_list_music_get   invoke, args=[listId]  → Rain.Music.MusicInfo[]   （契约 docs/android/ipc-contract.md:107）
  * </pre>
  *
  * <p>落点、建表、版本、单例一律复用 {@link RainMusicDatabase}；本文件只放这条通道自己的
- * {@code SELECT}、四条写语句、结果映射与两条日志。第五刀那两个只读通道
+ * {@code SELECT}、五条写语句（第七刀-B 的快照 INSERT 算一条）、结果映射与两条日志。第五刀那两个只读通道
  * （{@code player_list_music_check_exist} / {@code player_list_music_get_list_ids}）在
  * {@link RainMusicListMusicChannels} 里，<b>那个文件一行都没改</b>；第四刀 / 第一到三刀的文件同样没碰。
  *
@@ -59,15 +61,18 @@ import java.util.Set;
  * :201    targetList = merged
  * :202  }
  * </pre>
- * <b>本刀做：:196（去重）/ :197（那一半判断）/ :199 的"三步写库" / :201（把去重后的列表返回）。</b>
- * <b>本刀不做</b>（第七刀-B）：
+ * <b>本刀做：:196（去重）/ :197（那一半判断）/ :198（合并前的身份快照，见「快照」）/
+ * :199 的"四步写库" / :201（把去重后的列表返回）。</b>
+ * <b>本刀不做</b>（逐条）：
  * <ol>
- *   <li>{@code :198} 的 {@code queueStartupRestorePending} 与 {@code restoreSnapshot} ——
- *       即 {@code db_info} 里的 {@code playback_queue_startup_restore} 快照；</li>
  *   <li>{@code resolvePlaybackQueueRestoreIndex} / {@code completePlaybackQueueRestore} ——
- *       它们的消费者在桌面主进程 {@code winMain/rendererEvent/data.ts}，Android 侧还没有对应的那一支。
- *       ⚠️ 既有的范围守卫（{@code tests/unit/android-list-music-channels.test.cjs:528}）明令
- *       **不许照抄** {@code queueStartupRestorePending}；本文件里没有这个名字（见「并发」最后一节）。</li>
+ *       它们的消费者在桌面主进程 {@code winMain/rendererEvent/data.ts}，Android 侧还没有对应的那一支
+ *       （没有消费者 ⇒ 快照写进去之后**没人读、也没人清**，见「与桌面的语义差异」第 2 条）；</li>
+ *   <li>{@code queueStartupRestorePending} 这个**模块级标志**本身 ——
+ *       既有的范围守卫（{@code tests/unit/android-list-music-channels.test.cjs:528}）明令不许照抄它，
+ *       本文件自己的用例要求"通道里不许有可变的静态字段"
+ *       （{@code tests/unit/android-list-music-get-channels.test.cjs:641-643}）。
+ *       本文件用"{@code db_info} 里还没有快照"**推导**同一个语义：理由、边界与差异见「快照」一节。</li>
  * </ol>
  *
  * <h2>触发条件（三条同时成立才写库）</h2>
@@ -90,11 +95,14 @@ import java.util.Set;
  * 不挑"质量更高"的那一条、也不重新排序（顺序 = SQL 的 {@code ORDER BY O."order" ASC}）。
  * 返回给渲染层的也是**去重后的**那一份（桌面 {@code :201} 的 {@code targetList = merged}）。
  *
- * <h2>事务形状：只做桌面那三步，全部在**同一个**事务里</h2>
- * 逐条对齐 {@code dbHelper.ts:340-349}（{@code overwriteMusicInfo} 里 {@code db.transaction} 的函数体），
+ * <h2>事务形状：桌面那四步，全部在**同一个**事务里</h2>
+ * 逐条对齐 {@code dbHelper.ts:337-349}（{@code overwriteMusicInfo} 里 {@code db.transaction} 的函数体），
  * 顺序一字不改：
  * <pre>
  * 桌面 dbHelper.ts                                      本文件                                    语句
+ * :337-339 if (startupRestoreSnapshot &amp;&amp;                   if (!hasQueueRestoreSnapshot(db)) {      SQL_INSERT_QUEUE_RESTORE_SNAPSHOT
+ *            !await getPlaybackQueueRestoreSnapshot()) {   execSQL(SQL_INSERT_QUEUE_RESTORE_       （条件插入，见「快照」）
+ *            INSERT INTO db_info …                            SNAPSHOT, {key, snapshotText}) }
  * :340 musicInfoDeleteByListIdStatement.run(listId)      execSQL(SQL_DELETE_MUSIC_INFO_BY_LIST_ID,  {listId})
  * :341 musicInfoOrderDeleteByListIdStatement.run(listId) execSQL(SQL_DELETE_MUSIC_ORDER_BY_LIST_ID, {listId})
  * :342-349 for (musicInfo of musicInfos) {               for (order = 0…kept.size()-1) {
@@ -103,14 +111,73 @@ import java.util.Set;
  *          }                                             }
  * </pre>
  * 事务形状是 {@code beginTransaction()} / {@code setTransactionSuccessful()} / {@code endTransaction()}
- * （与 {@link RainMusicDatabase} 的 {@code onCreate} 同一套）。⚠️ 桌面 {@code :337-339} 那一段
- * （往 {@code db_info} 写 {@code playback_queue_startup_restore} 快照）**故意不在**这里 ——
- * 本刀只做上面那三步，快照是第七刀-B。
+ * （与 {@link RainMusicDatabase} 的 {@code onCreate} 同一套）。⚠️ 这四步是**一个**事务：
+ * {@code endTransaction()} 未标记成功时，快照那一行与两条 DELETE、{@code INSERT ×2×N} 一起回滚
+ * —— 桌面 {@code tests/unit/playback-queue.test.cjs:212-220} 证明的正是"合并失败 ⇒ 行与快照一起回滚、
+ * 不留脏快照"。
  *
  * <p><b>写回去的值从哪来</b>（对齐 {@code toDBMusicInfo(merged, listId)}，{@code modules/list/index.ts:39-48}）：
  * 每一条都取自**刚刚读到的那一行**（不重新查库、不跨源拼），{@code order} = 去重后列表里的下标
  * （{@code offset} 默认 0），{@code meta} = 把**解析出来的对象**重新序列化成文本
  * （桌面是 {@code JSON.stringify(info.meta)}，这里是 {@link MusicInfoRow#metaText()}）。
+ *
+ * <h2>快照（第七刀-B）：同一个事务的第一步，条件是"db_info 里还没有这份快照"</h2>
+ * 对齐 {@code dbHelper.ts:337-339}（{@code overwriteMusicInfo} 事务函数体的**头三行**）：
+ * <pre>
+ * 桌面 dbHelper.ts:337-339                                       本文件
+ * if (startupRestoreSnapshot &amp;&amp; !await                            if (!hasQueueRestoreSnapshot(db)) {
+ *     getPlaybackQueueRestoreSnapshot()) {                          db.execSQL(SQL_INSERT_QUEUE_RESTORE_SNAPSHOT,
+ *   await db.prepare('INSERT INTO db_info (field_name,                new Object[] { QUEUE_RESTORE_SNAPSHOT_KEY,
+ *     field_value) VALUES (?, ?)').run(                                  restoreSnapshotText });
+ *       QUEUE_RESTORE_SNAPSHOT_KEY,                              }
+ *       JSON.stringify(startupRestoreSnapshot))
+ * }
+ * </pre>
+ * 三条硬约束逐条满足：
+ * <ol>
+ *   <li><b>条件</b>：只有"库里还没有这份快照"时才插。桌面那两个条件是与关系：
+ *       {@code queueStartupRestorePending === true} **且** {@code getPlaybackQueueRestoreSnapshot() == null}；
+ *       本文件只用后半句 —— 于是"库里还没有"成了这次插入的**唯一**条件（理由见下）；</li>
+ *   <li><b>内容</b>：合并**前**的 {@code (id, name, singer)} 列表，顺序 = 这一次 SELECT 的行序。
+ *       桌面 {@code :198} 的 {@code targetList} 就是去重**前**读到的全部行 ⇒ 快照里**包含**那些
+ *       马上要被删掉的重复行（这不是 bug，正是"身份快照"要的东西：{@code playInfo.index} 指向的是
+ *       去重前的行序）。文本 = {@code org.json} 把同形状的对象数组序列化（{@link #toRestoreSnapshotText(List)}）；</li>
+ *   <li><b>顺序与事务</b>：这一句在 {@code beginTransaction()} 之后、**两条 DELETE 之前**执行，
+ *       所以它和 DELETE / INSERT 是**同一个事务**：{@code endTransaction()} 未标记成功时一起回滚
+ *       （与桌面 {@code :337-339} 在 {@code db.transaction} 函数体里、且在 {@code :340} 之前的位置逐条同形）。
+ *       ⚠️ 采集（把 {@code rows} 序列化成文本）发生在事务**之外**、锁**之内** —— 桌面同样是先在
+ *       {@code index.ts:198} 造数组、再进 {@code overwriteMusicInfo} 的事务；被采的 {@code rows}
+ *       就是同一个临界区里刚读到的那一批，不会被同一个进程里的另一次合并换掉。</li>
+ * </ol>
+ *
+ * <h3>为什么可以用"db_info 里有没有快照"代替 {@code queueStartupRestorePending}</h3>
+ * 桌面那个标志的**全部**用途只有一个：{@code index.ts:198} 决定这一次要不要顺手把快照带上。
+ * 它只在 {@code completePlaybackQueueRestore}（{@code index.ts:218-221}）里被置 false，
+ * 而那两行**同时**把快照行删掉（{@code clearPlaybackQueueRestoreSnapshot}）。
+ * 于是：
+ * <ul>
+ *   <li>"进程内标志 ∧ 库里没有快照"在任何时刻都蕴含"库里没有快照"。反过来，
+ *       在**没有消费者清快照**的 Android 侧，"库里没有快照"与"本进程还没为这份库记过身份"当前是同一件事
+ *       （本文件是全仓库唯一的生产者，清快照的那一半不做）；</li>
+ *   <li>快照是**持久**的、标志是**内存**的：worker 重启后标志回到 true 而快照还在 ——
+ *       桌面自己也知道这一点，所以 {@code :337} 才会**再查一次库**（{@code !await getPlaybackQueueRestoreSnapshot()}）。
+ *       本文件把这个"再查一次"提升为唯一条件，等于**只保留**桌面那个与式里真正持久、
+ *       且能跨进程成立的那一半。</li>
+ * </ul>
+ * <p><b>与桌面的可观察差异（不隐藏）</b>：
+ * <ol>
+ *   <li>一旦将来有代码实现"清快照"（{@code completePlaybackQueueRestore} 那一半），
+ *       桌面的标志在同一个 worker 生命周期里**不会**再回到 true ⇒ 之后即使队列又被弄脏、再合并一次，
+ *       桌面也**不写**快照；本文件会重新看见"库里没有快照"并**再写一份**。
+ *       差异只在"清过快照之后、同一个进程内又发生一次合并"时可见，表现为 {@code db_info} 里多一行。
+ *       在 Android 侧**当前不可观察**：没有任何代码会清它（那两个收尾函数本刀不做、Android 侧也没有别的调用点）。</li>
+ *   <li>桌面 {@code getPlaybackQueueRestoreSnapshot()} 会**解析并校验**那一行（坏 JSON / 类型不对 ⇒ 抛错，
+ *       整个合并失败）；本文件 {@link #hasQueueRestoreSnapshot} 只判"这一行在不在"（**不解析**）。
+ *       于是"行在但内容是坏的"这种库：桌面会让这次合并失败，本文件会跳过插入、照常合并 ——
+ *       那一行只可能由本文件按 {@link #QUEUE_RESTORE_SNAPSHOT_KEY} 写入，坏值属于**别人写坏**的库。
+ *       选择不解析的理由：那个值在 Android 侧没有任何消费者，为一个没人读的值再加一条校验路径，
+ *       会把"读失败 / 写失败"的可分辨性（第六刀到第七刀-A 一直在维护的东西）再搅一次。</li>
+ * </ol>
  *
  * <h2>失败语义：写回的 rejection **直接冒泡**（不吞、也不返回去重后的列表）</h2>
  * 桌面的事实（{@code tests/unit/playback-queue.test.cjs:212-220}）：在那个事务的 DELETE 上挂一个
@@ -120,8 +187,11 @@ import java.util.Set;
  * <ul>
  *   <li>写回抛出的任何异常都被包成 {@code IllegalStateException} 从 handler 里抛出去 ⇒
  *       P0-1 回 {@code ok:false, code=IPC_HANDLER_FAILED}（{@code RainMusicIpcPlugin.java:247-273}）；</li>
+ *   <li><b>快照那一句失败也算"写回失败"</b>：它在同一个事务里、是**第一条**写语句
+ *       （{@code db_info} 的 SELECT/INSERT 抛错都走这条路），所以整次合并失败、一起回滚。
+ *       桌面同形（{@code dbHelper.ts:337-339} 在事务函数体里，抛出去就是{@code overwriteMusicInfo} 失败）；</li>
  *   <li>消息**同时点名两半**（见 {@link #writeBackFailureMessage}）：读到 N 行**成功** /
- *       **写回失败** / **已回滚** / **库仍是写回前的 N 行** / 原始异常。
+ *       **写回失败** / **已回滚** / **库仍是写回前的 N 行** / 原始异常，并**点名快照那一句在不在回滚集合里**。
  *       第六刀"只读"的主要理由正是"读失败与写失败会压到同一个 ok 上、事后分辨不出" ——
  *       消息把两半分开说，可分辨性就有了，所以这一刀可以做了；</li>
  *   <li>渲染层那一侧也不缓存：{@code rendererListManage.ts:73-74} 是
@@ -161,16 +231,24 @@ import java.util.Set;
  * —— 将来的线 A（JS 侧 SQLite 驱动）或别的原生写通道与这里并发时，靠的是 SQLite 自己的文件锁与
  * 事务（这一次写回本身就是一个事务）。这就是"只护自己这一段的 read-modify-write"。
  *
- * <p><b>{@code queueStartupRestorePending} 的替代：不需要替代</b>。桌面那个模块级标志只有一个用途
- * —— 决定要不要顺手写一条 {@code db_info} 快照（{@code :198}）。本刀不含快照 ⇒ 它在 Android 侧
- * **没有任何落点**：第三个触发条件退化成"去重真删掉了元素"（{@code duplicates} 非空），
- * 与桌面的 {@code merged.length != targetList.length} 逐字同形。
+ * <p><b>这把锁也负责"同一次合并里快照只插一次"</b>：快照的"查在不在 → 插"两步与 DELETE / INSERT
+ * 同在临界区里（{@link #overwriteDefaultQueue} 被 {@link #readListMusics} 在锁内调用），
+ * 所以并发的两次合并会被排成先后两次：先到的写快照、后到的看见快照就跳过
+ * （与上一刀建立的并发方案同一把锁、同一个临界区，没有新锁、没有新的可变静态字段）。
+ *
+ * <p><b>{@code queueStartupRestorePending} 的替代：用"db_info 里还没有快照"推导</b>。桌面那个模块级标志
+ * 只有一个用途 —— 决定要不要顺手写一条 {@code db_info} 快照（{@code :198}）；
+ * 而它在 {@code completePlaybackQueueRestore} 里被置 false 的同时快照也被清掉
+ * （{@code index.ts:218-221}），并且 {@code dbHelper.ts:337} 本来就会再查一次库。
+ * 本文件于是**只保留**那个持久的那一半：条件 = {@code !hasQueueRestoreSnapshot(db)}，
+ * 不引入任何进程内标志（本文件**没有**可变的静态字段，见「快照」一节的论证与差异）。
  *
  * <h2>日志：第六刀那条"Android 没做合并"的临时 warn 已被**替换**（留着它就会说谎）</h2>
  * <ol>
  *   <li><b>合并成功</b>（{@link #warnQueueMerged}）：{@code Logger.warn}，节流
  *       {@link #QUEUE_MERGED_WARN_WINDOW_MS}（签名 = listId + 行数 + 重复数 + 前几条重复的键）。
- *       它说的是"检出 K 条重复、已去重并写回 N → M 行"，并点名"本刀不含 {@code db_info} 快照"；</li>
+ *       它说的是"检出 K 条重复、已去重并写回 N → M 行"，并点名"本次事务的第一步是
+ *       {@code db_info} 快照（只在还没有时插一份）"，以及"快照当前没有消费者"；</li>
  *   <li><b>{@code meta} 列是 NULL</b>（{@link #META_NULL_WARN}）：与第六刀逐字相同；</li>
  *   <li><b>写回失败</b>：**不打日志**，直接抛 —— 消息里已经点名两半，失败不该被压成一条与成功
  *       共存的 warn（那会让 logcat 上"成功"与"失败"看起来一样）。</li>
@@ -180,7 +258,7 @@ import java.util.Set;
  * ⚠️ Capacitor 的 {@code Logger} 受 {@code Logger.shouldLog()} 控制（{@code CapConfig.isLoggingEnabled()}，
  * 默认开），关掉日志时这两条也会消失 —— 这是平台属性，本文件不去绕它。
  *
- * <h2>SQL 逐字对齐 {@code statements.ts}</h2>
+ * <h2>SQL 逐字对齐 {@code statements.ts} / {@code dbHelper.ts}</h2>
  * <ul>
  *   <li>{@link #SQL_MUSIC_BY_LIST_ID} = {@code createMusicInfoQueryStatement()}（:68-78）的逐字副本，
  *       唯一的差异是 **better-sqlite3 的具名参数 {@code @listId} → Android 的位置参数 {@code ?}**
@@ -192,6 +270,12 @@ import java.util.Set;
  *       {@code statements.ts:119} / {@code :192} / {@code statements.ts:84-89} / {@code :170-175}
  *       那四条语句的逐字副本（同样只把具名参数换成 {@code ?}）。<b>列清单与列顺序一字不改</b> ——
  *       位置参数的值是按那个顺序绑的。</li>
+ *   <li>{@link #SQL_SELECT_QUEUE_RESTORE_SNAPSHOT} / {@link #SQL_INSERT_QUEUE_RESTORE_SNAPSHOT}
+ *       是 {@code dbHelper.ts:28} / {@code :338} 那两句的副本。它们的**列清单逐字对齐
+ *       {@code tables.ts:120-127} 的 {@code db_info}**（{@code "field_name"}、{@code "field_value"}，
+ *       主键是自增的 {@code "id"}，本文件**不碰**它）；表名与列名带 {@code "main".} 限定符与引号，
+ *       与同包里 {@code RainMusicDatabase.SQL_INSERT_SCHEMA_VERSION}（{@code version} 那一行）
+ *       的形状**逐字相同** —— SQLite 里 {@code db_info} 与 {@code "main"."db_info"} 是同一张表。</li>
  * </ul>
  * <p>⚠️ {@code SQL_INSERT_MUSIC_INFO} 的列清单里 {@code "listId"} 在 {@code "id"} **之后**、
  * {@code "meta"} 在最后：这不是"随便排的"，它就是 {@code statements.ts:87} 的顺序，
@@ -259,12 +343,12 @@ import java.util.Set;
  *       <td>桌面也是抛（better-sqlite3 准备/执行时抛）</td></tr>
  *   <tr><td><b>{@code meta} 不是合法 JSON / 不是对象</b></td><td>抛错，消息里点名 music id</td>
  *       <td>见上表（非法 JSON 同形；合法非对象是**有意**差异）</td></tr>
- *   <tr><td><b>默认列检出重复，且写回成功</b></td><td>去重 + 单事务写回 + 返回**去重后的**列表
- *       + 一条节流 {@code Logger.warn}</td>
- *       <td>与桌面 :196-:201 **同形**（桌面还会多写一条 db_info 快照）</td></tr>
- *   <tr><td><b>默认列检出重复，但写回失败</b></td><td><b>抛错</b>（消息点名读到 N 行成功 / 写回失败 /
- *       已回滚 / 库仍是 N 行 / 原始异常），**不返回**去重后的列表</td>
- *       <td>与桌面**同形**：{@code assert.rejects} + 事务回滚 + 行数不变
+ *   <tr><td><b>默认列检出重复，且写回成功</b></td><td>去重 + 单事务写回（第一步 = **条件**插入
+ *       {@code db_info} 合并前快照）+ 返回**去重后的**列表 + 一条节流 {@code Logger.warn}</td>
+ *       <td>与桌面 :196-:199 / :201 **同形**；快照的条件少一半（无进程内标志），见「快照」</td></tr>
+ *   <tr><td><b>默认列检出重复，但写回失败</b>（含**快照那一句**失败）</td><td><b>抛错</b>（消息点名读到 N 行成功 /
+ *       写回失败 / 已回滚 / 库仍是 N 行 / 快照那一句在不在回滚集合里 / 原始异常），**不返回**去重后的列表</td>
+ *       <td>与桌面**同形**：{@code assert.rejects} + 事务回滚 + 行数不变，**且不留脏快照**
  *           （{@code tests/unit/playback-queue.test.cjs:212-220}）</td></tr>
  * </table>
  *
@@ -274,9 +358,14 @@ import java.util.Set;
  *       （缓存为空那一条），Android 每次读都判。后果：库被**别的写者**（线 A 的 JS 驱动 / 将来的写通道）
  *       弄脏时，Android 会在下一次读时就修好，桌面（缓存已热）不会。方向是"更早修好"，
  *       不会丢数据；代价是"写库次数可能比桌面多"。这也是第六刀既有的取舍（它的用例明令不许照抄缓存）。</li>
- *   <li><b>不含 {@code db_info} 快照</b>（{@code queueStartupRestorePending} /
- *       {@code playback_queue_startup_restore}）：第七刀-B。桌面的那一支只在
- *       {@code queueStartupRestorePending} 为真（进程启动后第一次合并）时写。</li>
+ *   <li><b>快照的条件里没有 {@code queueStartupRestorePending} 这一半</b>：条件退化成
+ *       "库里还没有这份 {@code playback_queue_startup_restore} 快照"。桌面的那一支是
+ *       {@code 进程内标志 ∧ 库里没有}；两者只在"清过快照之后、同一个进程内又合并一次"时不同
+ *       （桌面不写、本文件再写一份）—— 在 Android 侧当前**不可观察**，因为没有任何代码会清快照。
+ *       另外本文件**不解析**已存在的那一行（桌面会校验、坏值让合并失败）：论证与边界见「快照」。
+ *       <p>还有一处**只写不读**的事实：{@code resolvePlaybackQueueRestoreIndex} /
+ *       {@code completePlaybackQueueRestore} 这一对消费者本刀不做，所以这一行写进去之后
+ *       Android 侧没有任何读取点 —— 它当前是一份"为将来那一刀预留"的元数据，不影响任何返回值。</li>
  *   <li><b>{@code meta} 写回时的文本由 {@code org.json} 重新序列化</b>（桌面是 {@code JSON.stringify}）。
  *       两边都是"把解析出来的对象紧凑地写回去"，键顺序两边都按插入顺序保留；但**数字**的文本形式
  *       在极端情况下可能不同（例如 {@code 1.0E10} 这种 {@code Double.toString} 形式，JS 会写成
@@ -302,11 +391,25 @@ import java.util.Set;
  * 逐条核对的，只能由 CI（{@code .github/workflows/build-android.yml} 的 {@code gradlew assembleDebug}）证伪。
  * 本机的 {@code javac}（JDK 20）做过三件事：① 用一组**手写替身**把它编过一遍；
  * ② 把 {@link RainMusicPlaybackQueueKey} 与 {@link RainMusicLogThrottle}（不含 Android 类型）
- * **真的跑起来**与 JS 对比；③ 用一组**手写的假 SQLite**（内存里的两张表 + 真事务语义 + 语句记录）
+ * **真的跑起来**与 JS 对比；③ 用一组**手写的假 SQLite**（内存里的三张表 + 真事务语义 + 语句记录）
  * 把这一刀的控制流**真的跑起来**（见 {@code tests/unit/android-playback-queue-merge.test.cjs}）。
  * 三件事的替身/假库都是人手写的，与真实框架 API、真实 SQLite 一旦不一致，那些用例不会发现。
  * 真机行为（首装建库后返回 {@code []}、JOIN 的实际行序、{@code execSQL} 的绑定与 NULL、
- * 事务在真机上的回滚、警告是否真的出现在 logcat）**同样未在真机验证**。
+ * {@code db_info} 的 INSERT/SELECT 是否真的落在同一张表上、事务在真机上的回滚（含快照那一行）、
+ * 警告是否真的出现在 logcat）**同样未在真机验证**。
+ * <p><b>本刀新增的未验证点（快照那一半）</b>：
+ * <ol>
+ *   <li>快照文本与桌面 {@code JSON.stringify} 是否**逐字节**相同**未验证**：两边都是
+ *       "键按插入顺序、紧凑、控制字符转义"，本文件的假 {@code org.json} 是按 AOSP 的形状手写的，
+ *       真机上的 {@code org.json} 一旦在转义上有别的取舍，文本可能不同（**语义相同**，
+ *       而 Android 侧目前没有消费者去读它）；</li>
+ *   <li>真机上"同一行只插一次"依赖的是本进程那把锁 —— 别的连接（线 A 的 JS 驱动）同时插一行
+ *       不会被它挡住（{@code db_info} 的 {@code field_name} 上**没有** UNIQUE 约束，
+ *       {@code tables.ts:120-127} 只约束了自增主键 {@code id}）。SQLite 自己的写锁会让两个
+ *       INSERT 串行，但不会做"存在就跳过"的判断 —— 这是本刀**已知**的边界（桌面同款：
+ *       它的"只插一次"也只是 worker 内的单线程 + 那次 {@code !await getPlaybackQueueRestoreSnapshot()}
+ *       检查，跨进程同样靠不住）。</li>
+ * </ol>
  */
 public final class RainMusicListMusicGetChannels {
 
@@ -372,6 +475,31 @@ public final class RainMusicListMusicGetChannels {
         VALUES (?, ?, ?)
         """;
 
+    /**
+     * 写回**第 0 步之一**（第七刀-B）：查"这份快照是否已经在 {@code db_info} 里"。
+     * 抄 {@code dbHelper.ts:28} 的 {@code getPlaybackQueueRestoreSnapshot} 那一句
+     * （{@code SELECT field_value FROM db_info WHERE field_name = ?}），列/表与
+     * {@code tables.ts:120-127} 的 {@code db_info} 对齐、与同包的
+     * {@code RainMusicDatabase.SQL_INSERT_SCHEMA_VERSION} 用同一套限定符与引号写法。
+     *
+     * <p>⚠️ 本文件**只判行在不在**，**不**把 {@code field_value} 解析成 JSON ——
+     * 理由与差异见类注释「快照」（桌面会解析并校验，坏值让整次合并失败）。
+     */
+    static final String SQL_SELECT_QUEUE_RESTORE_SNAPSHOT = """
+        SELECT "field_value" FROM "main"."db_info" WHERE "field_name"=?
+        """;
+
+    /**
+     * 写回**第 0 步之二**（第七刀-B）：插入"合并前身份快照"那一行。
+     * 抄 {@code dbHelper.ts:338} 的 {@code INSERT INTO db_info (field_name, field_value) VALUES (?, ?)}。
+     *
+     * <p>列清单（{@code "field_name"}、{@code "field_value"}）与列顺序逐字对齐
+     * {@code tables.ts:120-127} 的 {@code db_info}；**不碰**自增主键 {@code "id"}（与桌面一样让库自己填）。
+     */
+    static final String SQL_INSERT_QUEUE_RESTORE_SNAPSHOT = """
+        INSERT INTO "main"."db_info" ("field_name", "field_value") VALUES (?, ?)
+        """;
+
     /** {@code player_list_music_get} 的参数名（契约 :107：{@code listId: string}，裸字符串）。 */
     private static final String FIELD_LIST_ID = "listId";
 
@@ -401,6 +529,22 @@ public final class RainMusicListMusicGetChannels {
      * （{@code DDL_MY_LIST_MUSIC_INFO_ORDER}）才是结构的唯一出处，这里只放名字。
      */
     private static final String TABLE_MY_LIST_MUSIC_INFO_ORDER = "my_list_music_info_order";
+
+    /**
+     * 合并前身份快照在 {@code db_info} 里的 {@code field_name}。**逐字**抄
+     * {@code dbHelper.ts:24} 的 {@code QUEUE_RESTORE_SNAPSHOT_KEY = 'playback_queue_startup_restore'}
+     * —— 键名对不上就等于"没有快照"，而这是一份**跨 worker** 的持久数据。
+     *
+     * <p>它不引用 {@link RainMusicDatabase} 的常量：那个类里没有这个键（只有 {@code version}）。
+     */
+    private static final String QUEUE_RESTORE_SNAPSHOT_KEY = "playback_queue_startup_restore";
+
+    /**
+     * {@code db_info} 的两个列名（{@code tables.ts:120-127}）**只出现在上面那句 SQL 的文本里**，
+     * 刻意不做成常量：{@link RainMusicDatabase} 里已有一份（{@code COLUMN_FIELD_NAME} /
+     * {@code COLUMN_FIELD_VALUE}，同一个值），而"工具常量拼出来的 SQL"会让本机用例没法直接比对这一句
+     * （同库 {@code SQL_INSERT_SCHEMA_VERSION} 的注释里写着同一条理由）。
+     */
 
     /**
      * {@code default} 去重写回的**专用锁**（理由见类注释「并发」）。
@@ -462,12 +606,13 @@ public final class RainMusicListMusicGetChannels {
         // （所以 Context 一律留到 handler 调用时再取）。绝对路径由 open() 在真机上打进错误信息。
         Logger.info(
             TAG,
-            "P0-2 第七刀-A：已注册 " + CHANNEL_MUSIC_GET + "（落点 " + RainMusicDatabase.DATABASE_NAME +
+            "P0-2 第七刀-A + 第七刀-B（快照）：已注册 " + CHANNEL_MUSIC_GET + "（落点 " + RainMusicDatabase.DATABASE_NAME +
             " 的 \"" + RainMusicDatabase.TABLE_MY_LIST_MUSIC_INFO + "\" 表 LEFT JOIN \"" +
             TABLE_MY_LIST_MUSIC_INFO_ORDER + "\" 表，schema 版本 " +
             RainMusicDatabase.SCHEMA_VERSION_TEXT + "；\"" + LIST_ID_DEFAULT +
-            "\" 检出重复时会在**同一个事务**里去重写回（DELETE ×2 + INSERT ×2N），" +
-            "其它 listId 一律纯读；db_info 快照仍未做）"
+            "\" 检出重复时会在**同一个事务**里去重写回（第一步 = 条件插入 \"" + QUEUE_RESTORE_SNAPSHOT_KEY +
+            "\" 合并前身份快照，然后 DELETE ×2 + INSERT ×2N），其它 listId 一律纯读；" +
+            "resolvePlaybackQueueRestoreIndex / completePlaybackQueueRestore 仍不做，快照当前没有消费者）"
         );
     }
 
@@ -516,8 +661,9 @@ public final class RainMusicListMusicGetChannels {
     /**
      * 读一个歌单的全部行，并按需在 {@code default} 上做去重写回。
      *
-     * @param mergeDefaultQueue {@code true} ⇒ 读完之后判重、必要时在**同一个事务**里写回，
-     *                          并返回去重后的列表；{@code false} ⇒ 纯读（第六刀的行为）
+     * @param mergeDefaultQueue {@code true} ⇒ 读完之后判重、必要时在**同一个事务**里写回
+     *                          （第一步 = 条件插入合并前快照），并返回去重后的列表；
+     *                          {@code false} ⇒ 纯读（第六刀的行为）
      */
     private static Object readListMusics(Context context, String listId, boolean mergeDefaultQueue) {
         SQLiteDatabase db = RainMusicDatabase.open(context, RainMusicDatabase.TABLE_MY_LIST_MUSIC_INFO);
@@ -525,6 +671,7 @@ public final class RainMusicListMusicGetChannels {
         JSONArray musics;
         JSONArray merged = null;
         Set<RainMusicPlaybackQueueKey.MusicRow> dropped = null;
+        String restoreSnapshotText = null;
         int duplicateCount = 0;
         Cursor cursor = null;
         try {
@@ -570,6 +717,13 @@ public final class RainMusicListMusicGetChannels {
                     );
                     dropped.addAll(duplicates);
                     duplicateCount = duplicates.size();
+                    // 合并**前**的身份快照：桌面 index.ts:198 的 targetList.map(({id,name,singer}) => …)
+                    // —— targetList 就是刚刚读到的**全部**行（含马上要被删掉的重复行）。
+                    // 采集在这里、**插入**在事务里（见 overwriteDefaultQueue）：与桌面
+                    // "先造数组、再进 overwriteMusicInfo 的事务"同形。
+                    // ⚠️ 组装失败算**读**失败（它就在这个 try 里）：桌面那句 map/JSON.stringify 也在
+                    // getListMusics 里、抛出去同样是"这一次读失败"，两边同形。
+                    restoreSnapshotText = toRestoreSnapshotText(rows);
                     // 去重后的那一份也在这里组装（仍在"读"这一段的 try 里）：
                     // 组装失败算读失败，而**写回**的失败绝不能落到这个 catch 里
                     // （那会把"写回失败"误报成"读失败"，见 writeBackFailureMessage）。
@@ -601,7 +755,7 @@ public final class RainMusicListMusicGetChannels {
         for (MusicInfoRow row : rows) {
             if (!dropped.contains(row.keyRow)) kept.add(row);
         }
-        overwriteDefaultQueue(db, listId, kept, rows.size(), duplicateCount);
+        overwriteDefaultQueue(db, listId, kept, rows.size(), duplicateCount, restoreSnapshotText);
 
         // 写回**成功之后**才说话（失败会抛出去，由那条异常点名两半）。
         warnQueueMerged(listId, rows.size(), kept.size(), dropped);
@@ -610,23 +764,31 @@ public final class RainMusicListMusicGetChannels {
         return merged;
     }
 
-    // ------------------------------------------------------------------ 写回（第七刀-A）
+    // ------------------------------------------------------------------ 写回（第七刀-A + 第七刀-B 的快照）
 
     /**
-     * 把去重后的列表写回库：桌面 {@code dbHelper.ts:340-349} 的**三步**，全部在同一个事务里。
+     * 把去重后的列表写回库：桌面 {@code dbHelper.ts:337-349} 的**四步**，全部在同一个事务里。
      *
      * <pre>
      * beginTransaction()
-     *   DELETE FROM "main"."my_list_music_info"       WHERE "listId"=?     ← :340
-     *   DELETE FROM "main"."my_list_music_info_order" WHERE "listId"=?     ← :341
-     *   for (order = 0 …) { INSERT info; INSERT order }                    ← :342-349
+     *   if (!hasQueueRestoreSnapshot(db))                                     ← 条件（:337 的后半句）
+     *     INSERT INTO db_info (field_name, field_value)                       ← :338
+     *       VALUES ('playback_queue_startup_restore', 合并前的 (id,name,singer) 列表)
+     *   DELETE FROM "main"."my_list_music_info"       WHERE "listId"=?         ← :340
+     *   DELETE FROM "main"."my_list_music_info_ORDER" WHERE "listId"=?         ← :341
+     *   for (order = 0 …) { INSERT info; INSERT order }                        ← :342-349
      * setTransactionSuccessful()
-     * endTransaction()          ← 未标记成功 ⇒ 整体回滚
+     * endTransaction()          ← 未标记成功 ⇒ 整体回滚（快照那一行也一起回滚）
      * </pre>
      *
-     * <p>⚠️ 桌面的 {@code :337-339}（向 {@code db_info} 写快照）**故意不做**（第七刀-B）。
+     * <p>快照那一步在两条 DELETE **之前**：它记的是**合并前**的状态
+     * （内容由 {@link #toRestoreSnapshotText(List)} 在进事务之前从刚读到的 {@code rows} 采集）。
+     * 条件只有"{@code db_info} 里还没有这份快照"—— {@code queueStartupRestorePending} 的替代方案
+     * 与差异见类注释「快照」。
      *
-     * @throws IllegalStateException 任何一步失败（含 {@code endTransaction()} 的提交失败）。
+     * @param restoreSnapshotText 合并前的 {@code (id, name, singer)} 列表的 JSON 文本；
+     *                            调用方在 {@code duplicates} 非空时必定给出（非 null）
+     * @throws IllegalStateException 任何一步失败（含快照那一句、含 {@code endTransaction()} 的提交失败）。
      *                               消息由 {@link #writeBackFailureMessage} 组装，同时点名两半
      */
     private static void overwriteDefaultQueue(
@@ -634,14 +796,28 @@ public final class RainMusicListMusicGetChannels {
         String listId,
         List<MusicInfoRow> kept,
         int readCount,
-        int duplicateCount
+        int duplicateCount,
+        String restoreSnapshotText
     ) {
         // 记"事务是否已经标记成功"：用于区分"回滚"（未标记成功时 endTransaction 一定回滚）
         // 与"提交阶段失败"（已标记成功之后 endTransaction 才抛）—— 后者本通道**不能**声称库还是 N 行。
         boolean commitStarted = false;
+        // 快照那一行是否**已经写进事务**（用于让失败消息如实点名"回滚集合里有没有它"）。
+        // ⚠️ 只在 execSQL 返回之后才置 true：它抛错时那一行并没有落进事务。
+        boolean snapshotInserted = false;
         try {
             db.beginTransaction();
             try {
+                // 第 0 步（第七刀-B）：条件插入"合并前身份快照"。
+                // 必须在两条 DELETE **之前** —— 快照记的是合并前的行序与身份
+                // （内容已经在锁内、进事务之前从刚读到的 rows 采集好，见 restoreSnapshotText）。
+                if (!hasQueueRestoreSnapshot(db)) {
+                    db.execSQL(
+                        SQL_INSERT_QUEUE_RESTORE_SNAPSHOT,
+                        new Object[] { QUEUE_RESTORE_SNAPSHOT_KEY, restoreSnapshotText }
+                    );
+                    snapshotInserted = true;
+                }
                 db.execSQL(SQL_DELETE_MUSIC_INFO_BY_LIST_ID, new Object[] { listId });
                 db.execSQL(SQL_DELETE_MUSIC_ORDER_BY_LIST_ID, new Object[] { listId });
                 for (int order = 0; order < kept.size(); order++) {
@@ -658,17 +834,67 @@ public final class RainMusicListMusicGetChannels {
             }
         } catch (Exception ex) {
             throw new IllegalStateException(
-                writeBackFailureMessage(listId, readCount, kept.size(), duplicateCount, commitStarted, ex),
+                writeBackFailureMessage(
+                    listId, readCount, kept.size(), duplicateCount, snapshotInserted, commitStarted, ex
+                ),
                 ex
             );
         }
     }
 
     /**
+     * {@code db_info} 里是否**已经**有这份播放队列恢复快照（桌面 {@code dbHelper.ts:337} 的
+     * {@code !await getPlaybackQueueRestoreSnapshot()} 那一半，也是
+     * {@code queueStartupRestorePending} 的替代 —— 见类注释「快照」）。
+     *
+     * <p>只判"这一行在不在"：{@code moveToFirst()} 为真即可，**不读值、不解析**
+     * （差异见类注释「快照」第 2 条）。游标在 {@code finally} 里关（与读歌单那条路径同一形状）。
+     *
+     * <p>它在**事务里**被调用（{@code overwriteDefaultQueue}）：桌面那一句也在
+     * {@code db.transaction} 的函数体里。这样"查在不在 → 插"与 DELETE / INSERT 是同一个原子段，
+     * 同一个进程里的并发合并被 {@link #DEFAULT_QUEUE_MERGE_LOCK} 排成先后两次 ⇒ 快照只插一次。
+     *
+     * @throws RuntimeException 查询本身失败（列漂移 / 表缺失 / 游标异常）——
+     *                          与桌面一样**不吞**：它会让整次合并失败并一起回滚
+     */
+    private static boolean hasQueueRestoreSnapshot(SQLiteDatabase db) {
+        Cursor cursor = null;
+        try {
+            cursor = db.rawQuery(
+                SQL_SELECT_QUEUE_RESTORE_SNAPSHOT,
+                new String[] { QUEUE_RESTORE_SNAPSHOT_KEY }
+            );
+            return cursor.moveToFirst();
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+    }
+
+    /**
+     * 把**合并前**读到的那些行采集成本次事务要写进 {@code db_info} 的快照文本。
+     *
+     * <p>形状逐字对齐桌面 {@code index.ts:198}：
+     * {@code targetList.map(({ id, name, singer }) => ({ id, name, singer }))} ——
+     * 一个**数组**，每个元素**只有这三个键**（不含 {@code source / interval / meta}），
+     * 顺序 = 读到的行序，{@code id/name/singer} 都是字符串。桌面把它交给
+     * {@code dbHelper.ts:338} 的 {@code JSON.stringify(...)}；这里用 {@code org.json} 的
+     * {@link JSONArray#toString()} 得到同形状的文本。
+     *
+     * @param rows 这一次读到的**全部**行（含马上要被删掉的重复行）
+     */
+    private static String toRestoreSnapshotText(List<MusicInfoRow> rows) throws JSONException {
+        JSONArray snapshot = new JSONArray();
+        for (MusicInfoRow row : rows) snapshot.put(row.toSnapshotJson());
+        return snapshot.toString();
+    }
+
+    /**
      * 写回失败的消息：把"读"和"写"两半分开点名（这是本刀敢做写回的前提，见类注释「失败语义」）。
      *
-     * <p>它说的是五件事：读到 N 行**成功** / 写回**失败** / 已回滚 / 库仍是写回前的 N 行 / 原始异常。
+     * <p>它说的是六件事：读到 N 行**成功** / 写回**失败** / 已回滚 / 库仍是写回前的 N 行 /
+     * **快照那一句在不在回滚集合里** / 原始异常。
      *
+     * @param snapshotInserted 快照那一行是否真的发出去过（{@code true} ⇒ 它也在这次事务的回滚集合里）
      * @param commitStarted {@code true} ⇒ 失败发生在 {@code setTransactionSuccessful()} 之后的
      *                      {@code endTransaction()} 提交阶段：那时**不能**断言"库仍是 N 行"
      *                      （SQLite 提交失败时通常会回滚，但本通道不在错误路径上再发一次查询去"证明"它
@@ -679,6 +905,7 @@ public final class RainMusicListMusicGetChannels {
         int readCount,
         int keptCount,
         int duplicateCount,
+        boolean snapshotInserted,
         boolean commitStarted,
         Exception ex
     ) {
@@ -686,7 +913,8 @@ public final class RainMusicListMusicGetChannels {
         message.append(CHANNEL_MUSIC_GET).append("：默认播放队列的去重写回失败（\"")
             .append(FIELD_LIST_ID).append("\"=\"").append(listId).append("\"，落点 ")
             .append(RainMusicDatabase.TABLE_MY_LIST_MUSIC_INFO).append(" / ")
-            .append(TABLE_MY_LIST_MUSIC_INFO_ORDER).append("）。");
+            .append(TABLE_MY_LIST_MUSIC_INFO_ORDER).append(" / ")
+            .append(RainMusicDatabase.TABLE_DB_INFO).append("）。");
         message.append("**读到 ").append(readCount).append(" 行成功**（这一步没有出错；若读失败，")
             .append("走的是另一条消息、根本到不了这里），去重要删掉 ").append(duplicateCount)
             .append(" 条重复、留下 ").append(keptCount).append(" 条，但**写回失败**：")
@@ -696,11 +924,14 @@ public final class RainMusicListMusicGetChannels {
                 .append("事务**已标记成功**，本通道无法在不追加一次查询的前提下证明库的最终行数")
                 .append("（SQLite 提交失败时通常会回滚，但这里不猜）。");
         } else {
-            message.append("**已回滚**（同一个事务里的 DELETE ")
-                .append(RainMusicDatabase.TABLE_MY_LIST_MUSIC_INFO).append(" / DELETE ")
+            message.append("**已回滚**（未标记成功 ⇒ endTransaction 回滚）。这个事务里的写是：")
+                .append(snapshotInserted
+                    ? "db_info 的快照 INSERT（\"" + QUEUE_RESTORE_SNAPSHOT_KEY + "\"，在两条 DELETE 之前） + "
+                    : "（本次**没有**发出快照 INSERT —— 要么 db_info 里已经有那份快照，要么失败发生在它之前）+ ")
+                .append("DELETE ").append(RainMusicDatabase.TABLE_MY_LIST_MUSIC_INFO).append(" / DELETE ")
                 .append(TABLE_MY_LIST_MUSIC_INFO_ORDER).append(" / INSERT ×2×").append(keptCount)
-                .append(" 全部撤销，未标记成功 ⇒ endTransaction 回滚）⇒ **库仍是写回前的 ")
-                .append(readCount).append(" 行**。");
+                .append("，**全部撤销** ⇒ **库仍是写回前的 ").append(readCount).append(" 行**，")
+                .append("db_info 里也不会留下半份快照（桌面 tests/unit/playback-queue.test.cjs:212-220 证明同一条）。");
         }
         message.append("本通道**不会**吞掉写回错误、把「读到了但没修好」伪装成一次成功的读：")
             .append("整条调用以 ok:false 结束（IPC_HANDLER_FAILED），渲染层那条 invoke 直接 reject ⇒ ")
@@ -788,10 +1019,13 @@ public final class RainMusicListMusicGetChannels {
             duplicates.size() + " 条重复（共 " + readCount + " 行）：" + describeDuplicates(duplicates) +
             "。已按桌面的规则去重（src/common/utils/playbackQueue.ts:10-22，保留第一条完整记录、不跨源合并 meta）" +
             "并在**同一个事务**里写回：" + readCount + " → " + keptCount + " 行" +
-            "（三步对齐 src/main/worker/dbService/modules/list/dbHelper.ts:340-349：DELETE " +
+            "（四步对齐 src/main/worker/dbService/modules/list/dbHelper.ts:337-349：第一步 = **条件**插入" +
+            " \"" + QUEUE_RESTORE_SNAPSHOT_KEY + "\" 快照（内容 = 合并前的 (id,name,singer) 列表，" +
+            "只在 db_info 里还没有它时插一份），然后 DELETE " +
             RainMusicDatabase.TABLE_MY_LIST_MUSIC_INFO + " / DELETE " + TABLE_MY_LIST_MUSIC_INFO_ORDER +
-            " / INSERT ×2×" + keptCount + "）。⚠️ 与桌面的差别：本刀**不含** db_info 的播放队列恢复快照" +
-            "（桌面 index.ts:198 的 queueStartupRestorePending 那一支，留给第七刀-B）。" +
+            " / INSERT ×2×" + keptCount + "）。⚠️ 与桌面的差别：本刀**没有** queueStartupRestorePending" +
+            " 那个进程内标志，条件退化成\"db_info 里还没有快照\"（理由与差异见类注释「快照」）；" +
+            "resolvePlaybackQueueRestoreIndex / completePlaybackQueueRestore **不做**，所以这份快照目前**只写不读**。" +
             "本条警告节流 " + (QUEUE_MERGED_WARN.windowMs() / 1000) + " 秒一次，队列内容变了会立刻再报一条" +
             "（判定用的键与 JS 的 getPlaybackQueueMusicKey 逐字节相同，见 RainMusicPlaybackQueueKey 的注释）。"
         );
@@ -905,6 +1139,20 @@ public final class RainMusicListMusicGetChannels {
             item.put(COLUMN_INTERVAL, jsonValue(interval));
             // meta 必须是**对象**（桌面那一句是 JSON.parse，见类注释「meta」）。
             item.put(COLUMN_META, meta);
+            return item;
+        }
+
+        /**
+         * 快照里的一个元素：桌面 {@code index.ts:198} 的 {@code ({ id, name, singer }) => ({ id, name, singer })}。
+         *
+         * <p><b>只有这三个键</b>（与 {@link #toJson()} 的六个键**不同**：{@code source / interval / meta}
+         * 不进快照 —— 桌面那个 map 就是只挑三列），顺序也是 {@code id, name, singer}。
+         */
+        JSONObject toSnapshotJson() throws JSONException {
+            JSONObject item = new JSONObject();
+            item.put(COLUMN_ID, jsonValue(id));
+            item.put(COLUMN_NAME, jsonValue(name));
+            item.put(COLUMN_SINGER, jsonValue(singer));
             return item;
         }
 

@@ -139,9 +139,12 @@ public class RainMusicIpcPlugin extends Plugin {
         //
         // ⚠️ P0-2 第七刀-A 已经把上面"写回"那一半补在**同一个通道文件**里了（default 分支：
         // 去重 + 单事务写回 + 失败冒泡；写回失败的消息会同时点名"读到 N 行成功"与"写回失败"，
-        // 所以第六刀当时那条"分辨不出"的理由不再成立）。**db_info 快照**仍然没做，留给第七刀-B。
+        // 所以第六刀当时那条"分辨不出"的理由不再成立）；第七刀-B 又把**同一个事务的第一步**补上：
+        // **条件**插入一份"合并前身份快照"（db_info 的 playback_queue_startup_restore，对齐
+        // dbHelper.ts:337-339）。仍然不做的是 resolvePlaybackQueueRestoreIndex /
+        // completePlaybackQueueRestore 那一对收尾函数（Android 侧没有消费者 ⇒ 快照目前只写不读）。
         // 于是下面这一行的注册点名不变（同一条通道），行为变了 —— 见
-        // RainMusicListMusicGetChannels 的类注释「本刀做的是桌面那四行里的哪几行」。
+        // RainMusicListMusicGetChannels 的类注释「本刀做的是桌面那四行里的哪几行」与「快照」。
         RainMusicListMusicGetChannels.register(this);
 
         Logger.info(
