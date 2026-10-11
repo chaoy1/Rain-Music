@@ -34,28 +34,39 @@ import com.getcapacitor.Logger;
  *
  * <pre>
  * 桌面：{@code <RainDatas>/rain.data.db}         （{@code db.ts:22} = {@code path.join(rainDataPath, 'rain.data.db')}）
- * 本刀：{@code context.getDatabasePath("rain.data.db")}
- *       = {@code /data/data/com.rainmusic.mobile/databases/rain.data.db}（应用私有目录，无需任何权限）
+ * 本刀：{@code context.getDatabasePath("rain.dataSQLite.db")}
+ *       = {@code /data/data/com.rainmusic.mobile/databases/rain.dataSQLite.db}（应用私有目录，无需任何权限）
  * </pre>
+ *
+ * <p>Android 侧的名字与桌面**不同名**：插件会把库名改写成 {@code …SQLite.db}，详见
+ * {@link #DATABASE_NAME} 的「依据」。
  *
  * <p><b>为什么用 {@code SQLiteOpenHelper} 默认的 databases 目录、而不是 {@code getFilesDir()}</b>：
  * <ol>
  *   <li>契约给 Android 的 SQLite 方案是 {@code @capacitor-community/sqlite}
  *       （{@code ipc-contract.md:719}、{@code native-bridge-needs.md:30,431}）。该插件建库时用的就是
- *       框架的 databases 目录（{@code context.getDatabasePath(name)}），<b>文件名相同 ⇒ 线 A 的 JS 驱动
- *       与这个 Java 通道打开的是同一个文件</b>，不需要迁移、也不会出现两份歌单；</li>
- *   <li>文件名与桌面保持同名（{@code rain.data.db}）：契约与阶段 2a 的文档里到处用这个名字指代这份数据
- *       （{@code db.ts:22}、{@code src/main/app.ts:254,276}），换名字只会制造第三种叫法；</li>
+ *       框架的 databases 目录（{@code UtilsFile.isFileExists()} / {@code getDatabaseDirectoryPath()}
+ *       都走 {@code context.getDatabasePath(...)}），与 {@link #DATABASE_NAME} 同目录
+ *       ⇒ 线 A 的 JS 驱动与这个 Java 通道打开的是**同一个文件**，不需要迁移、也不会出现两份歌单；</li>
+ *   <li><b>文件名由插件改写，本类已按插件规则取名</b>（依据见 {@link #DATABASE_NAME}）：
+ *       {@code CapacitorSQLite.getDatabaseName()} 砍掉结尾的 {@code .db}，{@code createConnection()}
+ *       再固定拼 {@code "SQLite.db"} ⇒ 桌面那个 {@code rain.data.db} 在 Android 上**不可达**。
+ *       所以这里**与桌面不同名**：桌面仍是 {@code db.ts:22} 的 {@code rain.data.db}
+ *       （{@code src/main/app.ts:254,276} 同理），Android 侧是 {@code rain.dataSQLite.db}。
+ *       这不是审美选择 —— 名字不同才是"两边各写一份歌单"，所以只能跟着插件走；</li>
  *   <li>应用私有目录不需要任何存储权限，WebView 里的 JS 也看不到它
  *       （{@code web-runtime-blockers.md:932} 已经登记过"文件系统可见性与应用私有目录是两回事"），
  *       所以"渲染层直接开库"这条路本来就只可能走原生。</li>
  * </ol>
  *
- * <p>⚠️ <b>需要人复核的点（已列在汇报里）</b>：线 A 的 JS 驱动还没实现
- * （{@code src/main/worker/dbService/adapter/android.ts:53-58} 仍是 {@code throw}），
- * "插件也用 databases 目录 + 同名文件"是按其文档与 Android 惯例给出的判断，**本机无法验证
- * （插件未安装、无 SDK）**。若线 A 最终选用别的路径/文件名，两边就会各写一份歌单 —— 那时以线 A 为准，
- * 本文件只需改 {@link #DATABASE_NAME}（其余代码与表结构都不用动）。
+ * <p>⚠️ <b>仍然需要真机复核的点</b>：线 A 的 JS 驱动还没实现
+ * （{@code src/main/worker/dbService/adapter/android.ts:105-110} 仍是 {@code throw}）。
+ * 上面两条（同属 databases 目录 / 插件把名字改写成 {@code …SQLite.db}）是**读插件的官方文档
+ * {@code docs/API.md}「Databases Location」与 {@code CapacitorSQLite.java} 的
+ * {@code getDatabaseName()/createConnection()}（master 分支源码）得出的判断**，本机**无法验证
+ * （插件未安装、无 SDK）**。接入后必须复核一次：真机上先只让一侧建库，看另一侧打开时是否落在
+ * 同一个文件、是否抛 {@code onUpgrade(0→4)} —— 插件不写 {@code user_version}，这一条已登记在
+ * {@code src/main/worker/dbService/adapter/android.ts} 的「未验证清单」。
  *
  * <h2>什么时候建表</h2>
  *
@@ -192,10 +203,25 @@ import com.getcapacitor.Logger;
 final class RainMusicDatabase {
 
     /**
-     * 数据库文件名。与桌面 {@code db.ts:22} 的 {@code rain.data.db} **同名**
-     * （理由见类注释「文件放哪」）；线 A 若另有选择，只改这一行。
+     * 数据库文件名。**与桌面不同名**（桌面是 {@code db.ts:22} 的 {@code rain.data.db}）。
+     *
+     * <p><b>为什么叫这个</b>：{@code @capacitor-community/sqlite} 会**改写**传给它的库名 ——
+     * {@code CapacitorSQLite.getDatabaseName()} 砍掉结尾的 {@code .db}（只砍这一种后缀），
+     * {@code createConnection()} 再固定拼上 {@code "SQLite.db"}。所以线 A 的 JS 驱动传
+     * {@code 'rain.data.db'}（或 {@code 'rain.data'}）时，插件实际建/开的是
+     * {@code rain.dataSQLite.db}。两边要开**同一个文件**，本常量就必须取这个值
+     * （落点仍是 {@code context.getDatabasePath(DATABASE_NAME)}，目录与桌面无关、
+     * 与插件的 databases 目录相同）。
+     *
+     * <p><b>依据</b>：插件 {@code docs/API.md}「Databases Location」（原文
+     * {@code fooDB -> fooDBSQLite.db}、{@code foo.db} 内部变成 {@code fooSQLite.db}）
+     * + {@code CapacitorSQLite.java} 的 {@code getDatabaseName()} / {@code createConnection()}
+     * （master 分支源码，见 {@code native-bridge-needs.md:510} 记的依赖）。
+     * ⚠️ <b>读源码得出，未经真机验证</b>（本机没有该插件的 node_modules、没有 SDK）：
+     * {@code npm i @capacitor-community/sqlite} + {@code npx cap sync android} 之后必须复核一次 ——
+     * 建库后看 {@code /data/data/<pkg>/databases/} 里的真实文件名是否就是它。
      */
-    static final String DATABASE_NAME = "rain.data.db";
+    static final String DATABASE_NAME = "rain.dataSQLite.db";
 
     /** 歌单表（{@code tables.ts:128-138}）。本刀唯一读的表。 */
     static final String TABLE_MY_LIST = "my_list";
@@ -483,7 +509,7 @@ final class RainMusicDatabase {
         return db;
     }
 
-    /** 数据库文件的绝对路径（只用于错误信息；真机上形如 {@code /data/data/<pkg>/databases/rain.data.db}）。 */
+    /** 数据库文件的绝对路径（只用于错误信息；真机上形如 {@code /data/data/<pkg>/databases/rain.dataSQLite.db}）。 */
     static String databasePath(Context context) {
         try {
             return String.valueOf(context.getDatabasePath(DATABASE_NAME).getAbsolutePath());

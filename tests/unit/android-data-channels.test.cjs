@@ -232,7 +232,7 @@ test('注册必须发生在 RainMusicIpcPlugin.load() 里；MainActivity 仍先 
 
 test('playInfo 的"播放队列恢复校正"没有做，但必须**大声**说明（不静默跳过）', () => {
   // 桌面 M:data:11-24 会调 dbService.resolvePlaybackQueueRestoreIndex / getListMusics 并回写；
-  // Android 侧没有主进程、线 A 的 SQLite 驱动仍是 throw（adapter/android.ts:53-58）⇒ 原样返回。
+  // Android 侧没有主进程、线 A 的 SQLite 驱动仍是 throw（adapter/android.ts:105-110）⇒ 原样返回。
   assert.match(dataJava, /Logger\.warn\(/, 'playInfo 分支必须留下 warn，而不是静默返回')
   assert.match(dataJava, /播放队列恢复校正/, 'warn 里必须点名"校正没有执行"')
 

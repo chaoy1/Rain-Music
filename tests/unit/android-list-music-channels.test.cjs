@@ -4,7 +4,7 @@
  *
  * ⚠️ 先写清楚这个文件**做不到**什么：本机没有 Android SDK（`docs/android-port-plan.md` §0），
  * 它**不执行任何 Java**，也**没有真的开过 SQLite** —— 所以它**不能**证明这两条通道在真机上不再是
- * `IPC_CHANNEL_UNSUPPORTED`、不能证明库文件真的落在 `getDatabasePath("rain.data.db")`、
+ * `IPC_CHANNEL_UNSUPPORTED`、不能证明库文件真的落在 `getDatabasePath("rain.dataSQLite.db")`、
  * 不能证明 `rawQuery` 真的能绑上那两个参数。那几件事只能由 CI 的 `gradlew assembleDebug`（编译）
  * → 真机运行（行为）来证明。本刀额外用 `javac` + 一组手写替身（`android.*` / `org.json` /
  * `com.getcapacitor.Logger` / 一个 `RainMusicIpcPlugin` 替身）把
@@ -559,12 +559,14 @@ test('本刀不做 player_list_music_get：它的写回依赖必须能在源码�
   assert.match(listIndexTs, /export const completePlaybackQueueRestore/)
   assert.match(read('src/main/modules/winMain/rendererEvent/data.ts'), /resolvePlaybackQueueRestoreIndex/)
 
-  // Android 侧：这条"读里带写"的通道**没有**被注册（本刀范围外），而且窗口/设置那两条通道
-  // 也没有实现桌面那一支的"播放队列恢复校正"（第三刀已明确登记为未实现）。
+  // 本刀（第五刀）的 `RainMusicListMusicChannels.java` 里**没有**这条"读里带写"的通道 ——
+  // 第六/七刀把它另开了 `RainMusicListMusicGetChannels.java` 并已注册，所以下面这句只是
+  // "**这个文件**不做"，不是"Android 侧没人做"。
+  // 另外窗口/设置那两条通道（第三个文件）仍没有实现桌面那一支的"播放队列恢复校正"（第三刀已登记未实现）。
   assert.ok(!musicCode.includes('player_list_music_get"'), 'player_list_music_get 本刀不做')
   const dataCode = stripJavaComments(dataJava)
   assert.match(dataCode, /桌面版的「播放队列恢复校正」\*\*没有执行\*\*/)
-  assert.ok(!dataCode.includes('playback_queue_startup_restore'), 'Android 侧目前没有任何生产者/消费者')
+  assert.ok(!dataCode.includes('playback_queue_startup_restore'), '窗口/设置那两条通道不碰 playback_queue_startup_restore（生产者已在第六/七刀的 RainMusicListMusicGetChannels.java 落地，不在本文件）')
 })
 
 // ---------------------------------------------------------------------------
@@ -621,11 +623,11 @@ const makeNativeListMusic = (options = {}) => {
       // Java `RainMusicDatabase.open()` 的两条失败路径（在参数校验**之后**才走到，见下面的顺序）。
       const openFailure = () => {
         if (state.failure === 'unopenable') {
-          failed('打不开数据库 /data/data/com.rainmusic.mobile/databases/rain.data.db：file is not a database')
+          failed('打不开数据库 /data/data/com.rainmusic.mobile/databases/rain.dataSQLite.db：file is not a database')
           return true
         }
         if (state.failure === 'missing-table') {
-          failed('数据库 /data/data/com.rainmusic.mobile/databases/rain.data.db 里没有表 "my_list_music_info"：这不是本应用建的库，或者它已经损坏。')
+          failed('数据库 /data/data/com.rainmusic.mobile/databases/rain.dataSQLite.db 里没有表 "my_list_music_info"：这不是本应用建的库，或者它已经损坏。')
           return true
         }
         if (state.failure === 'query-failed') {

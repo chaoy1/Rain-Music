@@ -958,7 +958,7 @@ const makeNativeListMusicGet = (options = {}) => {
         return Promise.resolve({ accepted: true })
       }
       // Java `RainMusicDatabase.open()` 的两条失败路径（在参数校验之后）。
-      if (state.failure === 'unopenable') { failed('打不开数据库 /data/data/com.rainmusic.mobile/databases/rain.data.db：file is not a database'); return Promise.resolve({ accepted: true }) }
+      if (state.failure === 'unopenable') { failed('打不开数据库 /data/data/com.rainmusic.mobile/databases/rain.dataSQLite.db：file is not a database'); return Promise.resolve({ accepted: true }) }
       if (state.failure === 'missing-table') { failed('数据库 … 里没有表 "my_list_music_info"：这不是本应用建的库，或者它已经损坏。'); return Promise.resolve({ accepted: true }) }
       if (state.failure === 'query-failed') { failed('读 "my_list_music_info" 失败（SELECT … ORDER BY O."order" ASC）：no such table: my_list_music_info_order。'); return Promise.resolve({ accepted: true }) }
       if (state.failure === 'bad-meta') { failed(CHANNEL + '：music id="m-1" 的 "meta" 列不是合法的 JSON 对象'); return Promise.resolve({ accepted: true }) }

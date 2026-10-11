@@ -4,7 +4,7 @@
  *
  * ⚠️ 先写清楚这个文件**做不到**什么：本机没有 Android SDK（`docs/android-port-plan.md` §0），
  * 它**不执行任何 Java**，也**没有真的开过 SQLite** —— 所以它**不能**证明这条通道在真机上不再是
- * `IPC_CHANNEL_UNSUPPORTED`，不能证明库文件真的落在 `getDatabasePath("rain.data.db")`、
+ * `IPC_CHANNEL_UNSUPPORTED`，不能证明库文件真的落在 `getDatabasePath("rain.dataSQLite.db")`、
  * 不能证明首次打开真的建出了那 9 张表。那几件事只能由 CI 的 `gradlew assembleDebug`（编译）
  * → 真机运行（行为）来证明。
  *
@@ -322,10 +322,14 @@ test('schema 版本：Java 的 SCHEMA_VERSION_TEXT 必须等于 tables.ts 的 DB
   assert.match(dbCode, /db\.execSQL\(SQL_INSERT_SCHEMA_VERSION, new Object\[\] \{ FIELD_VERSION, SCHEMA_VERSION_TEXT \}\)/)
 })
 
-test('落点 == 桌面同名的 rain.data.db，且用 SQLiteOpenHelper（databases 目录，应用私有）', () => {
-  // 文件名与桌面 db.ts:22 的 `rain.data.db` 同名（线 A 的插件会用同一个 databases 目录）。
+test('落点 == 插件实际会开的 rain.dataSQLite.db（databases 目录，应用私有），且用 SQLiteOpenHelper', () => {
+  // 桌面仍是 db.ts:22 的 `rain.data.db`（这一条锁的是**桌面**，不要跟着 Android 改）。
   assert.match(read('src/main/worker/dbService/db.ts'), /path\.join\(rainDataPath, 'rain\.data\.db'\)/)
-  assert.equal(javaConstant(dbJava, 'DATABASE_NAME'), 'rain.data.db')
+  // Android 侧与桌面**不同名**：@capacitor-community/sqlite 会改写库名 ——
+  // `CapacitorSQLite.getDatabaseName()` 砍掉结尾的 `.db`，`createConnection()` 再固定拼 `"SQLite.db"`
+  // ⇒ JS 驱动传 `'rain.data.db'`（或 `'rain.data'`）时，插件实际建/开的是 `rain.dataSQLite.db`。
+  // 这里钉死它：名字一旦不一致，两边就是**各写一份歌单**（数据分叉，静默）。
+  assert.equal(javaConstant(dbJava, 'DATABASE_NAME'), 'rain.dataSQLite.db')
 
   // 用框架自带的 android.database.sqlite（**零新增 gradle 依赖**，任务书要求）。
   assert.match(dbJava, /import android\.database\.sqlite\.SQLiteOpenHelper;/)
@@ -531,11 +535,11 @@ const makeNativeList = (options = {}) => {
       switch (state.failure) {
         case 'unopenable':
           // Java RainMusicDatabase.open()：`throw new IllegalStateException("打不开数据库 " + path + …)`
-          reject('IPC_HANDLER_FAILED', '打不开数据库 /data/data/com.rainmusic.mobile/databases/rain.data.db：file is not a database')
+          reject('IPC_HANDLER_FAILED', '打不开数据库 /data/data/com.rainmusic.mobile/databases/rain.dataSQLite.db：file is not a database')
           return Promise.resolve({ accepted: true })
         case 'missing-table':
           // Java RainMusicDatabase.requireTable()：`… 里没有表 "my_list" …`
-          reject('IPC_HANDLER_FAILED', '数据库 /data/data/com.rainmusic.mobile/databases/rain.data.db 里没有表 "my_list"')
+          reject('IPC_HANDLER_FAILED', '数据库 /data/data/com.rainmusic.mobile/databases/rain.dataSQLite.db 里没有表 "my_list"')
           return Promise.resolve({ accepted: true })
         case 'query-failed':
           // Java RainMusicListChannels.readLists()：`throw new IllegalStateException("读 \"my_list\" 失败（…）")`

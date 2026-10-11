@@ -226,7 +226,7 @@ import java.util.Map;
  *       {@code await dbService.completePlaybackQueueRestore()}。Android 上这条链**没有可用的落点**：
  *       {@code global.rain.worker.dbService} 是**主进程**里的 SQLite worker（{@code src/main/event/ListEvent.ts:40}
  *       等 40 余处都是这么用的），而 Android 侧根本没有主进程，线 A 的 Android 驱动
- *       （{@code src/main/worker/dbService/adapter/android.ts:53-58}）到现在仍是
+ *       （{@code src/main/worker/dbService/adapter/android.ts:105-110}）到现在仍是
  *       {@code throw new Error('… not implemented yet')}。所以本通道**原样返回存储值**，
  *       并打一条 {@code Logger.warn} 点名"校正没有做" —— **不是静默跳过**。
  *       为什么"原样返回"不算假装成功：桌面自己在 {@code listId != DEFAULT || index < 0} 时
