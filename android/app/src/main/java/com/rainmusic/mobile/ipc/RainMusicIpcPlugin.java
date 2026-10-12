@@ -147,6 +147,13 @@ public class RainMusicIpcPlugin extends Plugin {
         // RainMusicListMusicGetChannels 的类注释「本刀做的是桌面那四行里的哪几行」与「快照」。
         RainMusicListMusicGetChannels.register(this);
 
+        // P0-2 第八刀：歌单写通道的第一条 —— 改名（player_list_update，落点 = SQLite 的 my_list 表）。
+        // **invoke + 同名广播两半**都在这一条通道上：桌面上 invoke 收在 rendererEvent.ts:18-20、
+        // 广播发在 winRendererEvent.ts:15-17（裸数组），渲染层在 rendererListManage.ts:231 订阅。
+        // 同族的另外两条写通道（player_list_add / player_list_remove）**不在这里注册** ——
+        // 第九 / 第十刀再做，届时它们与本刀同一个文件（三条写通道共用那一把 LIST_WRITE_LOCK）。
+        RainMusicListWriteChannels.register(this);
+
         Logger.info(
             TAG,
             "IPC 传输桥已加载：plugin=" + PLUGIN_NAME + ", event=" + EVENT_NAME +

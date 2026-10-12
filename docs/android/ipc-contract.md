@@ -99,9 +99,9 @@
 | 通道名 | 渲染层封装（文件:行） | 主进程 handler（文件:行） | 参数 → 返回值 | 用途 |
 | --- | --- | --- | --- | --- |
 | `player_list_get` | `getUserLists` `R:listManage:28` | `M:list:6` | 无 → `Rain.List.UserListInfo[]` | 读全部歌单 |
-| `player_list_add` | `createUserList` `R:listManage:38` | `M:list:12` | `{position, listInfos}` → `void` | 新建歌单 |
-| `player_list_remove` | `removeUserList` `R:listManage:46` | `M:list:15` | `ids: string[]` → `void` | 删除歌单 |
-| `player_list_update` | `updateUserList` `R:listManage:55` | `M:list:18` | `listInfos[]` → `void` | 改歌单元信息 |
+| `player_list_add` | 双向：`createUserList` `R:listManage:38`；监听 `R:listManage:229` | 接收 `M:list:12`；发送 `M:listSend:10` | `{position, listInfos}` → `void` | 新建歌单 |
+| `player_list_remove` | 双向：`removeUserList` `R:listManage:46`；监听 `R:listManage:230` | 接收 `M:list:15`；发送 `M:listSend:13` | `ids: string[]` → `void` | 删除歌单 |
+| `player_list_update` | 双向：`updateUserList` `R:listManage:55`；监听 `R:listManage:231` | 接收 `M:list:18`；发送 `M:listSend:16` | `listInfos[]` → `void` | 改歌单元信息 |
 | `player_list_update_position` | `updateUserListPosition` `R:listManage:63` | `M:list:21` | `{position, ids}` → `void` | 歌单排序 |
 | `player_list_data_overwire` | 双向：`overwriteUserLists` `R:listManage:149`；监听 `R:listManage:228` | 接收 `M:list:9`；发送 `M:listSend:7` | `Rain.List.ListActionDataOverwrite` → `void` | 整表覆盖（导入备份） |
 | `player_list_music_get` | `getListMusics` `R:listManage:73` | `M:list:24` | `listId: string` → `Rain.Music.MusicInfo[]` | 读歌单内歌曲 |
@@ -116,6 +116,8 @@
 | `player_list_music_get_list_ids` | `getMusicExistListIds` `R:listManage:166` | `M:list:51` | `musicInfoId: string` → `string[]` | 反查歌曲所属歌单 |
 
 > **已发现的缺陷（证据充分，建议实现时一并修）**：`M:listSend:39-41` 的 `list_music_clear` 广播函数错误地发送了 `PLAYER_EVENT_NAME.list_data_overwire` 而不是 `list_music_clear`。因此 `player_list_music_clear` 实际上只有"渲染层 → 主进程"一个方向。Android 侧不需要复制这个 bug，但要注意桌面版的广播语义是错的。
+
+> **上面三条"双向"的广播载荷形状（照抄，别自己包装）**：三条都同时是 invoke 通道和广播通道，但**载荷不同形**——`player_list_add` 的 `M:listSend:10` 发的是 `sendEvent(channel, { position, listInfos })`，事件参数是**对象**；`player_list_remove` 的 `M:listSend:13` 发的是 `ids`、`player_list_update` 的 `M:listSend:16` 发的是 `listInfos`，这两条是**裸数组**（不是 `{ ids }` / `{ listInfos }`）。原生侧用 `ctx.emitTo(channel, payload)` 单参发一条 `{kind:'event', channel, args:[payload]}`，桥把 `args[0]` 原样当作 `params` 交给订阅者（`src/common/platform/ipcBridge/capacitor.js:434-470`）；把那两条**裸数组**包成对象，会让渲染层 `rendererListManage.ts:185-191` 转手给 `action.ts:163-181` 的 `for (const … of …)` 抛 `TypeError`，而那个异常会被桥自己吞成一条 `console.error`（`capacitor.js:464-467`）——表现为"操作没生效"，且调用方拿不到任何 reject。（`player_list_add` 反过来：它必须是对象，发成裸数组时 `rendererListManage.ts:180-184` 的解构同样会炸。）
 
 ### 1.4 收藏 / 不感兴趣
 
