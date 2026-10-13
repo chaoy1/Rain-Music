@@ -1458,7 +1458,7 @@ public final class RainMusicListWriteChannels {
                 "（`WHERE \"id\"=?` 拿一个空串去匹配只会静默命中 0 行；空串也不可能是歌单的 id）"
             );
         }
-        if (RESERVED_LIST_ID_DEFAULT.equals(id) || RESERVED_LIST_ID_TEMP.equals(id) || "love".equals(id)) {
+        if (RESERVED_LIST_ID_DEFAULT.equals(id) || RESERVED_LIST_ID_TEMP.equals(id)) {
             throw new IllegalArgumentException(
                 CHANNEL_LIST_REMOVE + " 拒绝删除保留列表 `" + id + "`（`" + FIELD_IDS + "` 第 " + index +
                 " 个元素）：保留列表（`" + RESERVED_LIST_ID_DEFAULT + "` / `" + RESERVED_LIST_ID_TEMP +
