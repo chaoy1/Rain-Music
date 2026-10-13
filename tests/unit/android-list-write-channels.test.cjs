@@ -1,13 +1,16 @@
 /**
  * Android 移植 · **P0-2 第八刀**（`player_list_update`：改名，invoke + 同名广播两半）
  * + **第九刀-a/b**（`player_list_add`：新建，invoke + 同名广播两半）
+ * + **第十刀-a/b**（`player_list_remove`：删除，invoke + 同名广播两半）
  * 的契约 / 接线 / 落点 / 范围回归网。
  *
- * ⚠️ **第九刀-b（本刀）只改本文件与 `docs/android/ipc-contract.md`**：第九刀-a 把
- * `player_list_add` 实现进**同一个**生产文件（`RainMusicListWriteChannels.java`）之后，
- * 本文件里"整个文件只有一条通道 / 只有一把锁的临界区 / 只有一种载荷形状"的**旧守卫**
- * 全部过期了。本刀把它们从"整文件级"改成"**逐条通道 / 逐个临界区**级"，并没有放宽任何一条
- * 断言：`player_list_update` 那一半的每一条守卫都**逐字保留**，新增的是 add 那一半。
+ * ⚠️ **第十刀-b（本刀）只改本文件、`docs/android/ipc-contract.md`，以及
+ * `RainMusicListWriteChannels.java` 里那一处 `.0` 归一化**：第十刀-a 把 `player_list_remove`
+ * 实现进**同一个**生产文件之后，本文件里"整个文件只有两条通道 / 只有两个临界区 / 禁字表里还有
+ * remove"的**旧守卫**全部过期了。本刀把它们从"两条"改成"三条"，并没有放宽任何一条断言：
+ * `player_list_update` / `player_list_add` 那两半的每一条守卫都**逐字保留**，新增的是 remove 那一半；
+ * 同时把第十刀-a 只用 `%TEMP%` 里的临时探针跑过的两组断言（原生 JVM 组 11 条 + 渲染层组）
+ * **正式搬进仓库**（替身补上了"认识三句 DELETE"的能力，见 `STUB_SQLITE_STATEMENT` 的类注释）。
  *
  * ⚠️ 先写清楚这个文件**做不到**什么：本机没有 Android SDK（`docs/android-port-plan.md` §0），
  * 它**没有在 Android 上跑过任何东西**，也**没有真的开过 SQLite** —— 所以它**不能**证明这条通道
@@ -29,14 +32,22 @@
  *    **第九刀-a 那一半同款**：形状 == 契约 `:102`（`{position, listInfos}` → `void`，广播载荷是
  *    **对象**）、桌面三段链（`rendererListManage.ts:36-39` → `rendererEvent.ts:12-14` →
  *    `ListEvent.ts:50-55` → `winRendererEvent.ts:9-11` + 订阅 `rendererListManage.ts:229`）
- *    逐字对得上；`SQL_LIST_INSERT` / `SQL_LIST_CLEAR` / 排序列读逐字对齐 `statements.ts:16-20,27-41`；
- *    **两个** `synchronized (LIST_WRITE_LOCK)` 临界区都逐块断言"块内没有 emit、没有顶层载荷解析"。
+ *    逐字对得上；`SQL_LIST_INSERT` / `SQL_LIST_CLEAR` / 排序列读逐字对齐 `statements.ts:16-20,27-41`。
+ *    **第十刀-a 那一半同款**：形状 == 契约 `:103`（`ids: string[]` → `void`，广播载荷是**裸数组**）、
+ *    桌面三段链（`rendererListManage.ts:45-47` → `rendererEvent.ts:15-17` → `ListEvent.ts:61-65` →
+ *    `winRendererEvent.ts:12-14` + 订阅 `rendererListManage.ts:230`）逐字对得上；
+ *    三句 DELETE 逐字对齐 `statements.ts:49 / :119 / :192`（`my_list` → `my_list_music_info` →
+ *    `my_list_music_info_order`，**每个 id 三句连着发**，对齐 `dbHelper.ts:86-90`）；
+ *    **三个** `synchronized (LIST_WRITE_LOCK)` 临界区都**逐块**断言"块内没有 emit、
+ *    没有顶层载荷解析（含 `readRemoveIds` / `requireRemoveId`）"；保留 id 的常量与消息文本；
+ *    以及 `.0` 归一化（写通道读现有行那一处与读通道 / 桌面 `dbHelper.ts:44-49` 逐字同形）。
  *
  * 2. **渲染层接线组（真 JS）**：用真的桥（`capacitor.js`）+ **真的** `rendererListManage.ts`
  *    与**真的** `action.ts`（只把它们的 import 换成替身），跑一遍
  *    "原生 `{kind:'event', channel:'player_list_update', args:[payload]}` → 渲染层 state 被改"。
  *    它钉住的是**广播载荷必须是裸数组**：包成对象 ⇒ `for…of` 抛 `TypeError` ⇒ 被桥自己吞成
  *    **一条 `console.error`**（`capacitor.js:464-467`）⇒ 界面完全不动。
+ *    同一条链也跑了 add（对象载荷）与 remove（裸字符串数组）两半 —— 三条通道**形状各不同形**。
  *
  * 3. **JVM 行为组（真 `javac` + 真 `java`）**：把 `RainMusicListWriteChannels.java` 与
  *    **没改过的** `RainMusicIpcHandlers.java` 连同一组**手写替身**（假 `SQLiteDatabase` /
@@ -49,15 +60,22 @@
  *    **第九刀-a 新增的 add 场景**：广播载荷是**对象**且 `position` 是**调用方原值**（`-1` 不被折算）、
  *    空 `listInfos` ⇒ 0 条 INSERT + 提交 + 广播、**空洞续号**（库里 `0,1,5` ⇒ 下一个 `6`）、
  *    **插队重编号**（清表 + `0..n-1` 全量重写、可空列原样搬回）、id 冲突 ⇒ 回滚 + 不广播、
- *    缺 `name` ⇒ 连事务都不开（校验早于 `open`）、两个线程并发 add ⇒ 位置不重复。
+ *    缺 `name` ⇒ 连事务都不开（校验早于 `open`）、两个线程并发 add ⇒ 位置不重复；
+ *    **第十刀-b 新增的 remove 场景**（第十刀-a 只用 `%TEMP%` 跑过的那 11 条，逐条搬进来）：
+ *    两个 id ⇒ 一个事务六句 DELETE（绑定序 `l-1,l-1,l-1,l-2,l-2,l-2`）、广播是**裸字符串数组**
+ *    （`arg0=JSONArray`、`wire=["l-1","l-2"]`）、单个 / 不存在的 id 都不被误拒、**`love` 不被拒**、
+ *    空数组 ⇒ 0 条 SQL（连 prepare 都不做）、**保留 id（`default` / `temp`）在 `open` 之前就被拒**、
+ *    第 2 句失败 ⇒ 回滚（第一句删掉的行走回来）+ 不广播、库打不开 / 表缺失、两个线程并发 remove。
  *    ⚠️ 替身的签名是人手写的，与真框架 API 一旦不一致，这次 `javac` 不会发现；而
  *    `RainMusicDatabase` 在本组里是**替身**（真文件的建表 / 迁移 / `requireTable` 语义不在
  *    本组覆盖范围内，那些由 `android-list-channels.test.cjs` 等用例在源码层面对齐）。
  *    本机没有 javac 时这一组跳过。
  *
- * 范围守卫：本文件覆盖**同一个生产文件**里的**两条**通道（第八刀的 `player_list_update`
- * + 第九刀-a 的 `player_list_add`），**不改**第四 / 五 / 六 / 七刀与第一 / 二 / 三刀的任何一个
- * 文件（那些文件的注册条数在这里被重新数一遍），也不碰 `player_list_remove`（第十刀）。
+ * 范围守卫：本文件覆盖**同一个生产文件**里的**三条**通道（第八刀的 `player_list_update`
+ * + 第九刀-a 的 `player_list_add` + 第十刀-a 的 `player_list_remove`），**不改**第四 / 五 / 六 / 七刀
+ * 与第一 / 二 / 三刀的任何一个文件（那些文件的注册条数在这里被重新数一遍）；
+ * 后面几刀的写通道（`player_list_update_position` / `player_list_data_overwire` /
+ * `player_list_music*`）仍在禁字表里，一个字都不许出现。
  */
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -163,6 +181,8 @@ const { PLAYER_EVENT_NAME } = load('src/common/ipcNames.ts', {}, {})
 const CHANNEL = PLAYER_EVENT_NAME.list_update
 /** 第九刀-a 的通道名（同一个文件里的第二条通道）。 */
 const CHANNEL_ADD = PLAYER_EVENT_NAME.list_add
+/** 第十刀-a 的通道名（同一个文件里的第三条通道）。 */
+const CHANNEL_REMOVE = PLAYER_EVENT_NAME.list_remove
 /** 桌面那一条 UPDATE（`statements.ts:56-62` 的 `createListUpdateStatement`）。 */
 const desktopUpdateSql = statementsTs.match(/createListUpdateStatement[\s\S]*?db\.prepare<\[Rain\.DBService\.UserListInfo\]>\(`([\s\S]*?)`\)/)[1]
 /** 桌面那一条 INSERT（`statements.ts:27-32`，**6 列、含 position**）。 */
@@ -171,10 +191,16 @@ const desktopInsertSql = statementsTs.match(/createListInsertStatement[\s\S]*?db
 const desktopClearSql = statementsTs.match(/createListClearStatement[\s\S]*?db\.prepare<\[\]>\('([\s\S]*?)'\)/)[1]
 /** 桌面读全部歌单那一句（`statements.ts:16-20`，`ORDER BY "position" ASC, "rowid" ASC`）。 */
 const desktopQuerySql = statementsTs.match(/createListQueryStatement[\s\S]*?db\.prepare<\[\]>\(`([\s\S]*?)`\)/)[1]
+/** 第十刀-a 的三句删除（`statements.ts:49 / :119 / :192`，三句**本来就是位置参数**）。 */
+const desktopListDeleteSql = statementsTs.match(/createListDeleteStatement[\s\S]*?db\.prepare<\[string\]>\('([\s\S]*?)'\)/)[1]
+const desktopMusicInfoDeleteSql = statementsTs.match(/createMusicInfoDeleteByListIdStatement[\s\S]*?db\.prepare<\[string\]>\('([\s\S]*?)'\)/)[1]
+const desktopOrderDeleteSql = statementsTs.match(/createMusicInfoOrderDeleteByListIdStatement[\s\S]*?db\.prepare<\[string\]>\('([\s\S]*?)'\)/)[1]
 /** 桌面 `updateUserLists` 的事务边界（`dbHelper.ts:99-105`）。 */
 const desktopUpdateHelper = dbHelperTs.match(/export const updateUserLists[\s\S]*?\}\)\(lists\)/)[0]
 /** 桌面 `insertUserLists` 的事务边界（`dbHelper.ts:58-75`，`isClear` 那一支）。 */
 const desktopInsertHelper = dbHelperTs.match(/export const insertUserLists[\s\S]*?\}\)\(lists\)/)[0]
+/** 桌面 `deleteUserLists` 的事务边界（`dbHelper.ts:81-93`，"每个 id 三句连着发"）。 */
+const desktopDeleteHelper = dbHelperTs.match(/export const deleteUserLists[\s\S]*?\}\)\(listIds\)/)[0]
 /** 桌面 `createUserLists` 的两个分支（`modules/list/index.ts:70-98`）。 */
 const desktopCreateLists = read('src/main/worker/dbService/modules/list/index.ts').match(/export const createUserLists[\s\S]*?\n\}/)[0]
 
@@ -262,7 +288,8 @@ test('契约注里点名的三个订阅行号（:229/:230/:231）与桌面源码
   // ⚠️ 第九刀-b：`:102` 那一行的"用途"一格里补了**原生已实现**的标注（指向生产文件），
   // 所以这条断言跟着换成了新文本 —— 它钉的还是"那一行的形状没被顺手改掉"。
   assert.ok(contractMd.includes('| `player_list_add` | 双向：`createUserList` `R:listManage:38`；监听 `R:listManage:229` | 接收 `M:list:12`；发送 `M:listSend:10` | `{position, listInfos}` → `void` | 新建歌单（**原生已实现**：`RainMusicListWriteChannels.java` 的 `CHANNEL_LIST_ADD`，第九刀-a；本行左侧的契约就是实现的形状） |'))
-  assert.ok(contractMd.includes('| `player_list_remove` | 双向：`removeUserList` `R:listManage:46`；监听 `R:listManage:230` | 接收 `M:list:15`；发送 `M:listSend:13` | `ids: string[]` → `void` | 删除歌单 |'))
+  // ⚠️ 第十刀-b：`:103` 同款（第十刀-a 已实现 remove，本刀按第八/九刀的做法补上标注）。
+  assert.ok(contractMd.includes('| `player_list_remove` | 双向：`removeUserList` `R:listManage:46`；监听 `R:listManage:230` | 接收 `M:list:15`；发送 `M:listSend:13` | `ids: string[]` → `void` | 删除歌单（**原生已实现**：`RainMusicListWriteChannels.java` 的 `CHANNEL_LIST_REMOVE`，第十刀-a；本行左侧的契约就是实现的形状） |'))
   // 表下那条注必须点明"裸数组 / 不能包成对象"以及它的代价（被桥吞成一条 console.error）。
   assert.match(contractMd, /> \*\*上面三条"双向"的广播载荷形状（照抄，别自己包装）\*\*/)
   assert.ok(contractMd.includes('裸数组'))
@@ -273,6 +300,15 @@ test('契约注里点名的三个订阅行号（:229/:230/:231）与桌面源码
   assert.ok(contractMd.includes('args = [{ position, listInfos }]'), '契约注必须写出 wire 的形状')
   assert.ok(contractMd.includes('就是调用方传来的原值'), '契约注必须点明 position 不折算')
   assert.ok(contractMd.includes('position ASC, rowid ASC'), '契约注必须写出插队分支的读序')
+  // 第十刀-b 补的那一段：remove 的**裸数组**载荷形状 + 它的四条 invoke 语义。
+  assert.match(contractMd, /> \*\*`player_list_remove` 的裸数组载荷形状（原生已实现，第十刀-a）\*\*/)
+  assert.ok(contractMd.includes('`ctx.emitTo(CHANNEL_LIST_REMOVE, ids)`'), '契约注必须点名原生侧那一次 emit')
+  assert.ok(contractMd.includes('args = [["l-1","l-2"]]'), '契约注必须写出 remove 的 wire 形状（裸数组）')
+  assert.ok(contractMd.includes('`args = [{ ids: […] }]`'), '契约注必须点明**不能**包成 {ids:…}')
+  assert.ok(contractMd.includes('每个 id **连着跑三句** DELETE'), '契约注必须写清三句 DELETE 的形状')
+  assert.ok(contractMd.includes('0 条 SQL（连 prepare 都不做）'), '契约注必须写清空数组的语义')
+  assert.ok(contractMd.includes('保留 id（`default` / `temp`'), '契约注必须写清保留 id 被拒 + 这是一处有意偏离')
+  assert.ok(contractMd.includes('`love` **不在**拒绝之列'), '契约注必须写清 love 不被拒（裁定 4）')
 })
 
 // ---------------------------------------------------------------------------
@@ -373,6 +409,88 @@ test('第九刀-a 的 SQL 逐字对齐 statements.ts：INSERT 6 列（含 positi
   assert.match(desktopInsertHelper, /for \(const list of lists\) \{\s*\n\s*await listInsertStatement\.run\(/)
 })
 
+test('第十刀-a 的三句 DELETE 逐字对齐 statements.ts（my_list / my_list_music_info / my_list_music_info_order，各一句）', () => {
+  // 先钉住桌面那三句（引用没写错文件）：三张表**一个都不能写错**，写错 = 删错表。
+  assert.match(desktopListDeleteSql, /DELETE FROM "main"\."my_list" WHERE "id"=\?/)
+  assert.match(desktopMusicInfoDeleteSql, /DELETE FROM "main"\."my_list_music_info" WHERE "listId"=\?/)
+  assert.match(desktopOrderDeleteSql, /DELETE FROM "main"\."my_list_music_info_order" WHERE "listId"=\?/)
+
+  const pairs = [
+    ['SQL_LIST_DELETE', desktopListDeleteSql, 'my_list', 'id'],
+    ['SQL_MUSIC_INFO_DELETE_BY_LIST_ID', desktopMusicInfoDeleteSql, 'my_list_music_info', 'listId'],
+    ['SQL_MUSIC_INFO_ORDER_DELETE_BY_LIST_ID', desktopOrderDeleteSql, 'my_list_music_info_order', 'listId'],
+  ]
+  for (const [name, desktop, table, column] of pairs) {
+    const java = javaTextBlock(writeJava, name)
+    assert.equal(
+      normalizeSql(java),
+      normalizeSql(toPositionalSql(desktop)),
+      `Java 的 ${name} 必须与 statements.ts 那一句逐字一致（这三句本来就只有位置参数）`,
+    )
+    // 归一化比对挡不住"三句全抄成 my_list"这种抄错（去空白后仍是合法 SQL），所以按表 / 列再断一次。
+    assert.match(java, new RegExp(`DELETE FROM "main"\\."${table}" WHERE "${column}"=\\?`), `${name} 必须删 ${table}.${column}`)
+    assert.equal((java.match(/\?/g) ?? []).length, 1, `${name} 只该有一个位置参数（多一个 = 删得比桌面多）`)
+  }
+
+  // 三句在**同一个循环**里、按 1→2→3 连着发（对齐 dbHelper.ts:86-90）。
+  assert.match(desktopDeleteHelper, /db\.transaction/)
+  assert.match(
+    desktopDeleteHelper,
+    /for \(const id of listIds\) \{\s*\n\s*await listDeleteStatement\.run\(id\)\s*\n\s*await musicInfoDeleteByListIdStatement\.run\(id\)\s*\n\s*await musicInfoOrderDeleteByListIdStatement\.run\(id\)/,
+    '桌面就是"每个 id 三句连着发"——顺序不能反、也不能少的少',
+  )
+
+  const body = blockRange(writeCode, 'private static void applyListRemoves').body
+  const compiled = pairs.map(([name]) => body.indexOf(`compileStatement(${name})`))
+  assert.ok(compiled.every(at => at > -1) && compiled[0] < compiled[1] && compiled[1] < compiled[2],
+    `三句 compileStatement 的顺序必须与 statements.ts 的调用序一致：${compiled.join(',')}`)
+  const loop = body.slice(body.indexOf('for (int i = 0'), body.indexOf('db.setTransactionSuccessful()'))
+  const fired = ['listDelete.clearBindings()', 'musicInfoDelete.clearBindings()', 'orderDelete.clearBindings()']
+    .map(call => loop.indexOf(call))
+  assert.ok(fired[0] > -1 && fired[1] > fired[0] && fired[2] > fired[1], `三句的执行顺序必须是 1→2→3：${fired.join(',')}`)
+  assert.equal((loop.match(/executeUpdateDelete\(\)/g) ?? []).length, 3, '每个 id 恰好三句 DELETE')
+  assert.equal((loop.match(/bindString\(1, id\)/g) ?? []).length, 3, '三句都用位置参数 1 绑同一个 id')
+  // 不做的事：删歌单**不重排 / 不重编号** position（桌面也不做），也不看 executeUpdateDelete 的返回值。
+  assert.ok(!/position/i.test(body), 'remove 的写库段里不该出现 position')
+  assert.ok(!/=\s*\w+\.executeUpdateDelete\(\)/.test(loop), '三句的返回值一律丢掉（0 行命中 = 成功）')
+  // 裁定 1：空数组**连 prepare 都不做**（"0 条 SQL"要在任何读法下都字面成立）——
+  // 三条 compileStatement 必须在 `ids.length() > 0` 那个 if 里面。
+  const guardIndex = body.indexOf('if (ids.length() > 0)')
+  assert.ok(guardIndex > -1, '空数组那条分支必须显式存在（`if (ids.length() > 0)`）')
+  assert.ok(compiled.every(at => at > guardIndex), '三条 prepare 必须在 `ids.length() > 0` 的块里')
+})
+
+test('`.0` 归一化：写通道**读现有行**时与读通道 / 桌面同一条规则（少了它，插队整表重写会把 "123.0" 固化）', () => {
+  // 桌面：`dbHelper.ts:23` 的 `idFixRxp = /\.0$/`，`:44-49` 在 queryAllUserList() 里逐条去掉末尾 .0。
+  assert.match(dbHelperTs, /const idFixRxp = \/\\\.0\$\//)
+  assert.match(
+    dbHelperTs,
+    /if \(info\.sourceListId\?\.endsWith\?\.\('\.0'\)\) \{\s*\n\s*info\.sourceListId = info\.sourceListId\.replace\(idFixRxp, ''\)/,
+  )
+  // 读通道（第四刀）照抄了它：本文件（写通道）读现有行那一处也必须接上 —— 否则老库里的 "123.0"
+  // 在插队整表重写之后仍是 "123.0"，而渲染层走读通道看到的是 123 ⇒ 两侧视图不一致。
+  assert.match(listJava, /jsonValue\(stripLegacyNumericIdSuffix\(cursor\.getString\(sourceListIdIndex\)\)\)/)
+  assert.match(writeCode, /jsonNullIfNull\(stripLegacyNumericIdSuffix\(cursor\.getString\(sourceListIdIndex\)\)\)/)
+  // 必须是**读现有行**的那条路（readOrderedRows），不是别处顺手加的。
+  assert.match(
+    blockRange(writeCode, 'private static List<ListRow> readOrderedRows').body,
+    /stripLegacyNumericIdSuffix\(cursor\.getString\(sourceListIdIndex\)\)/,
+  )
+  // 语义（不是只匹配名字）：只去**末尾那一次**的 `.0`，null 原样返回。
+  assert.match(
+    writeCode,
+    /return sourceListId\.endsWith\("\.0"\) \? sourceListId\.substring\(0, sourceListId\.length\(\) - 2\) : sourceListId;/,
+  )
+  // 两份实现必须**逐字同形**（一份语义、两处实现；抽共享要动读通道 ⇒ 见汇报）：
+  // 改一份而不改另一份，同一个 "123.0" 在读 / 写两条通道上就会有**两个**答案。
+  const bodyOf = (source, marker) => blockRange(stripJavaComments(source), marker).body.replace(/\s+/g, ' ').trim()
+  assert.equal(
+    bodyOf(writeJava, 'private static String stripLegacyNumericIdSuffix'),
+    bodyOf(listJava, 'private static String stripLegacyNumericIdSuffix'),
+    '两份 stripLegacyNumericIdSuffix 必须逐字同形（改一份必须同时改另一份）',
+  )
+})
+
 test('表 / 列名对齐 tables.ts：my_list 的 6 列都在，且 position 是 NOT NULL（所以它不能进 SET）', () => {
   const ddl = tablesTs.match(/tables\.set\('my_list',\s*`([\s\S]*?)`\)/)[1]
   const columns = [...ddl.matchAll(/"(\w+)"\s+(INTEGER|TEXT|REAL|BLOB)([^,\n]*)/g)]
@@ -418,35 +536,47 @@ test('锁：private static final Object LIST_WRITE_LOCK（三条写通道共用�
     /private\s+static\s+final\s+Object\s+LIST_WRITE_LOCK\s*=\s*new\s+Object\(\)\s*;/,
     '锁必须是文件私有的 static final Object（三条写通道共用同一把）',
   )
-  // ⚠️ 第九刀-b：本文件现在有**两个**临界区（第八刀改名的 `applyListUpdates` +
-  // 第九刀-a 新建的 `applyListAdds`），所以不再是 1 而是 2。**一条都不许省**：
+  // ⚠️ 第九刀-b：本文件有**两个**临界区（第八刀改名的 `applyListUpdates` + 第九刀-a 新建的
+  // `applyListAdds`）；第十刀-b 起是**三个**（第十刀-a 删除的 `applyListRemoves`）。**一条都不许省**：
   // 数少了说明锁没了，数多了说明有人又新加了一把/一处锁，两种情况都要回来看这一条。
-  assert.equal((writeCode.match(/synchronized\s*\(/g) ?? []).length, 2, '本文件应恰好有两个临界区（update 一个、add 一个）')
-  // ⚠️ 逐个临界区断言（原来只查了第一个）：两个块里都**不许** emit、也**不许**做顶层载荷解析。
-  // 顶层载荷解析（`readListInfos` / `readAddParams` / `requirePosition` / `requireAddListInfos` /
-  // `buildPayloadRows`）必须在进锁**之前**做完：它们只依赖 args，进锁只会白占锁并让
-  // "参数非法"这条路径先去开库/开事务（缺 name 连事务都不该开，见 JVM 探针 add-missing-name）。
+  assert.equal((writeCode.match(/synchronized\s*\(/g) ?? []).length, 3, '本文件应恰好有三个临界区（update 一个、add 一个、remove 一个）')
+  // ⚠️ 逐块断言（第九刀-b 起覆盖**全部**临界区，第十刀-b 把第三条也纳进来）：三块里都**不许** emit、
+  // 也**不许**做顶层载荷解析。顶层载荷解析（`readListInfos` / `readAddParams` / `requirePosition` /
+  // `requireAddListInfos` / `buildPayloadRows` / `readRemoveIds` / `requireRemoveId`）必须在进锁**之前**做完：
+  // 它们只依赖 args，进锁只会白占锁并让"参数非法"这条路径先去开库/开事务
+  // （缺 name / 保留 id 连事务都不该开，见 JVM 探针 add-missing-name 与 remove-reserved-default）。
   const locks = blockRanges(writeCode, 'synchronized (LIST_WRITE_LOCK)')
-  assert.equal(locks.length, 2, '两个临界区都要被解析出来（blockRanges 按花括号配对）')
+  assert.equal(locks.length, 3, '三个临界区都要被解析出来（blockRanges 按花括号配对）')
   for (const [index, one] of locks.entries()) {
-    for (const forbidden of ['emitTo', 'RequestContext', 'readListInfos', 'readAddParams', 'requirePosition', 'requireAddListInfos', 'buildPayloadRows']) {
+    for (const forbidden of [
+      'emitTo', 'RequestContext', 'readListInfos', 'readAddParams', 'requirePosition',
+      'requireAddListInfos', 'buildPayloadRows', 'readRemoveIds', 'requireRemoveId',
+    ]) {
       assert.ok(!one.body.includes(forbidden), `第 ${index + 1} 个临界区里不该出现 ${forbidden}`)
     }
   }
-  // 两个临界区必须**各属于一个写方法**，且都在 `beginTransaction` 之前进入、`endTransaction`
+  // 三个临界区必须**各属于一个写方法**，且都在 `beginTransaction` 之前进入、`endTransaction`
   // 之后退出（同一个块里既 begin 又 end ⇒ 锁包住了整趟事务；emit 在块外 ⇒ 提交后才广播）。
   const updateFn = blockRange(writeCode, 'private static void applyListUpdates')
   const addFn = blockRange(writeCode, 'private static void applyListAdds')
+  const removeFn = blockRange(writeCode, 'private static void applyListRemoves')
   const within = fn => locks.filter(one => one.start > fn.open && one.end < fn.end)
   assert.equal(within(updateFn).length, 1, 'applyListUpdates（改名）里必须有且只有一个临界区')
   assert.equal(within(addFn).length, 1, 'applyListAdds（新建）里必须有且只有一个临界区')
-  // 两个块不是同一个：一个是 UPDATE 的写库段，一个是 INSERT/DELETE 的写库段。
+  assert.equal(within(removeFn).length, 1, 'applyListRemoves（删除）里必须有且只有一个临界区')
+  // 三个块不是同一个：一个是 UPDATE 的写库段、一个是 INSERT/DELETE 的写库段、一个是三句 DELETE 的写库段。
   assert.ok(within(updateFn)[0].body.includes('statement.executeUpdateDelete()'))
   assert.ok(within(addFn)[0].body.includes('writeListRows(db, rows)'), 'add 的临界区里必须真的落库')
   assert.ok(within(addFn)[0].body.includes('db.execSQL(SQL_LIST_CLEAR)'), 'add 的临界区里必须含清表那一半')
   assert.match(blockRange(writeCode, 'private static void writeListRows').body,
     /for \(Object\[\] row : rows\) db\.execSQL\(SQL_LIST_INSERT, row\)/, '逐行 execSQL，而不是一条拼出来的多值 INSERT')
+  // remove 的临界区：三句 DELETE 一句话都不许少（逐句都点名，见「三句 DELETE」那一条用例）。
+  for (const call of ['listDelete.executeUpdateDelete()', 'musicInfoDelete.executeUpdateDelete()', 'orderDelete.executeUpdateDelete()']) {
+    assert.ok(within(removeFn)[0].body.includes(call), `remove 的临界区里必须有 ${call}`)
+  }
   assert.notEqual(within(updateFn)[0].start, within(addFn)[0].start)
+  assert.notEqual(within(updateFn)[0].start, within(removeFn)[0].start)
+  assert.notEqual(within(addFn)[0].start, within(removeFn)[0].start)
   for (const [index, one] of locks.entries()) {
     assert.match(one.body, /db\.beginTransaction\(\)/, `第 ${index + 1} 个临界区里必须开事务`)
     assert.match(one.body, /db\.setTransactionSuccessful\(\)/, `第 ${index + 1} 个临界区里必须标成功`)
@@ -461,10 +591,11 @@ test('锁：private static final Object LIST_WRITE_LOCK（三条写通道共用�
   assert.match(writeJava, /固定 2 线程池|2 线程池/, '类注释必须写明它护的是同一 2 线程池里的两次 handler')
 })
 
-test('emit 在**提交成功之后**、**锁外**；update 的载荷是裸数组、add 的载荷是对象（两条各钉一条）', () => {
+test('emit 在**提交成功之后**、**锁外**；update / remove 的载荷是裸数组、add 的载荷是对象（三条各钉一条）', () => {
   // ⚠️ 这是**两个方法**（listUpdate 里 emit、applyListUpdates 里加锁），所以不能拿"源码里谁的
-  // indexOf 更大"当证据 —— 结构证据是"锁块与两个写库方法里都没有 emit"，行为证据在 JVM 探针那一组
-  // （update 的 `events` 是 `…>update>commit>close>end>emit`，add 的是 `…>execSQL>commit>end>emit`）。
+  // indexOf 更大"当证据 —— 结构证据是"锁块与三个写库方法里都没有 emit"，行为证据在 JVM 探针那一组
+  // （update 的 `events` 是 `…>update>commit>close>end>emit`，add 的是 `…>execSQL>commit>end>emit`，
+  // remove 的是 `…>delete:my_list>delete:my_list_music_info>delete:my_list_music_info_order>commit>end>emit`）。
   const lock = blockRange(writeCode, 'synchronized (LIST_WRITE_LOCK)')
   const writeMethod = blockRange(writeCode, 'private static void applyListUpdates')
   assert.ok(!lock.body.includes('emitTo'), '锁块里不许 emit（临界区 = 只有 SQL）')
@@ -500,6 +631,22 @@ test('emit 在**提交成功之后**、**锁外**；update 的载荷是裸数组
     writeCode.indexOf('ctx.emitTo(CHANNEL_LIST_ADD, payload)') > writeCode.indexOf('applyListAdds(db, position, additions);'),
     'add 的 emit 必须晚于写库调用（提交成功之后）',
   )
+  // (c) 第十刀-b：remove 也是**裸数组**（与 update 同形、与 add 不同形）—— `readRemoveIds` 把
+  // `args[0]` 当数组并**原样返回它**，`emitTo` 发的是它本身。这一条**不是**"抄 update 那一条
+  // 的断言"：它点的是第三条通道自己的那个变量名（`ids`），改错了名字这里就红。
+  assert.match(writeCode, /JSONArray\s+ids\s*=\s*readRemoveIds\(args\)/, 'remove 的载荷必须是 `args[0]` 那个裸数组')
+  assert.match(writeCode, /ctx\.emitTo\(CHANNEL_LIST_REMOVE, ids\)/, 'remove 广播的必须是那个数组本身（不是 {ids}）')
+  const removeWriteMethod = blockRange(writeCode, 'private static void applyListRemoves')
+  assert.ok(!removeWriteMethod.body.includes('emitTo'), 'remove 的写库方法里也不许 emit')
+  assert.ok(!removeWriteMethod.body.includes('RequestContext'), 'remove 的写库方法连 ctx 都不该拿到')
+  assert.ok(
+    writeCode.indexOf('ctx.emitTo(CHANNEL_LIST_REMOVE, ids)') > writeCode.indexOf('applyListRemoves(db, ids);'),
+    'remove 的 emit 必须晚于写库调用（提交成功之后）',
+  )
+  // 三条 emit 都在**锁块外**：三块里一块都不许出现 emitTo（逐块，不是"整份源码 indexOf"）。
+  for (const [index, one] of blockRanges(writeCode, 'synchronized (LIST_WRITE_LOCK)').entries()) {
+    assert.ok(!one.body.includes('emitTo'), `第 ${index + 1} 个临界区里不许 emit`)
+  }
   assert.ok(!/emitTo\([^)]*new JSONObject/.test(writeCode), 'emit 的载荷不能就地包成 JSONObject（update 那一条尤其）')
 
   // 失败时不许改本地状态：没有把 emit 放进 catch/finally 的退路。
@@ -536,37 +683,37 @@ test('0 行命中 = 成功（幂等）：不看 executeUpdateDelete 的返回值
 })
 
 // ---------------------------------------------------------------------------
-// 4. 范围守卫：只注册这 2 条（update + add）；老文件一个都没改；零新增依赖
+// 4. 范围守卫：只注册这 3 条（update + add + remove）；老文件一个都没改；零新增依赖
 // ---------------------------------------------------------------------------
 
-test('范围守卫：本文件只注册 2 条通道（update + add）；同族的 remove 一条都不碰', () => {
+test('范围守卫：本文件只注册 3 条通道（update + add + remove）；后面几刀的一条都不碰', () => {
   const registrations = writeCode.match(/RainMusicIpcHandlers\.register\(/g) ?? []
-  // ⚠️ 第九刀-b：从 1 改成 2（第八刀的 update + 第九刀-a 的 add）。数**精确**：少一条说明
-  // add 没落地（真机 IPC_CHANNEL_UNSUPPORTED），多一条说明有人顺手做了第十刀的 remove。
-  assert.equal(registrations.length, 2, '本文件应注册 player_list_update + player_list_add，一条不多一条不少')
+  // ⚠️ 第十刀-b：从 2 改成 3（第八刀的 update + 第九刀-a 的 add + 第十刀-a 的 remove）。数**精确**：
+  // 少一条说明那一条没落地（真机 IPC_CHANNEL_UNSUPPORTED），多一条说明有人顺手做了下一刀。
+  assert.equal(registrations.length, 3, '本文件应注册 player_list_update + player_list_add + player_list_remove，一条不多一条不少')
 
-  // 通道名字面量只允许出现这两个（写错一个字就是真机 IPC_CHANNEL_UNSUPPORTED）。
+  // 通道名字面量只允许出现这三个、**且首现顺序就是三条常量的声明序**（update, add, remove）。
   assert.deepEqual(
     [...new Set([...writeCode.matchAll(/"(player_[a-z_]+)"/g)].map(match => match[1]))],
-    ['player_list_update', 'player_list_add'],
+    ['player_list_update', 'player_list_add', 'player_list_remove'],
   )
-  // 常量也只能有这两个 CHANNEL_*。
+  // 常量也只能有这三个 CHANNEL_*。
   assert.deepEqual(
     [...writeCode.matchAll(/String\s+(CHANNEL_[A-Z_]+)\s*=/g)].map(match => match[1]),
-    ['CHANNEL_LIST_UPDATE', 'CHANNEL_LIST_ADD'],
+    ['CHANNEL_LIST_UPDATE', 'CHANNEL_LIST_ADD', 'CHANNEL_LIST_REMOVE'],
   )
-  // 两条通道都真的挂进注册表（常量存在但没 register = 真机上还是"未注册"）。
+  // 三条通道都真的挂进注册表（常量存在但没 register = 真机上还是"未注册"）。
   assert.match(writeCode, /RainMusicIpcHandlers\.register\(\s*CHANNEL_LIST_UPDATE\s*,/)
   assert.match(writeCode, /RainMusicIpcHandlers\.register\(\s*CHANNEL_LIST_ADD\s*,/)
+  assert.match(writeCode, /RainMusicIpcHandlers\.register\(\s*CHANNEL_LIST_REMOVE\s*,/)
 
-  // 后面几刀的写通道一条都不许出现（连拼名片段都不许）。⚠️ 第九刀-b 起 add 两项**已解禁**，
-  // `player_list_remove` / `CHANNEL_LIST_REMOVE`（第十刀）与另外两条仍在禁字表里 —— 一个字都不许松。
+  // 后面几刀的写通道一条都不许出现（连拼名片段都不许）。⚠️ 第十刀-b 起 remove 两项**已解禁**
+  // （它们正是本刀的落点），另外 5 项仍在禁字表里 —— 一个字都不许松。
   for (const forbidden of [
-    'player_list_remove', 'player_list_update_position', 'player_list_data_overwire',
-    'player_list_music', 'CHANNEL_LIST_REMOVE', 'CHANNEL_LIST_UPDATE_POSITION',
-    'CHANNEL_LIST_DATA_OVERWIRE',
+    'player_list_update_position', 'player_list_data_overwire', 'player_list_music',
+    'CHANNEL_LIST_UPDATE_POSITION', 'CHANNEL_LIST_DATA_OVERWIRE',
   ]) {
-    assert.ok(!writeCode.includes(forbidden), `本刀不应出现 ${forbidden}（第十刀及以后再做）`)
+    assert.ok(!writeCode.includes(forbidden), `本刀不应出现 ${forbidden}（第十一刀及以后再做）`)
   }
 
   // 老文件冻结：每一刀的注册条数一个都没变。
@@ -710,9 +857,10 @@ const setupRenderer = () => {
   return { errors, native, state, action, rendererListManage }
 }
 
-const seedUserLists = (state, list) => {
+/** 播几行歌单（第十刀-b：接受多个 —— remove 要证明"没被点名的那个还在"）。 */
+const seedUserLists = (state, ...lists) => {
   state.userLists.length = 0
-  state.userLists.push(list)
+  state.userLists.push(...lists)
 }
 
 test('invoke 的信封是 args=[[{…}]]（裸数组），与契约 :104 的 listInfos[] 同形', async() => {
@@ -830,6 +978,87 @@ test('监听器体 == 生产代码那三行（rendererListManage.ts:180-184 → 
 })
 
 // ---------------------------------------------------------------------------
+// 5c. 第十刀-a 的渲染层接线（同一个真桥 + 真 rendererListManage + 真 action）：
+//     remove 的广播载荷必须是**裸数组** `ids`（与 update 同形、与 add 的对象不同形）
+// ---------------------------------------------------------------------------
+
+test('remove 的 invoke 信封是 args=[["l-1"]]（**裸数组**；不是 {ids:[…]}）', async() => {
+  const env = setupRenderer()
+  await env.rendererListManage.removeUserList(['l-1'])
+
+  const envelope = env.native.posts[0]
+  assert.equal(envelope.kind, 'invoke')
+  assert.equal(envelope.channel, CHANNEL_REMOVE)
+  assert.equal(CHANNEL_REMOVE, 'player_list_remove', 'ipcNames.ts 的真实值变了？')
+  // ⚠️ JSON.stringify 比对：参数数组是在 `vm.runInNewContext` 里造的（另一个 realm）。
+  assert.equal(JSON.stringify(envelope.args), JSON.stringify([['l-1']]), 'args[0] 必须是数组（不是 {ids}）')
+  assert.equal(Array.isArray(envelope.args[0]), true, 'args[0] 必须是数组')
+  assert.equal(typeof envelope.args[0][0], 'string', 'args[0] 的元素必须是字符串（契约是 ids: string[]）')
+})
+
+test('remove 的广播载荷是裸数组：args:[["l-1"]] ⇒ 真 list_remove ⇒ 真 userListsRemove **真的删掉**、零 console.error', () => {
+  const env = setupRenderer()
+  seedUserLists(
+    env.state,
+    { id: 'l-1', name: '甲', source: 'wy', sourceListId: 's-1', locationUpdateTime: 1 },
+    { id: 'l-2', name: '乙', source: 'wy', sourceListId: 's-2', locationUpdateTime: 2 },
+  )
+
+  env.native.deliver({ kind: 'event', channel: CHANNEL_REMOVE, args: [['l-1']] })
+
+  assert.deepEqual(env.state.userLists.map(list => list.id), ['l-2'],
+    '裸数组必须能走到 userListsRemove（点名的那个真的被删掉）')
+  assert.equal(env.state.userLists[0].name, '乙', '没被点名的那个一个字都不许动')
+  assert.deepEqual(env.errors, [], '裸数组这一路不该有任何 console.error')
+  assert.equal(env.native.notifies, 1, '只有那一条广播（没有应答）')
+})
+
+test('remove 的裸数组包成 {ids:[…]} ⇒ for…of TypeError 被桥吞成**一条 console.error**，state 一个字没动', () => {
+  const env = setupRenderer()
+  seedUserLists(
+    env.state,
+    { id: 'l-1', name: '甲', source: 'wy', sourceListId: 's-1', locationUpdateTime: 1 },
+    { id: 'l-2', name: '乙', source: 'wy', sourceListId: 's-2', locationUpdateTime: 2 },
+  )
+
+  env.native.deliver({ kind: 'event', channel: CHANNEL_REMOVE, args: [{ ids: ['l-1'] }] })
+
+  assert.deepEqual(env.state.userLists.map(list => list.id), ['l-1', 'l-2'], '包成对象 ⇒ 界面完全不动')
+  assert.equal(env.errors.length, 1, '桥把监听器的异常吞成恰好一条 console.error')
+  assert.match(env.errors[0], /监听器抛错/)
+  assert.match(env.errors[0], new RegExp(CHANNEL_REMOVE))
+  assert.match(env.errors[0], /not iterable/)
+  // 调用方那边**什么都不会收到**（不是 reject，也不是 resolve）。
+  assert.equal(env.native.notifies, 1, '只有那一条广播，没有应答')
+})
+
+test('remove 的监听器体 == 生产代码那三行（rendererListManage.ts:185-188 → action.ts:163-175）', () => {
+  assert.match(rendererListManageTs, /\{ params: ids \}[\s\S]{0,120}userListsRemove\(ids\)/)
+  assert.match(
+    rendererActionTs,
+    /export const userListsRemove = \(ids: string\[\]\) => \{\s*\n\s*const changedIds = \[\]\s*\n\s*for \(const id of ids\)/,
+  )
+  // 订阅也必须在同一个 registerListAction 里（:230）。
+  assert.match(rendererListManageTs.split('\n')[229], /rendererOn\(PLAYER_EVENT_NAME\.list_remove, list_remove\)/)
+  // 桌面链那三行（本通道广播形状的来源）。
+  assert.match(
+    desktopWinRendererEventTs.split('\n')[12],
+    /sendEvent<Rain\.List\.ListActionRemove>\(PLAYER_EVENT_NAME\.list_remove, ids\)/,
+    'winRendererEvent 发的必须是裸数组 ids',
+  )
+  assert.ok(
+    !/list_remove,\s*\{\s*ids/.test(desktopWinRendererEventTs),
+    '广播载荷不能包成 {ids}',
+  )
+  assert.match(desktopEventTs.split('\n')[14], /mainHandle<Rain\.List\.ListActionRemove>\(PLAYER_EVENT_NAME\.list_remove/)
+  assert.match(
+    desktopListEventTs,
+    /await global\.rain\.worker\.dbService\.removeUserLists\(ids\)\s*\n\s*this\.emit\('list_remove', ids\)/,
+    '桌面是"先落库、再广播同一个 ids"——顺序不能反',
+  )
+})
+
+// ---------------------------------------------------------------------------
 // 6. JVM 行为组：真 javac + 真 java + 手写替身（观察者探针）
 // ---------------------------------------------------------------------------
 
@@ -925,6 +1154,14 @@ public class SQLiteDatabase {
     public static volatile int AFFECTED_ROWS = 1;
     /** 并发探针的会合点：两个线程都进到 beginTransaction 时立刻放行（用来放大"没锁"的窗口）。 */
     public static volatile CountDownLatch RENDEZVOUS = null;
+    /**
+     * 第十刀-b：{@code bindString} 的**先后**（{@code 下标:值}，按调用序）。
+     * 三句 DELETE 都绑位置参数 1，所以它同时钉住"三句都绑同一个 id"与"每个 id 三句连着发"。
+     */
+    public static final List<String> BINDS = Collections.synchronizedList(new ArrayList<String>());
+    /** 第十刀-b 的失败注入：第 N 次（**从 0 数**）DELETE 抛错；{@code -1} = 不注入。 */
+    public static volatile int FAIL_DELETE_INDEX = -1;
+    public static final AtomicInteger DELETE_INDEX = new AtomicInteger(0);
 
     /** 假 {@code my_list}：一行 = {id, name, source, sourceListId, position, locationUpdateTime}。 */
     private static final List<Object[]> ROWS = Collections.synchronizedList(new ArrayList<Object[]>());
@@ -996,7 +1233,18 @@ public class SQLiteDatabase {
     public SQLiteStatement compileStatement(String sql) {
         SQL_SEEN.add(sql);
         EVENTS.add("compile");
-        return new SQLiteStatement();
+        // ⚠️ 第十刀-b：SQL 本身要传给替身 —— 否则它分不清"改名那一句 UPDATE"与"删除的三句 DELETE"
+        // （见 STUB_SQLITE_STATEMENT 的类注释）。
+        return new SQLiteStatement(sql);
+    }
+
+    /** 删一行假 {@code my_list}（第十刀-b）：只有 my_list 有行模型，另两张子表只记执行。 */
+    static void deleteListRow(String id) {
+        synchronized (ROWS) {
+            for (int i = ROWS.size() - 1; i >= 0; i--) {
+                if (id.equals(String.valueOf(ROWS.get(i)[0]))) ROWS.remove(i);
+            }
+        }
     }
 
     /** 第九刀-a 的三个读：{@code COUNT(*)} / {@code MAX("position")} / 按 {@code position, rowid} 读现有行。 */
@@ -1140,14 +1388,31 @@ package android.database.sqlite;
 
 import java.util.Arrays;
 
-/** 手写替身：绑定 + 一次"UPDATE"，观察点由 SQLiteDatabase 那个替身收集。 */
+/**
+ * 手写替身：绑定 + 一次"UPDATE / DELETE"，观察点由 SQLiteDatabase 那个替身收集。
+ *
+ * <p>⚠️ 第十刀-b：{@code compileStatement(sql)} 现在把 SQL 本身传进来。替身**必须**分得清
+ * 改名那一句 {@code UPDATE} 与删除的三句 {@code DELETE}（{@code my_list} /
+ * {@code my_list_music_info} / {@code my_list_music_info_order}）：不分的话，"每个 id 三句、
+ * 顺序 1→2→3"在本机根本没有观察点，而且 DELETE 会被当成 UPDATE 去查 {@code bindings[0] == null}
+ * （把绑进去的 id 当成 name 记一条假的 NOT NULL 检查）。
+ */
 public class SQLiteStatement {
+
+    /** 这一句是怎么来的（{@code compileStatement} 传进来的原文）。 */
+    private final String sql;
 
     private final Object[] bindings = new Object[5];
 
+    SQLiteStatement(String sql) { this.sql = sql == null ? "" : sql; }
+
     public void bindNull(int index) { bindings[index - 1] = null; }
 
-    public void bindString(int index, String value) { bindings[index - 1] = value; }
+    public void bindString(int index, String value) {
+        bindings[index - 1] = value;
+        // 第十刀-b：绑定的**先后**本身就是一个观察点（"每个 id 三句连着发、三句都绑同一个 id"）。
+        SQLiteDatabase.BINDS.add(index + ":" + value);
+    }
 
     public void bindLong(int index, long value) { bindings[index - 1] = Long.valueOf(value); }
 
@@ -1157,11 +1422,12 @@ public class SQLiteStatement {
     public void close() { SQLiteDatabase.EVENTS.add("close"); }
 
     /**
-     * 替身里唯一"有业务语义"的地方：my_list."name" 是 TEXT NOT NULL（tables.ts:131），
-     * 而 SQLite 是在**语句执行时**报这个约束的 —— 替身照做，这样"载荷没带 name"走的就是
-     * 真机上那条路（抛错 ⇒ 不 markSuccessful ⇒ endTransaction 回滚 ⇒ 不广播）。
+     * 替身里唯一"有业务语义"的地方（UPDATE 那一支）：my_list."name" 是 TEXT NOT NULL
+     * （tables.ts:131），而 SQLite 是在**语句执行时**报这个约束的 —— 替身照做，这样"载荷没带
+     * name"走的就是真机上那条路（抛错 ⇒ 不 markSuccessful ⇒ endTransaction 回滚 ⇒ 不广播）。
      */
     public int executeUpdateDelete() {
+        if (sql.contains("DELETE")) return executeDelete();
         if (bindings[0] == null) {
             throw new RuntimeException("NOT NULL constraint failed: my_list.name (code 1299)");
         }
@@ -1171,6 +1437,40 @@ public class SQLiteStatement {
             ";locationUpdateTime=" + bindings[3] + ";id=" + bindings[4]
         );
         return SQLiteDatabase.AFFECTED_ROWS;
+    }
+
+    /**
+     * {@code DELETE}（第十刀-b 新增）：三句都是"绑一个 id、删它那一行"
+     * （{@code SQL_LIST_DELETE} / {@code SQL_MUSIC_INFO_DELETE_BY_LIST_ID} /
+     * {@code SQL_MUSIC_INFO_ORDER_DELETE_BY_LIST_ID}）。替身里只有 {@code my_list} 真的存了行
+     * （另两张子表没有行模型），所以：
+     * <ul>
+     *   <li>三句都记进 {@code EVENTS}（{@code delete:表名}）与 {@code EXECUTED}
+     *       （{@code delete|表名|id}）："每个 id 三句、顺序 1→2→3"就是靠这两个观察点断言的；</li>
+     *   <li>只有 {@code my_list} 那一句真的从假表里删行 ⇒ "半批失败 ⇒ 整批回滚之后那一行还在"
+     *       才是真的被验证过，而不是只看了个 emitCount；</li>
+     *   <li>{@code FAIL_DELETE_INDEX} 让探针指定"第 N 句 DELETE 抛错"（注入失败路径）。</li>
+     * </ul>
+     */
+    private int executeDelete() {
+        int index = SQLiteDatabase.DELETE_INDEX.getAndIncrement();
+        if (index == SQLiteDatabase.FAIL_DELETE_INDEX) {
+            throw new RuntimeException("探针注入：第 " + (index + 1) + " 句 DELETE 失败（真机上会是一条 SQLiteException）");
+        }
+        String table = deleteTable();
+        String id = String.valueOf(bindings[0]);
+        SQLiteDatabase.EVENTS.add("delete:" + table);
+        SQLiteDatabase.EXECUTED.add("delete|" + table + "|" + id);
+        if ("my_list".equals(table)) SQLiteDatabase.deleteListRow(id);
+        return 1;
+    }
+
+    /** 这一句删的是哪张表（只认生产代码真正会 compile 的那三句；认不出来 = 替身过期，直接抛）。 */
+    private String deleteTable() {
+        if (sql.contains("my_list_music_info_order")) return "my_list_music_info_order";
+        if (sql.contains("my_list_music_info")) return "my_list_music_info";
+        if (sql.contains("my_list")) return "my_list";
+        throw new IllegalStateException("假语句不认识这句 DELETE（替身过期了？）：" + sql);
     }
 
     /**
@@ -1380,8 +1680,16 @@ public final class WriteProbe {
 
     static final String CHANNEL = RainMusicListWriteChannels.CHANNEL_LIST_UPDATE;
     static final String CHANNEL_ADD = RainMusicListWriteChannels.CHANNEL_LIST_ADD;
+    static final String CHANNEL_REMOVE = RainMusicListWriteChannels.CHANNEL_LIST_REMOVE;
     static final StringBuilder REPORT = new StringBuilder();
     static final List<String> EMITS = Collections.synchronizedList(new ArrayList<String>());
+    /**
+     * 第十刀-b：广播载荷的**形状**（{@code channel|arg0=类型|len=…|[i]=类型:值|wire=…}）。
+     * 与 {@code EMITS} 分开记：{@code EMITS} 的文本格式是第八 / 九刀那批用例钉住的，
+     * 这里只是**多一个观察点**（arg0 到底是 JSONArray 还是 JSONObject、元素是什么类型、
+     * 序列化后的 wire 长什么样），不去动既有那几行。
+     */
+    static final List<String> EMIT_SHAPES = Collections.synchronizedList(new ArrayList<String>());
 
     interface Call { Object run() throws Exception; }
 
@@ -1482,6 +1790,18 @@ public final class WriteProbe {
             ))));
         });
 
+        // 23b) 第十刀-b：**插队重写时读出来的 sourceListId 必须先过 ".0" 归一化**
+        //      （桌面 dbHelper.ts:44-49 的 idFixRxp；读通道 RainMusicListChannels.java:283 同款）。
+        //      少了它，老库里的 "123.0" 重写完还是 "123.0"，而渲染层走读通道看到的是 123
+        //      ⇒ 两侧视图不一致。四行各钉一种：只去末尾、只去一次、不动的原样、NULL 仍是 NULL。
+        runCase("add-renumber-dot-zero", () -> {
+            SQLiteDatabase.seedList("A", "甲", "wy", "123.0", 0L, Long.valueOf(1L));
+            SQLiteDatabase.seedList("B", "乙", "wy", "456.0.0", 1L, Long.valueOf(2L));
+            SQLiteDatabase.seedList("C", "丙", "wy", "789", 2L, Long.valueOf(3L));
+            SQLiteDatabase.seedList("D", "丁", "wy", JSONObject.NULL, 3L, JSONObject.NULL);
+            return callAdd(addArgs(0L, arr(obj("id", "X", "name", "新"))));
+        });
+
         // 24) id 冲突 ⇒ 假库照 SQLite 的 UNIQUE 抛错 ⇒ 不 commit、不广播、**整表回滚**。
         runCase("add-id-conflict", () -> {
             SQLiteDatabase.seedList("A", "甲", "wy", "s-a", 0L, Long.valueOf(1L));
@@ -1528,6 +1848,83 @@ public final class WriteProbe {
         // 43) 并发 add：锁在 ⇒ 两个事务不同时开，且**两趟追加的位置不重复**（0,1 与 2,3）。
         concurrencyAddCase("add-concurrent-two-writers");
 
+        // ------------------------------------------------------------------
+        // 第十刀-a/b：player_list_remove（裸数组载荷 [ids]，每个 id 三句 DELETE）
+        // ------------------------------------------------------------------
+        say("probe", "removeRegistered", String.valueOf(RainMusicIpcHandlers.get(CHANNEL_REMOVE) != null));
+
+        // 44) 两个 id：**同一个事务**里恰好六句 DELETE（每个 id 三句、顺序 1→2→3），
+        //     没被点名的第三行必须留着（"只删 ids 里那些"），emit 在提交之后。
+        runCase("remove-two-ids", () -> {
+            SQLiteDatabase.seedList("l-1", "甲", "wy", "s-1", 0L, Long.valueOf(1L));
+            SQLiteDatabase.seedList("l-2", "乙", "wy", "s-2", 1L, Long.valueOf(2L));
+            SQLiteDatabase.seedList("keep", "留着", "wy", "s-3", 2L, Long.valueOf(3L));
+            return callRemove(ids("l-1", "l-2"));
+        });
+
+        // 45) 单个 id：三句、一个事务；顺带证明普通 id **不被误拒**（它不是保留 id）。
+        runCase("remove-single-id", () -> {
+            SQLiteDatabase.seedList("l-1", "甲", "wy", "s-1", 0L, Long.valueOf(1L));
+            SQLiteDatabase.seedList("l-2", "乙", "wy", "s-2", 1L, Long.valueOf(2L));
+            return callRemove(ids("l-1"));
+        });
+
+        // 46) id 不在库里 ⇒ 0 行命中 = **成功**（幂等），三句照样发、照样广播（桌面同款）。
+        runCase("remove-unknown-id", () -> callRemove(ids("no-such-id")));
+
+        // 47) **"love" 不被拒**（第十刀-a 的裁定 4）："default" / "temp" 特殊在"有子表行但没有
+        //     my_list 父行"；"love" 若因备份导入出现在 my_list 里，删它就是**正常删除**，
+        //     拒绝反而会破坏一次合法操作。这里连"真的删掉了"一起钉住。
+        runCase("remove-love-allowed", () -> {
+            SQLiteDatabase.seedList("love", "我喜欢", "wy", "s-love", 0L, Long.valueOf(1L));
+            return callRemove(ids("love"));
+        });
+
+        // 48) 空数组 ⇒ 0 条 SQL（连 prepare 都不做）+ 事务照样提交 + 广播一个空数组。
+        runCase("remove-empty-array", () -> callRemove(ids()));
+
+        // 49) 保留 id "default"：拒绝，而且**在 open 之前**就拒（库故意设成打不开 ⇒ 拿到的必须是
+        //     IllegalArgumentException 而不是"打不开数据库"），events 必须是 "-"。
+        runCase("remove-reserved-default", () -> {
+            RainMusicDatabase.FAIL_OPEN = true;
+            return callRemove(ids("default"));
+        });
+
+        // 50) 保留 id "temp" 夹在普通 id 后面：整批被拒（**一句 SQL 都不许发**，不许"先删了前面的"）。
+        runCase("remove-reserved-temp-in-list", () -> {
+            RainMusicDatabase.FAIL_OPEN = true;
+            return callRemove(ids("l-1", "temp"));
+        });
+
+        // 51~55) 参数坏形状（全部在开库之前失败）。
+        runCase("remove-param-missing", () -> callRemove(new ArrayList<Object>()));
+        runCase("remove-param-wrapped-object", () -> callRemove(args(obj("ids", arr("l-1")))));
+        runCase("remove-param-item-not-string", () -> callRemove(args(arr(Long.valueOf(7L)))));
+        runCase("remove-param-item-empty", () -> callRemove(args(arr(""))));
+        runCase("remove-param-item-null", () -> callRemove(args(arr(JSONObject.NULL))));
+
+        // 56) 第 2 句 DELETE 注入失败 ⇒ 不提交、回滚、不广播 —— 而且第一句删掉的那一行**回来了**
+        //     （假库照 SQLite 的语义回滚；只数 emitCount 是证明不了"没有删了一半"的）。
+        runCase("remove-fail-second-delete", () -> {
+            SQLiteDatabase.seedList("l-1", "甲", "wy", "s-1", 0L, Long.valueOf(1L));
+            SQLiteDatabase.seedList("l-2", "乙", "wy", "s-2", 1L, Long.valueOf(2L));
+            SQLiteDatabase.FAIL_DELETE_INDEX = 1;
+            return callRemove(ids("l-1", "l-2"));
+        });
+
+        // 57~58) 库打不开 / 三张表缺任何一张（都在 open(...) 那一层，不广播、不开事务）。
+        runCase("remove-open-failure", () -> {
+            RainMusicDatabase.FAIL_OPEN = true;
+            return callRemove(ids("l-1"));
+        });
+        runCase("remove-table-missing", () -> {
+            RainMusicDatabase.FAIL_REQUIRE_TABLE = true;
+            return callRemove(ids("l-1"));
+        });
+
+        // 59) 并发 remove：两个线程各删两个 id ⇒ 同一时刻只有一个事务开着（锁真的在护第三条临界区）。
+        concurrencyRemoveCase("remove-concurrent-two-writers");
+
         writeReport();
     }
 
@@ -1548,16 +1945,58 @@ public final class WriteProbe {
         say(name, "message", message);
         say(name, "emitCount", String.valueOf(EMITS.size()));
         say(name, "emit0", EMITS.isEmpty() ? "-" : EMITS.get(0));
+        // 第十刀-b：载荷的**形状**（arg0 的类型 / 元素类型 / 序列化后的 wire）。
+        say(name, "emitShape0", EMIT_SHAPES.isEmpty() ? "-" : EMIT_SHAPES.get(0));
         say(name, "events", SQLiteDatabase.EVENTS.isEmpty() ? "-" : String.join(">", SQLiteDatabase.EVENTS));
+        // 第十刀-b：事务条数 / 提交条数（"整批只开一个事务"就是靠这个断言的）。
+        say(name, "transactionCount", String.valueOf(count(SQLiteDatabase.EVENTS, "begin")));
+        say(name, "commitCount", String.valueOf(count(SQLiteDatabase.EVENTS, "commit")));
         say(name, "executed", String.valueOf(SQLiteDatabase.EXECUTED.size()));
         for (String binding : SQLiteDatabase.EXECUTED) say(name, "binding", binding);
+        // 第十刀-b：绑定序（"下标:值"）—— 三句 DELETE 都绑位置参数 1 时的先后。
+        say(name, "binds", SQLiteDatabase.BINDS.isEmpty() ? "-" : String.join(",", SQLiteDatabase.BINDS));
         // 第九刀-a：INSERT 的绑定（按执行序）与写完之后**表里到底有什么**（回滚过没有，看这里）。
         say(name, "insertedCount", String.valueOf(SQLiteDatabase.INSERTED.size()));
         for (String row : SQLiteDatabase.INSERTED) say(name, "inserted", row);
         say(name, "rowCount", String.valueOf(SQLiteDatabase.rowCount()));
         for (String row : SQLiteDatabase.dumpList()) say(name, "row", row);
         say(name, "maxOpenTransactions", String.valueOf(SQLiteDatabase.MAX_OPEN_TRANSACTIONS.get()));
-        say(name, "sql", SQLiteDatabase.SQL_SEEN.isEmpty() ? "-" : oneLine(SQLiteDatabase.SQL_SEEN.get(0)));
+        // 第十刀-b：compile 过几句 SQL + 逐句的原文（删除那三句的表名与顺序就靠它）。
+        say(name, "sqlSeenCount", String.valueOf(SQLiteDatabase.SQL_SEEN.size()));
+        if (SQLiteDatabase.SQL_SEEN.isEmpty()) say(name, "sql", "-");
+        else for (String sql : SQLiteDatabase.SQL_SEEN) say(name, "sql", oneLine(sql));
+    }
+
+    /** 第十刀-a 的并发场景：两个线程各自删两个**不同 id**。 */
+    static void concurrencyRemoveCase(String name) throws Exception {
+        reset();
+        SQLiteDatabase.RENDEZVOUS = new CountDownLatch(1);
+        final List<Object> payloadA = ids("a-1", "a-2");
+        final List<Object> payloadB = ids("b-1", "b-2");
+        final String[] results = new String[2];
+        Thread first = new Thread(() -> { results[0] = attemptRemove(payloadA); }, "probe-remove-a");
+        Thread second = new Thread(() -> { results[1] = attemptRemove(payloadB); }, "probe-remove-b");
+        first.start();
+        second.start();
+        first.join(10000);
+        second.join(10000);
+
+        say(name, "result0", results[0]);
+        say(name, "result1", results[1]);
+        say(name, "maxOpenTransactions", String.valueOf(SQLiteDatabase.MAX_OPEN_TRANSACTIONS.get()));
+        say(name, "commitCount", String.valueOf(count(SQLiteDatabase.EVENTS, "commit")));
+        say(name, "emitCount", String.valueOf(EMITS.size()));
+        say(name, "executed", String.valueOf(SQLiteDatabase.EXECUTED.size()));
+        say(name, "binds", SQLiteDatabase.BINDS.isEmpty() ? "-" : String.join(",", SQLiteDatabase.BINDS));
+    }
+
+    static String attemptRemove(List<Object> payload) {
+        try {
+            Object value = callRemove(payload);
+            return value == null ? "ok" : "ok:" + value.getClass().getSimpleName();
+        } catch (Throwable ex) {
+            return "threw:" + ex.getClass().getName() + ":" + firstLine(ex.getMessage());
+        }
     }
 
     /** 第九刀-a 的并发场景：两个线程各自 add 两条**不同 id** 的新歌单。 */
@@ -1637,10 +2076,19 @@ public final class WriteProbe {
         return handler.handle(payload, new RainMusicIpcHandlers.RequestContext("ipc-probe-add-1", CHANNEL_ADD));
     }
 
+    /** 第十刀-a 的入口：**同一个注册表**，换一条通道名（remove 的参数是**裸字符串数组**）。 */
+    static Object callRemove(List<Object> payload) throws Exception {
+        RainMusicIpcHandlers.Handler handler = RainMusicIpcHandlers.get(CHANNEL_REMOVE);
+        if (handler == null) throw new IllegalStateException("通道没注册：" + CHANNEL_REMOVE);
+        return handler.handle(payload, new RainMusicIpcHandlers.RequestContext("ipc-probe-remove-1", CHANNEL_REMOVE));
+    }
+
     // ---------------------------------------------------------------- 广播记录
 
     static void recordEmit(String channel, List<Object> emitArgs) {
         SQLiteDatabase.EVENTS.add("emit");
+        // 第十刀-b：形状单独记一份（既有那行文本的格式被第八 / 九刀的用例钉住了，不动它）。
+        EMIT_SHAPES.add(shapeOf(channel, emitArgs));
         StringBuilder builder = new StringBuilder();
         builder.append(channel).append('|').append(emitArgs == null ? -1 : emitArgs.size()).append('|');
         Object arg0 = (emitArgs == null || emitArgs.isEmpty()) ? null : emitArgs.get(0);
@@ -1693,16 +2141,21 @@ public final class WriteProbe {
         SQLiteDatabase.EXECUTED.clear();
         SQLiteDatabase.INSERTED.clear();
         SQLiteDatabase.SQL_SEEN.clear();
+        SQLiteDatabase.BINDS.clear();
         SQLiteDatabase.OPEN_TRANSACTIONS.set(0);
         SQLiteDatabase.MAX_OPEN_TRANSACTIONS.set(0);
         SQLiteDatabase.AFFECTED_ROWS = 1;
         SQLiteDatabase.RENDEZVOUS = null;
+        // 第十刀-b：失败注入与"第几句 DELETE"每个场景都从零开始。
+        SQLiteDatabase.FAIL_DELETE_INDEX = -1;
+        SQLiteDatabase.DELETE_INDEX.set(0);
         // 每个场景都从**空表**开始（需要现有数据的场景自己在 lambda 里 seedList）。
         SQLiteDatabase.resetRows();
         RainMusicDatabase.FAIL_OPEN = false;
         RainMusicDatabase.FAIL_REQUIRE_TABLE = false;
         com.getcapacitor.Logger.LINES.clear();
         EMITS.clear();
+        EMIT_SHAPES.clear();
     }
 
     static JSONObject obj(Object... pairs) {
@@ -1728,6 +2181,44 @@ public final class WriteProbe {
         List<Object> list = new ArrayList<Object>();
         list.add(obj("position", Long.valueOf(position), "listInfos", listInfos));
         return list;
+    }
+
+    /** 第十刀-a 的载荷：{@code args = [ ["l-1", "l-2"] ]}（**裸字符串数组**，不是 {@code [{ids: […]}]}）。 */
+    static List<Object> ids(String... values) {
+        JSONArray array = new JSONArray();
+        for (String value : values) array.put(value);
+        List<Object> list = new ArrayList<Object>();
+        list.add(array);
+        return list;
+    }
+
+    static int count(List<String> values, String needle) {
+        int total = 0;
+        for (String value : values) if (needle.equals(value)) total++;
+        return total;
+    }
+
+    /**
+     * 第十刀-b：广播载荷的**形状**文本（{@code arg0} 的类型、元素类型、序列化后的 wire）。
+     * 它回答的是"到底是 JSONArray 还是 JSONObject"这个 update / remove 与 add 之间最容易写错的问题。
+     */
+    static String shapeOf(String channel, List<Object> emitArgs) {
+        Object arg0 = (emitArgs == null || emitArgs.isEmpty()) ? null : emitArgs.get(0);
+        StringBuilder builder = new StringBuilder();
+        builder.append(channel).append("|arg0=").append(arg0 == null ? "null" : arg0.getClass().getSimpleName());
+        if (arg0 instanceof JSONArray) {
+            JSONArray array = (JSONArray) arg0;
+            builder.append("|len=").append(array.length());
+            for (int i = 0; i < array.length(); i++) {
+                Object value = array.opt(i);
+                builder.append("|[").append(i).append("]=")
+                    .append(value == null ? "null" : value.getClass().getSimpleName() + ":" + String.valueOf(value));
+            }
+            builder.append("|wire=").append(array.toString());
+        } else if (arg0 instanceof JSONObject) {
+            builder.append("|keys=").append(String.valueOf(((JSONObject) arg0).names()));
+        }
+        return builder.toString();
     }
 
     static String firstLine(String text) {
@@ -2169,4 +2660,236 @@ test('JVM 探针（第九刀-a）：两个线程同时 add ⇒ 位置不重复�
   assert.equal(field(report, 'add-concurrent-two-writers', 'rowCount'), '4')
   assert.deepEqual(fields(report, 'add-concurrent-two-writers', 'row').map(row => row.match(/position=(\d+)/)[1]),
     ['0', '1', '2', '3'], '表里的顺序也必须是 0..3（没有并列、没有空洞）')
+})
+
+// ---------------------------------------------------------------------------
+// 9. JVM 行为组（第十刀-b）：player_list_remove 的场景
+//    （第十刀-a 只用 %TEMP% 里的临时探针跑过这 11 条；本刀把它们**逐条搬进仓库**，
+//     并把替身补上"认识三句 DELETE"的能力 —— 见 STUB_SQLITE_STATEMENT 的类注释。）
+// ---------------------------------------------------------------------------
+
+test('JVM 探针（第十刀-a）：注册 + 两个 id —— 一个事务六句 DELETE（每个 id 三句、1→2→3）、commit 之后才 emit', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const s = 'remove-two-ids'
+  assert.equal(field(report, 'probe', 'removeRegistered'), 'true', 'remove 的 handler 必须也在注册表里')
+  assert.equal(field(report, s, 'result'), 'null', '契约是 void ⇒ 成功时返回 null')
+
+  // 整批删除是**一个**事务（同一时刻只开一个）。
+  assert.equal(field(report, s, 'transactionCount'), '1', '整批只开一个事务')
+  assert.equal(field(report, s, 'commitCount'), '1')
+  assert.equal(field(report, s, 'maxOpenTransactions'), '1')
+
+  // prepare 的是那三句、**各一次**（不是每个 id 重新 prepare 一遍），顺序 = statements.ts 的调用序。
+  assert.equal(field(report, s, 'sqlSeenCount'), '3', '只 prepare 三句')
+  assert.deepEqual(fields(report, s, 'sql').map(normalizeSql), [
+    normalizeSql(javaTextBlock(writeJava, 'SQL_LIST_DELETE')),
+    normalizeSql(javaTextBlock(writeJava, 'SQL_MUSIC_INFO_DELETE_BY_LIST_ID')),
+    normalizeSql(javaTextBlock(writeJava, 'SQL_MUSIC_INFO_ORDER_DELETE_BY_LIST_ID')),
+  ], 'compileStatement 的语句集合与顺序 = statements.ts:49 / :119 / :192')
+
+  // 执行序：**每个 id 三句连着发**（对齐 dbHelper.ts:86-90），表序 1→2→3。
+  assert.deepEqual(fields(report, s, 'binding'), [
+    'delete|my_list|l-1',
+    'delete|my_list_music_info|l-1',
+    'delete|my_list_music_info_order|l-1',
+    'delete|my_list|l-2',
+    'delete|my_list_music_info|l-2',
+    'delete|my_list_music_info_order|l-2',
+  ], '每个 id 三句 DELETE：my_list → my_list_music_info → my_list_music_info_order')
+
+  // 绑定序：l-1 三连、再 l-2 三连；三句都绑**位置参数 1**。
+  const binds = field(report, s, 'binds')
+  assert.equal(binds.split(',').map(binding => binding.split(':')[1]).join(','), 'l-1,l-1,l-1,l-2,l-2,l-2',
+    '绑定序必须是 l-1,l-1,l-1,l-2,l-2,l-2（每个 id 三句连着发）')
+  assert.ok(binds.split(',').every(binding => binding.startsWith('1:')), '三句都绑位置参数 1（各一个 ?）')
+
+  // 只删 ids 里点名的那些：没被点名的第三行必须活着。
+  assert.equal(field(report, s, 'rowCount'), '1', '没被点名的第三行必须活着')
+  assert.deepEqual(fields(report, s, 'row'), [
+    'id=keep;name=留着;source=wy;sourceListId=s-3;position=2;locationUpdateTime=3',
+  ])
+
+  // emit 在最后（= 提交 + 三个 close + endTransaction 之后）。
+  const events = field(report, s, 'events').split('>')
+  assert.equal(events[events.length - 1], 'emit', `emit 必须是最后一个事件：${events.join('>')}`)
+  assert.ok(events.indexOf('commit') < events.indexOf('emit'), 'emit 必须在 commit 之后')
+  assert.equal(field(report, s, 'emitCount'), '1')
+  assert.equal(field(report, s, 'emit0'), 'player_list_remove|1|array|2|-|-', '一个参数、是数组、2 个元素')
+})
+
+test('JVM 探针（第十刀-a）：广播载荷是**裸字符串数组**（arg0=JSONArray、元素是 String、wire=["l-1","l-2"]）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  // ⚠️ 这一条是第十刀-a 那台临时探针里唯一"直接看 arg0 类型"的断言，本刀**逐字搬进来**：
+  // arg0 必须是 JSONArray（不是 JSONObject）、长度 2、元素是 String、序列化后就是那个数组。
+  const shape = field(report, 'remove-two-ids', 'emitShape0')
+  assert.match(
+    shape,
+    /^player_list_remove\|arg0=JSONArray\|len=2\|\[0\]=String:l-1\|\[1\]=String:l-2\|wire=\["l-1","l-2"\]$/,
+  )
+  assert.equal(/arg0=JSONObject/.test(shape), false, '不能是对象（{ids: […]}）——那是 add 的形状')
+  // 单个 id 同理。
+  assert.equal(field(report, 'remove-single-id', 'emitShape0'),
+    'player_list_remove|arg0=JSONArray|len=1|[0]=String:l-1|wire=["l-1"]')
+  // 空数组 ⇒ 仍然是 JSONArray，只是 len=0 / wire=[]（**不是**改发一个对象）。
+  assert.match(field(report, 'remove-empty-array', 'emitShape0'), /arg0=JSONArray\|len=0\|wire=\[\]$/)
+})
+
+test('JVM 探针（第十刀-a）：单个 id / 不在库里的 id 都不被误拒（0 行命中 = 成功 + 照样广播）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+
+  assert.equal(field(report, 'remove-single-id', 'result'), 'null', '普通 id 不许被当成保留 id')
+  assert.equal(field(report, 'remove-single-id', 'executed'), '3', '单个 id 也是三句')
+  assert.deepEqual(fields(report, 'remove-single-id', 'row'), [
+    'id=l-2;name=乙;source=wy;sourceListId=s-2;position=1;locationUpdateTime=2',
+  ], '只删点名的那个（另一个原样留着）')
+  assert.equal(field(report, 'remove-single-id', 'emitCount'), '1')
+
+  // id 不在库里：三句照样发（命中 0 行）⇒ **成功**，而且照样广播（桌面 better-sqlite3 也是静默成功）。
+  assert.equal(field(report, 'remove-unknown-id', 'result'), 'null', '命中 0 行不是错误')
+  assert.equal(field(report, 'remove-unknown-id', 'executed'), '3', '三句确实发出去了')
+  assert.equal(field(report, 'remove-unknown-id', 'emitCount'), '1', '0 行命中也要广播（桌面照样 emit）')
+  assert.ok(field(report, 'remove-unknown-id', 'events').includes('commit'))
+})
+
+test('JVM 探针（第十刀-a）：`love` **不被拒**（裁定 4）——它在 my_list 里就是一次正常删除', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const s = 'remove-love-allowed'
+  // ⚠️ 只有 default / temp 被拒：它们特殊在"有子表行但没有 my_list 父行"。love 若因备份导入出现在
+  // my_list 里，删它就是**正常删除** —— 拒绝反而会破坏一次合法操作。
+  assert.equal(field(report, s, 'result'), 'null', 'love 不是保留 id，不许被拒')
+  assert.equal(field(report, s, 'executed'), '3', '照样三句 DELETE')
+  assert.equal(field(report, s, 'rowCount'), '0', '那一行真的被删掉了（不是"拒绝"、也不是"没删到"）')
+  assert.equal(field(report, s, 'emitCount'), '1')
+  assert.equal(field(report, s, 'emitShape0'), 'player_list_remove|arg0=JSONArray|len=1|[0]=String:love|wire=["love"]')
+  // 保留 id 是**两个**常量，不是"任何看起来特殊的 id"。
+  assert.match(writeJava, /RESERVED_LIST_ID_DEFAULT = "default"/)
+  assert.match(writeJava, /RESERVED_LIST_ID_TEMP = "temp"/)
+})
+
+test('JVM 探针（第十刀-a）：空数组 ⇒ 0 条 SQL（连 prepare 都不做）+ 事务照样提交 + 广播空数组', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const s = 'remove-empty-array'
+  assert.equal(field(report, s, 'result'), 'null')
+  assert.equal(field(report, s, 'sqlSeenCount'), '0', '空数组 ⇒ 一条 SQL 都不发（连 compile 都没有）')
+  assert.equal(field(report, s, 'executed'), '0')
+  assert.equal(field(report, s, 'binds'), '-', '一次绑定都没有')
+  assert.equal(field(report, s, 'transactionCount'), '1', '事务照样开')
+  assert.equal(field(report, s, 'commitCount'), '1', '并且照样提交成功')
+  assert.equal(field(report, s, 'emitCount'), '1')
+  assert.equal(field(report, s, 'emit0'), 'player_list_remove|1|array|0|-|-', '广播的是**空数组**')
+})
+
+test('JVM 探针（第十刀-a）：保留 id default / temp ⇒ 校验**早于 open**（一条 SQL、一个连接都没有）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+
+  // 两个场景都刻意把库设成"打不开"：如果实现先开库，拿到的会是 IllegalStateException（打不开数据库）
+  // 而不是 IllegalArgumentException（拒绝保留 id）—— 这条断言就是**顺序**的证明。
+  for (const [section, id, index] of [
+    ['remove-reserved-default', 'default', 0],
+    ['remove-reserved-temp-in-list', 'temp', 1],
+  ]) {
+    assert.equal(field(report, section, 'result'), 'threw:java.lang.IllegalArgumentException', `${section} 必须是 IllegalArgumentException`)
+    const message = field(report, section, 'message')
+    assert.match(message, new RegExp('拒绝删除保留列表 `' + id + '`'), `${section} 的消息必须点名是哪个保留 id`)
+    assert.match(message, new RegExp('`' + id + '`（`ids` 第 ' + index + ' 个元素）'), `${section} 的消息必须点名第几个元素`)
+    assert.match(message, /从不写进/, '消息必须写清"保留列表从不写进 my_list"')
+    assert.match(message, /只会清空它的歌曲/, '消息必须写清照抄桌面会发生什么（清空歌曲却删不掉列表）')
+    assert.match(message, /有意在这里偏离桌面语义/, '消息必须自报"这是一处有意偏离"')
+    assert.equal(field(report, section, 'events'), '-', `${section} 一个事务都不该开`)
+    assert.equal(field(report, section, 'sqlSeenCount'), '0', `${section} 一条 SQL 都不该发`)
+    assert.equal(field(report, section, 'transactionCount'), '0')
+    assert.equal(field(report, section, 'emitCount'), '0', `${section} 参数非法 ⇒ 不广播`)
+  }
+  // `default` / `temp` 这两个字面量的出处是 src/common/constants.ts 的 LIST_IDS（单一出处没破）。
+  assert.match(writeJava, /src\/common\/constants\.ts:25-30/)
+})
+
+test('JVM 探针（第十刀-a）：参数非法 ⇒ IllegalArgumentException 点名字段（5 种坏形状）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const expected = {
+    'remove-param-missing': /需要一个 `ids` 数组参数/,
+    'remove-param-wrapped-object': /参数必须是数组（`ids`）/,
+    'remove-param-item-not-string': /第 0 个元素必须是字符串/,
+    'remove-param-item-empty': /不能是空字符串/,
+    'remove-param-item-null': /第 0 个元素是 null/,
+  }
+  for (const [section, pattern] of Object.entries(expected)) {
+    assert.equal(field(report, section, 'result'), 'threw:java.lang.IllegalArgumentException', `${section} 必须是 IllegalArgumentException`)
+    assert.match(field(report, section, 'message'), pattern, `${section} 的消息必须点名`)
+    assert.equal(field(report, section, 'events'), '-', `${section} 不该开事务`)
+    assert.equal(field(report, section, 'sqlSeenCount'), '0', `${section} 不该发任何 SQL`)
+    assert.equal(field(report, section, 'emitCount'), '0', `${section} 不该广播`)
+  }
+  // "包成对象"这一种必须把"remove 要的是裸数组、对象是 add 的形状"说出来。
+  assert.match(field(report, 'remove-param-wrapped-object', 'message'),
+    /契约是 args=\[\[ids\]\]，\*\*不是\*\* args=\[\{ids: \[…\]\}\]/)
+})
+
+test('JVM 探针（第十刀-a）：第 2 句 DELETE 失败 ⇒ 不提交、**回滚**、不广播（第一句删掉的行走回来）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const s = 'remove-fail-second-delete'
+  assert.match(field(report, s, 'result'), /^threw:/)
+  assert.match(field(report, s, 'message'), /第 2 句 DELETE 失败/)
+  assert.equal(field(report, s, 'commitCount'), '0', '没 markSuccessful ⇒ 回滚')
+  assert.equal(field(report, s, 'emitCount'), '0', '失败**不许**改本地状态 ⇒ 一条广播都没有')
+  assert.equal(field(report, s, 'executed'), '1', '只发出过第一句')
+  const events = field(report, s, 'events').split('>')
+  assert.equal(events[events.length - 1], 'end', `最后一个事件必须是 endTransaction（回滚）：${events.join('>')}`)
+  // ⚠️ 回滚的**真凭实据**：第一句已经把 l-1 删掉了，endTransaction 之后两行都必须回来。
+  assert.equal(field(report, s, 'rowCount'), '2', '回滚必须把第一句删掉的那一行放回来')
+  assert.deepEqual(fields(report, s, 'row'), [
+    'id=l-1;name=甲;source=wy;sourceListId=s-1;position=0;locationUpdateTime=1',
+    'id=l-2;name=乙;source=wy;sourceListId=s-2;position=1;locationUpdateTime=2',
+  ])
+})
+
+test('JVM 探针（第十刀-a）：库打不开 / 三张表缺任何一张 ⇒ IllegalStateException，不广播、不开事务', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  assert.equal(field(report, 'remove-open-failure', 'result'), 'threw:java.lang.IllegalStateException')
+  assert.match(field(report, 'remove-open-failure', 'message'), /打不开数据库/)
+  assert.equal(field(report, 'remove-open-failure', 'events'), '-', '库都没打开 ⇒ 连事务都不该开')
+  assert.equal(field(report, 'remove-open-failure', 'emitCount'), '0')
+
+  assert.equal(field(report, 'remove-table-missing', 'result'), 'threw:java.lang.IllegalStateException')
+  assert.match(field(report, 'remove-table-missing', 'message'), /没有表 "my_list"/)
+  assert.equal(field(report, 'remove-table-missing', 'sqlSeenCount'), '0', '表缺失在 open 那一层就失败 ⇒ 一条 SQL 都没有')
+  assert.equal(field(report, 'remove-table-missing', 'emitCount'), '0')
+  // 三张表都点名进了 open 的 requiredTables（缺第 2/3 句要写的那两张同样在 open 层失败）。
+  assert.match(
+    blockRange(writeCode, 'private static Object listRemove').body,
+    /RainMusicDatabase\.open\(\s*context,\s*RainMusicDatabase\.TABLE_MY_LIST,\s*TABLE_MY_LIST_MUSIC_INFO,\s*TABLE_MY_LIST_MUSIC_INFO_ORDER\s*\)/,
+  )
+})
+
+test('JVM 探针（第十刀-a）：两个线程同时 remove ⇒ 同一时刻只有一个事务（remove 也在 LIST_WRITE_LOCK 里）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const s = 'remove-concurrent-two-writers'
+  assert.equal(field(report, s, 'result0'), 'ok')
+  assert.equal(field(report, s, 'result1'), 'ok')
+  assert.equal(field(report, s, 'maxOpenTransactions'), '1',
+    '去锁之后这里会变成 2（两趟 remove 各开一个事务）—— 这条断言就是第三条临界区的存在证明')
+  assert.equal(field(report, s, 'commitCount'), '2')
+  assert.equal(field(report, s, 'emitCount'), '2')
+  assert.equal(field(report, s, 'executed'), '12', '两趟各 2 个 id × 3 句')
+  assert.equal(field(report, s, 'binds'),
+    '1:a-1,1:a-1,1:a-1,1:a-2,1:a-2,1:a-2,1:b-1,1:b-1,1:b-1,1:b-2,1:b-2,1:b-2',
+    '两趟各自的"每个 id 三句"都完整（没有交错成一个 id 一句）')
+})
+
+test('JVM 探针（第十刀-b）：插队整表重写时 sourceListId 的 ".0" 已被归一（老库 "123.0" ⇒ 写回 "123"）', { skip: SKIP_REASON }, () => {
+  const report = probeReport()
+  const s = 'add-renumber-dot-zero'
+  assert.equal(field(report, s, 'result'), 'null')
+  // 四行各钉一种：末尾 .0 被去掉、只去**末尾那一次**（"456.0.0" ⇒ "456.0"）、不动的原样、NULL 仍是 NULL。
+  assert.deepEqual(fields(report, s, 'inserted'), [
+    'id=X;name=新;source=null;sourceListId=null;position=0;locationUpdateTime=null',
+    'id=A;name=甲;source=wy;sourceListId=123;position=1;locationUpdateTime=1',
+    'id=B;name=乙;source=wy;sourceListId=456.0;position=2;locationUpdateTime=2',
+    'id=C;name=丙;source=wy;sourceListId=789;position=3;locationUpdateTime=3',
+    'id=D;name=丁;source=wy;sourceListId=null;position=4;locationUpdateTime=null',
+  ], '插队重写读出来的 sourceListId 必须先过 `.0` 归一化（与读通道 / 桌面 dbHelper.ts:44-49 同一条规则）')
+  // 表里最终也是这 5 行（"123.0" 不许被原样固化回去）。
+  assert.deepEqual(fields(report, s, 'row'), fields(report, s, 'inserted'))
+  assert.equal(field(report, s, 'rowCount'), '5')
+  assert.ok(!fields(report, s, 'row').some(row => /sourceListId=123\.0;/.test(row)), '`123.0` 不许出现在重写后的表里')
 })
