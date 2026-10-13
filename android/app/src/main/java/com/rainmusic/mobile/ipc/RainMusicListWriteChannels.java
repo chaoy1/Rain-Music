@@ -1,6 +1,7 @@
 package com.rainmusic.mobile.ipc;
 
 import android.content.Context;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteStatement;
 
@@ -9,23 +10,30 @@ import com.getcapacitor.Logger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Android 移植 · **P0-2 第八刀**：歌单写通道的第一条 —— 改名
- * {@code player_list_update}（**invoke + 广播两半**）。
+ * Android 移植 · 歌单写通道（**P0-2 第八刀**起，本文件逐刀加通道）。
  *
  * <pre>
- * player_list_update   invoke,  args=[listInfos[]]  → void   （契约 docs/android/ipc-contract.md:104）
- * player_list_update   event,   args=[listInfos[]]           （主进程 → 渲染层，裸数组；契约同一条，
- *                                                              本刀把它从"单向"改成"双向"）
+ * 第八刀  player_list_update   invoke,  args=[listInfos[]]      → void   （契约 docs/android/ipc-contract.md:104）
+ *         player_list_update   event,   args=[listInfos[]]               （主进程 → 渲染层，裸数组；契约同一条，
+ *                                                                          第八刀把它从"单向"改成"双向"）
+ * 第九刀-a player_list_add     invoke,  args=[{position,listInfos}] → void （契约 :102）
+ *         player_list_add      event,   args=[{position,listInfos}]       （主进程 → 渲染层，**对象**载荷；
+ *                                                                          与 update / remove 的裸数组不同形）
  * </pre>
  *
- * <p>这一族（{@code player_list_*}）的写侧一共 5 条，本刀**只做 1 条**：
- * {@code player_list_add}（{@code list_create}）与 {@code player_list_remove}（{@code list_remove}）
- * 留给第九 / 第十刀，{@code player_list_update_position} 与 {@code player_list_data_overwire}
- * 各有各的形状（前者是"一批 id 的 position 重排"、后者是整表覆盖），都不在本刀范围。
+ * <p>这一族（{@code player_list_*}）的写侧一共 5 条：{@code player_list_update}（第八刀）与
+ * {@code player_list_add}（第九刀-a）已做；{@code player_list_remove} 留给第十刀，
+ * {@code player_list_update_position} 与 {@code player_list_data_overwire} 各有各的形状
+ * （前者是"一批 id 的 position 重排"、后者是整表覆盖），都不在本文件当前范围内。
  * 三条写通道（add / update / remove）**共用本文件**：这是刻意的 —— 见「{@code LIST_WRITE_LOCK}」。
+ *
+ * <p>⚠️ <b>第九刀-a 的用法</b>：本文件现在有**两个** {@code synchronized (LIST_WRITE_LOCK)} 临界区
+ * （改名一个、新建一个），两处都在 {@code beginTransaction} 之前进入、在 {@code endTransaction}
+ * 之后退出；两次 {@code emitTo} 都在各自临界区**之外**、提交**之后**。
  *
  * <h2>形状（抄契约与桌面链，没有自己发明）</h2>
  *
@@ -192,9 +200,129 @@ import java.util.List;
  * 界面看起来就是"改名没生效"，且**没有**任何 reject 回到调用方。本文件的类注释与用例都把
  * 这条形状单独钉住。
  *
+ * <h2>第九刀-a：{@code player_list_add}（新建歌单）</h2>
+ *
+ * <pre>
+ * player_list_add   invoke, args=[{position, listInfos}] → void   （契约 ipc-contract.md:102）
+ * player_list_add   event,  args=[{position, listInfos}]          （对象载荷，见下）
+ * </pre>
+ *
+ * <p><b>链</b>（逐段与桌面对齐，行号是桌面源码的）：
+ * <ol>
+ *   <li><b>invoke</b>：渲染层 {@code createUserList} {@code R:listManage:36-39}
+ *       （{@code rendererInvoke<Rain.List.ListActionAdd>(PLAYER_EVENT_NAME.list_add, data)}，
+ *       {@code data = {position, listInfos}}）→ 主进程 {@code M:list:12-14}
+ *       （{@code mainHandle<Rain.List.ListActionAdd>(list_add, async({params: {position, listInfos}}) => …)}，
+ *       {@code mainHandle} ⇒ **请求 / 应答**）→ {@code ListEvent.list_create}
+ *       （{@code src/main/event/ListEvent.ts:50-55}）→ {@code dbService.createUserLists(position, lists)}。</li>
+ *   <li><b>广播</b>：{@code ListEvent.ts:53} 的 {@code this.emit('list_create', position, lists)}
+ *       → {@code winRendererEvent.ts:9-11} 的
+ *       {@code sendEvent<Rain.List.ListActionAdd>(PLAYER_EVENT_NAME.list_add, { position, listInfos })}
+ *       → 渲染层 {@code rendererListManage.ts:180-184} 的
+ *       {@code list_create = ({params: {position, listInfos}}) => …}，订阅在 {@code :229}。</li>
+ *   <li><b>参数 → 返回值</b>：{@code {position, listInfos}} → {@code void}（这一刀不返回新 id）。</li>
+ * </ol>
+ *
+ * <h3>广播的形状是**对象**（与 update / remove 不同形）</h3>
+ * 载荷逐字是 {@code {position, listInfos}} —— 桌面 {@code winRendererEvent.ts:10} 发的就是它，
+ * 渲染层 {@code rendererListManage.ts:180} 也是按这两个键解构的。所以这里**不能**照 update
+ * 那条形状发裸数组：{@code rendererListManage.ts:228-231} 的三个监听器虽然挂在同一条
+ * {@code registerListAction} 里，但形状各不同形（{@link #CHANNEL_LIST_UPDATE} 的类注释
+ * 「广播的形状」记录的是**那一条**的裸数组）。契约 {@code ipc-contract.md:120} 的注把三条
+ * 一起写了：{@code player_list_add} 必须是对象，另两条必须是裸数组。
+ *
+ * <p>⚠️ 广播里的 {@code position} 就是**调用方传来的那个值**（可能是负数，见下），
+ * 不做任何"折算成真实落库位置"的加工：桌面 {@code ListEvent.ts:53} 也是把**同一个**
+ * {@code position} 参数往后传；渲染层 {@code action.ts:48} 自己判
+ * {@code position < 0 || position >= userLists.length} 决定 push 还是 splice。
+ * 折算反而会让渲染层把"追加"当成"插到第 0 位"。
+ *
+ * <h3>两个分支（桌面 {@code modules/list/index.ts:70-98}），同一个事务</h3>
+ * <table border="1">
+ *   <caption>{@code position} 落到哪一支</caption>
+ *   <tr><th>条件</th><th>SQL（本文件）</th><th>桌面出处</th></tr>
+ *   <tr><td><b>追加</b>：{@code position < 0 || position >= COUNT(*)}</td>
+ *       <td>只 {@code INSERT} 这 M 行（6 列），**不删**</td>
+ *       <td>{@code index.ts:72-85} + {@code dbHelper.ts:58-75} 的 {@code isClear=false}</td></tr>
+ *   <tr><td><b>插队</b>：否则</td>
+ *       <td>{@code DELETE FROM "main"."my_list"} + 全量 {@code INSERT}（N+M 行，position 重编号 0..n-1）</td>
+ *       <td>{@code index.ts:86-97} + {@code dbHelper.ts:58-75} 的 {@code isClear=true}</td></tr>
+ * </table>
+ * <p><b>新位置怎么算（追加分支）</b>：{@code order = MAX(position) + 1}，
+ * 空表 ⇒ {@code 0}。桌面 {@code index.ts:75} 是
+ * {@code userLists.length ? (rawPoss.get(userLists.at(-1)!.id) ?? userLists.length) + 1 : 0}
+ * —— 取的是**最后一行**的原始 position；表按 position 排序 ⇒ 那一行就是 {@code MAX(position)}。
+ * 它明写"因为原始 pos 可能比 userLists.length 大，所以不能直接用 userLists.length 作为新列表的
+ * 原始位置"（{@code index.ts:74}）⇒ 本通道**允许空洞**：库里是 {@code 0,1,5} 时下一个是 {@code 6}，
+ * 不是 {@code 3}。多行一次传入时依次 {@code order + index}（{@code index.ts:76-78}）。
+ *
+ * <p><b>插队分支的重编号</b>：整表清空重写，{@code position} 被重写成 {@code 0..n-1}
+ * （{@code index.ts:90-92} 的 {@code forEach((list, index) => list.position = index)}）。
+ * 顺序取"读出来的行序" = {@code statements.ts:19} 的 {@code ORDER BY "position" ASC, "rowid" ASC}
+ * （{@code queryAllUserList()} 的语句就是这个排序），再把 M 条新行 {@code splice(position, …)}
+ * 进去（{@code index.ts:89}）。⚠️ 这里**必须**按那个排序读，不能按 SQLite 的存储序 ——
+ * 否则"库里本来有空洞 / 顺序与 rowid 不一致"时插队的位置会与桌面不同。
+ *
+ * <p>两个分支都**不碰** {@code my_list_music_info} / {@code my_list_music_info_order}：
+ * 歌单的 {@code id} 没有变（插队分支删了又按同一个 id 插回），歌单内的歌曲是按
+ * {@code listId} 关联的，所以无需搬动（桌面同样一行都不碰，{@code index.ts:84/93} 只调
+ * {@code insertUserLists}）。
+ *
+ * <p><b>可空列怎么绑（{@code NULL} 的一格）</b>：{@code source} / {@code sourceListId} /
+ * {@code locationUpdateTime} 缺字段或给 JSON {@code null} 时，绑的是 {@code org.json} 的
+ * {@code JSONObject.NULL} 哨兵，**不是** Java {@code null}（理由：Android 的
+ * {@code execSQL(String, Object[])} 对 {@code null} 元素的行为在本机无法验证，而哨兵在
+ * 所有 {@code SQLiteProgram.bind*} 路径上都是明确的 SQL NULL）。{@code name} 缺失 /
+ * 为 null 则**直接抛 {@code IllegalArgumentException}**（点名字段），不靠 NOT NULL 约束兜底 ——
+ * 约束那一条路只在真机上才知道是什么异常类型，而参数错误本来就该在打开库之前失败。
+ * {@code name} 在、但是数字 / 布尔时按桌面 {@code better-sqlite3} 的绑定语义原样传下去
+ * （SQLite 的 TEXT 列会接受它，见类注释「依赖」里"不自己发明校验"这一条）。
+ *
+ * <h3>{@code position} 的校验形状：整数，**负数合法**</h3>
+ * 只拒绝"缺失 / 非数值 / 非整数"三种，**不拒绝负数**。三条依据：
+ * <ol>
+ *   <li>桌面 {@code index.ts:72} 的条件就是 {@code position < 0 || position >= userLists.length}
+ *       ⇒ 负数属于**追加**分支，是被支持的输入，不是坏输入；</li>
+ *   <li>渲染层**确实**用 {@code -1} 表示"没指定位置"：{@code store/list/action.ts:56,62} 的
+ *       参数默认值 {@code position = -1}，{@code :65} 把它折算成 {@code userLists.length} 之后
+ *       才发出去。也就是说 {@code -1} 在这条链上是**正常的"未指定"**；</li>
+ *   <li>于是"拒绝负数"会打断渲染层那条正常路径 —— 真机上的表现就是"新建歌单失败"
+ *       （{@code ok:false} + 一条 {@code IllegalArgumentException}），而库里什么都没有坏。
+ *       那是本通道**自己发明**的一条桌面没有的限制。</li>
+ * </ol>
+ *
+ * <h3>{@code id} 冲突 / 同名：一个大声失败，一个允许</h3>
+ * <ul>
+ *   <li><b>id 冲突 ⇒ 大声失败</b>：{@code my_list} 的主键是 {@code id}（{@code tables.ts:136}，
+ *       与 {@code RainMusicDatabase.DDL_MY_LIST} 逐字一致），重复 id 的 {@code INSERT} 会抛
+ *       {@code SQLiteConstraintException} ⇒ 不标记事务成功 ⇒ 回滚 ⇒ 异常冒泡成 {@code ok:false}。
+ *       本通道**不吞、不换一个 id、不返回假 id**（返回类型本来就是 {@code void}）。</li>
+ *   <li><b>同名 ⇒ 允许</b>：{@code my_list} 上**没有** name 的 UNIQUE（{@code tables.ts:128-138}
+ *       只有 {@code PRIMARY KEY("id")}）⇒ 本通道**不加判重**。桌面也不加：判重在 UI 侧
+ *       （渲染层自己的列表里查重名），库这一层从来不管。</li>
+ * </ul>
+ *
+ * <h3>成功与失败的形状（沿用第八刀的三态）</h3>
+ * <table border="1">
+ *   <caption>第九刀-a 的失败矩阵</caption>
+ *   <tr><th>状态</th><th>本通道</th><th>理由</th></tr>
+ *   <tr><td><b>参数非法</b>（缺参数 / 不是对象 / 缺 {@code position} 或它不是整数 /
+ *       {@code listInfos} 不是数组 / 元素不是对象 / {@code id} 不是非空字符串 / 可空列类型不对）</td>
+ *       <td>{@code IllegalArgumentException}，消息点名第几个元素与哪个字段</td>
+ *       <td>与第八刀同一风格（{@link #listUpdate} 的参数校验、{@code RainMusicDataChannels} 的消息风格）</td></tr>
+ *   <tr><td><b>{@code listInfos} 是空数组</b></td><td>成功：0 条 INSERT、提交、广播
+ *       {@code {position, listInfos: []}}</td>
+ *       <td>桌面 {@code db.transaction(…)([])} 同样什么都不写、随后照样 emit</td></tr>
+ *   <tr><td><b>库打不开 / 表缺失</b></td><td>reject，不广播</td>
+ *       <td>复用 {@link RainMusicDatabase#open(Context, String...)}（与第八刀同一入口）</td></tr>
+ *   <tr><td><b>语句失败</b>（结构漂移 / {@code name} 为 NULL / id 冲突 / 约束不满足）</td>
+ *       <td>reject，事务回滚，**不广播**</td>
+ *       <td>绝不 catch 之后返回"成功"（见「emit 的位置」）</td></tr>
+ * </table>
+ *
  * <h2>依赖</h2>
  * 只用到 {@code :capacitor-android}（{@code com.getcapacitor.Logger}）、Android 框架自带的
- * {@code android.database.*} 与 {@code org.json}、JDK 的 {@code java.util.List}，
+ * {@code android.database.*} 与 {@code org.json}、JDK 的 {@code java.util.{ArrayList,List}}，
  * 以及同包的 {@link RainMusicDatabase} / {@link RainMusicIpcHandlers}。
  * <b>没有新增任何 gradle 依赖</b>，也没有引入 Kotlin。
  *
@@ -211,6 +339,25 @@ import java.util.List;
  * 不覆盖任何框架行为。真机行为（并发写、{@code beginTransaction} 的实际隔离、
  * 与线 A 的 SQLite 是否同一个连接、{@code notifyListeners} 的时机与序列化）
  * **同样未在真机验证**。
+ *
+ * <p><b>第九刀-a 新增的未验证点（逐条列出来，别当成已验证）</b>：
+ * <ol>
+ *   <li>{@code SQLiteDatabase.rawQuery(String, String[])} / {@code Cursor} 的那几个方法
+ *       （{@code moveToFirst / moveToNext / isNull / getLong / getColumnIndexOrThrow / close}）
+ *       是按 AOSP 的签名写的，本机**没有 android.jar 可以对着编**（{@code $ANDROID_HOME} 与
+ *       {@code platforms/} 都不在），只能由 CI 的 {@code gradlew assembleDebug} 证伪；</li>
+ *   <li>{@code MAX("position")} 在**空表**上返回一行一列的 NULL 这一点（真 SQLite 的聚合语义）
+ *       同样只由真机 / CI 证伪；本机用内存假库按同一语义复现；</li>
+ *   <li>{@code execSQL(String, Object[])} 对 {@code JSONObject.NULL} 哨兵绑成 SQL NULL
+ *       这一点未验证（因此刻意不用 Java {@code null}，见「可空列怎么绑」）；</li>
+ *   <li>{@code executeUpdateDelete()} / {@code executeInsert()} 的差异、以及
+ *       {@code INSERT} 在 id 冲突时抛的**具体异常类型**（{@code SQLiteConstraintException}
+ *       的子类）未在真机确认 —— 本通道只用"它抛出来 ⇒ 回滚 ⇒ ok:false"这一条**不依赖具体类型**
+ *       的性质，所以类型不确定不影响这一刀的正确性；</li>
+ *   <li>插队分支是"整表清空重写"（N+M 行、每行一条 INSERT），歌单很多时的事务时长
+ *       **没有测量**；桌面 {@code better-sqlite3} 是同步 API、同样一句一句写，但真机上的
+ *       时长与是否会触发 ANR 属于**未知**（本通道不碰 UI 线程，handler 在后台 2 线程池里）。</li>
+ * </ol>
  */
 public final class RainMusicListWriteChannels {
 
@@ -224,6 +371,16 @@ public final class RainMusicListWriteChannels {
      * 契约 {@code ipc-contract.md:104} 那一行本刀改成"双向"记法。
      */
     public static final String CHANNEL_LIST_UPDATE = "player_list_update";
+
+    /**
+     * {@code player_list_add}：键名 {@code list_add}（{@code src/common/ipcNames.ts:25}
+     * 的 {@code PLAYER_EVENT_NAME.list_add}）+ 模块前缀 {@code player}（{@code ipcNames.ts:171-176}）。
+     *
+     * <p>与 {@link #CHANNEL_LIST_UPDATE} 一样，同一个字符串既是 invoke 的通道名、也是广播的通道名
+     * （{@code rendererEvent.ts:12} 收、{@code winRendererEvent.ts:10} 发），契约 {@code :102}
+     * 记成"双向"。<b>但广播的形状不同</b>：本通道发的是对象 {@code {position, listInfos}}。
+     */
+    public static final String CHANNEL_LIST_ADD = "player_list_add";
 
     /**
      * 三条歌单写通道（{@code player_list_add} / {@code player_list_update} /
@@ -251,12 +408,72 @@ public final class RainMusicListWriteChannels {
         WHERE "id"=?
         """;
 
+    /**
+     * 插入一行歌单（第九刀-a）。逐字抄 {@code statements.ts:27-32} 的
+     * {@code createListInsertStatement()}：<b>6 列</b>、列清单顺序
+     * {@code id, name, source, sourceListId, position, locationUpdateTime}
+     * （就是 {@code tables.ts:128-138} 的列序，也是 {@code dbHelper.ts:65-72} 的绑定顺序）。
+     *
+     * <p>它被两个分支共用：追加分支插 M 行；插队分支先 {@link #SQL_LIST_CLEAR} 再插 N+M 行。
+     * 唯一的差异是 {@code @id} … {@code @locationUpdateTime} → {@code ?}（按出现顺序绑定，
+     * 见 {@link #bindListRow}）。
+     */
+    static final String SQL_LIST_INSERT = """
+        INSERT INTO "main"."my_list" ("id", "name", "source", "sourceListId", "position", "locationUpdateTime")
+        VALUES (?, ?, ?, ?, ?, ?)
+        """;
+
+    /**
+     * 清空整张 {@code my_list}（第九刀-a 的插队分支第一步）。逐字抄
+     * {@code statements.ts:38-41} 的 {@code createListClearStatement()}：
+     * {@code DELETE FROM "main"."my_list"} —— <b>没有 WHERE</b>，这是刻意的
+     * （插队 = 整表清空重写，{@code dbHelper.ts:63} 的 {@code isClear=true} 那一支）。
+     */
+    static final String SQL_LIST_CLEAR = """
+        DELETE FROM "main"."my_list"
+        """;
+
+    /**
+     * 取"现有第一行"的 position（追加分支的计算依据）。桌面取的是
+     * {@code queryAllUserList()} 的**最后一行**（{@code index.ts:75} 的 {@code userLists.at(-1)}），
+     * 而那句 SQL 是 {@code ORDER BY "position" ASC, "rowid" ASC} ⇒ 最后一行就是 position 最大的一行。
+     * 这里直接取 {@code MAX("position")}（同值、少一次排序）。
+     *
+     * <p>⚠️ {@code MAX} 在**空表**上返回 {@code NULL} —— 调用方按 {@code 0} 处理
+     * （桌面 {@code index.ts:75} 的三元表达式 {@code userLists.length ? … : 0} 是同一个意思）。
+     */
+    static final String SQL_MAX_POSITION = """
+        SELECT MAX("position") FROM "main"."my_list"
+        """;
+
+    /**
+     * 数现有几行（插队分支判 {@code position >= userLists.length} 用的就是它）。
+     * 桌面的 {@code userLists.length} 来自 {@code queryAllUserList()} 的长度。
+     */
+    static final String SQL_COUNT_LISTS = """
+        SELECT COUNT(*) FROM "main"."my_list"
+        """;
+
+    /**
+     * 插队分支：按桌面 {@code statements.ts:16-20} 的排序把现有 N 行读出来
+     * （{@code ORDER BY "position" ASC, "rowid" ASC} —— 与 {@code queryAllUserList()} 同序）。
+     *
+     * <p>只选本通道要写回的 6 列。⚠️ {@code position} 一定读：重编号时不用它的**值**，
+     * 但要用它的**序**（{@code ORDER BY} 就是靠它；见类注释「插队分支的重编号」）。
+     */
+    static final String SQL_LIST_ORDERED = """
+        SELECT "id", "name", "source", "sourceListId", "position", "locationUpdateTime"
+        FROM "main"."my_list"
+        ORDER BY "position" ASC, "rowid" ASC
+        """;
+
     /** {@code my_list} 的列名（{@code tables.ts:129-137}），只在本文件里用。 */
     private static final String COLUMN_NAME = "name";
     private static final String COLUMN_SOURCE = "source";
     private static final String COLUMN_SOURCE_LIST_ID = "sourceListId";
     private static final String COLUMN_LOCATION_UPDATE_TIME = "locationUpdateTime";
     private static final String COLUMN_ID = "id";
+    private static final String COLUMN_POSITION = "position";
 
     /**
      * 契约那一格写的参数名 {@code listInfos}（{@code ipc-contract.md:104}）。
@@ -266,12 +483,20 @@ public final class RainMusicListWriteChannels {
      */
     private static final String FIELD_LIST_INFOS = "listInfos";
 
+    /**
+     * 契约那一格写的参数名 {@code position}（{@code ipc-contract.md:102}），与
+     * {@link #FIELD_LIST_INFOS} 同款：只出现在**错误信息**里。wire 上它就是参数对象的一个键
+     * （{@code rendererEvent.ts:12} 的 {@code {params: {position, listInfos}}}）。
+     */
+    private static final String FIELD_POSITION = "position";
+
     private static final String TAG = "RainMusicListWrite";
 
     private RainMusicListWriteChannels() {}
 
     /**
-     * 注册这一条通道。**在 {@link RainMusicIpcPlugin#load()} 里调用**（与 P0-1 的
+     * 注册本文件的两条通道（第八刀的 {@code player_list_update} + 第九刀-a 的
+     * {@code player_list_add}）。**在 {@link RainMusicIpcPlugin#load()} 里调用**（与 P0-1 的
      * {@code setEmitter}、前七刀的 {@code register} 同一处、同一时序理由：必须在渲染层第一次
      * invoke 之前完成，否则真机上就是 {@code IPC_CHANNEL_UNSUPPORTED}）。
      *
@@ -286,11 +511,15 @@ public final class RainMusicListWriteChannels {
             CHANNEL_LIST_UPDATE,
             (args, ctx) -> listUpdate(requireContext(plugin), ctx, args)
         );
+        RainMusicIpcHandlers.register(
+            CHANNEL_LIST_ADD,
+            (args, ctx) -> listAdd(requireContext(plugin), ctx, args)
+        );
         // ⚠️ 这里**只打文件名**、不调 getDatabasePath()：load() 阶段 Context 可能还没有
         // （所以 Context 一律留到 handler 调用时再取）。绝对路径由 open() 在真机上打进错误信息。
         Logger.info(
             TAG,
-            "P0-2 第八刀：已注册 " + CHANNEL_LIST_UPDATE +
+            "P0-2 第八刀 + 第九刀-a：已注册 " + CHANNEL_LIST_UPDATE + " / " + CHANNEL_LIST_ADD +
             "（写 + 同名广播；invoke 落点 " + RainMusicDatabase.DATABASE_NAME +
             " 的 \"" + RainMusicDatabase.TABLE_MY_LIST + "\" 表，schema 版本 " +
             RainMusicDatabase.SCHEMA_VERSION_TEXT + "；三条写通道共用 LIST_WRITE_LOCK）"
@@ -312,7 +541,9 @@ public final class RainMusicListWriteChannels {
      * @throws IllegalStateException    库打不开 / 表缺失 / 语句失败（**并且不会广播**）
      */
     private static Object listUpdate(Context context, RainMusicIpcHandlers.RequestContext ctx, List<Object> args) {
-        JSONArray listInfos = readListInfos(args);
+        JSONArray listInfos = readListInfos(
+            args, CHANNEL_LIST_UPDATE, "docs/android/ipc-contract.md:104", "`listInfos[]`"
+        );
 
         SQLiteDatabase db = RainMusicDatabase.open(context, RainMusicDatabase.TABLE_MY_LIST);
         applyListUpdates(db, listInfos);
@@ -366,15 +597,456 @@ public final class RainMusicListWriteChannels {
         }
     }
 
+    // ------------------------------------------------------------------ 第九刀-a：player_list_add
+
+    /**
+     * {@code player_list_add}：新建歌单（**invoke + 同名广播两半**，契约 {@code :102}）。
+     *
+     * @param args {@code args[0]} = {@code {position, listInfos}}：{@code position} 是整数
+     *             （**负数合法** = 追加，见类注释「{@code position} 的校验形状」），
+     *             {@code listInfos} 是 {@code {id, name, source?, sourceListId?, locationUpdateTime?}} 的数组
+     * @return 固定 {@code null}（契约是 {@code void} —— **不返回新 id**，理由见类注释）
+     * @throws IllegalArgumentException 参数非法（缺 / 不是对象 / {@code position} 缺失或不是整数 /
+     *                                  {@code listInfos} 不是数组 / 元素不是对象 /
+     *                                  {@code id} 不是非空字符串 / 可空列给了错的类型）
+     * @throws IllegalStateException    库打不开 / 表缺失 / 语句失败（含 **id 冲突**）—— **不广播**
+     */
+    private static Object listAdd(Context context, RainMusicIpcHandlers.RequestContext ctx, List<Object> args) {
+        JSONObject params = readAddParams(args);
+        long position = requirePosition(params);
+        JSONArray listInfos = requireAddListInfos(params);
+        // 元素级参数校验在这里**一次做完**（而不是等到写库循环里）：坏载荷在打开库、开事务之前
+        // 就大声失败，失败路径上一条 SQL、一个连接都没有（见「失败语义三态」那一节的参数非法行）。
+        List<ListRow> additions = buildPayloadRows(listInfos);
+
+        SQLiteDatabase db = RainMusicDatabase.open(context, RainMusicDatabase.TABLE_MY_LIST);
+        applyListAdds(db, position, additions);
+
+        // 只有走到这里才广播：事务**已提交**（applyListAdds 正常返回）且**在锁外**。
+        // 载荷是**对象** {position, listInfos}，逐字对齐 winRendererEvent.ts:10 的
+        // sendEvent(channel, { position, listInfos }) —— 渲染层 rendererListManage.ts:180
+        // 是按这两个键解构的，发成裸数组会在那里立刻炸（见类注释「广播的形状是对象」）。
+        // position 用**调用方传来的那个值**，不折算（理由见类注释同一节）。
+        JSONObject payload = new JSONObject();
+        payload.put(FIELD_POSITION, position);
+        payload.put(FIELD_LIST_INFOS, listInfos);
+        ctx.emitTo(CHANNEL_LIST_ADD, payload);
+
+        Logger.info(
+            TAG,
+            CHANNEL_LIST_ADD + "：已提交并广播 " + listInfos.length() +
+            " 个新歌单（对象载荷 {position, listInfos}，形状对齐 winRendererEvent.ts:9-11）"
+        );
+        return null;
+    }
+
+    /**
+     * 新建歌单的写库部分：<b>一个事务</b>（对齐桌面 {@code dbHelper.ts:58-75} 的
+     * {@code insertUserLists}），整段在 {@link #LIST_WRITE_LOCK} 内。
+     *
+     * <p><b>两个分支</b>（判定抄桌面 {@code modules/list/index.ts:72}）：
+     * <ol>
+     *   <li><b>追加</b>（{@code position < 0 || position >= COUNT(*)}）：只 INSERT 这 M 行。
+     *       {@code position} 从 {@code MAX(position)+1} 起递增 ⇒ **允许空洞**
+     *       （桌面 {@code index.ts:73-74} 明写"不能直接用 length"）；</li>
+     *   <li><b>插队</b>（否则）：先 {@code DELETE FROM "main"."my_list"}，再把 N+M 行按新顺序
+     *       全量 INSERT，{@code position} 重编号 {@code 0..n-1}（桌面 {@code index.ts:89-92}）。</li>
+     * </ol>
+     * 两个分支都不碰 {@code my_list_music_info} / {@code my_list_music_info_order}。
+     *
+     * <p>⚠️ <b>读 {@code COUNT(*) / MAX(position)} 与读现有行都在锁内</b>（且插队分支的读在
+     * 事务内）：这里是"先读后写"的复合操作，锁外读会让两个并发的 add 读到同一个基数。
+     * 与第八刀"临界区只有 SQL"的形状不同 —— 那一刀没有读，这一刀**必须**把读包进来。
+     *
+     * <p>任何一步抛错（含 id 冲突 / {@code name} 为 NULL）⇒ 不标记事务成功 ⇒
+     * {@code endTransaction()} 回滚 ⇒ 异常冒泡（**不会有广播**）。
+     */
+    private static void applyListAdds(SQLiteDatabase db, long position, List<ListRow> additions) {
+        synchronized (LIST_WRITE_LOCK) {
+            db.beginTransaction();
+            try {
+                boolean append = isAppendPosition(db, position);
+                List<Object[]> rows = append
+                    ? buildAppendRows(db, additions)
+                    : buildRenumberedRows(db, position, additions);
+                // isClear 那一半（桌面 dbHelper.ts:63）：**只有插队分支**清表。
+                if (!append) db.execSQL(SQL_LIST_CLEAR);
+                writeListRows(db, rows);
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+    }
+
+    /**
+     * 桌面 {@code index.ts:72} 的那半边条件：{@code position < 0 || position >= userLists.length}。
+     * {@code userLists.length} = {@code COUNT(*)}（桌面那个数组就是 {@code queryAllUserList()} 读出来的）。
+     *
+     * <p><b>负数落在这里</b>（返回 {@code true} = 追加），不报错 —— 理由见类注释
+     * 「{@code position} 的校验形状」。
+     */
+    private static boolean isAppendPosition(SQLiteDatabase db, long position) {
+        Cursor cursor = db.rawQuery(SQL_COUNT_LISTS, null);
+        try {
+            return !cursor.moveToFirst() || position < 0 || position >= cursor.getLong(0);
+        } finally {
+            cursor.close();
+        }
+    }
+
+    /**
+     * 追加分支：新行的 position 从 {@code MAX(position)+1} 起依次递增
+     * （桌面 {@code index.ts:75} 的 {@code order} + {@code :77} 的 {@code order + index}）。
+     *
+     * <p>空表 ⇒ {@code MAX} 是 NULL ⇒ 起点 {@code 0}（桌面那个三元表达式的 {@code : 0}）。
+     * <b>允许空洞</b>：库里是 {@code 0,1,5} ⇒ 下一个是 {@code 6}。
+     */
+    private static List<Object[]> buildAppendRows(SQLiteDatabase db, List<ListRow> additions) {
+        long order = readNextPosition(db);
+        List<Object[]> rows = new ArrayList<>(additions.size());
+        for (int i = 0; i < additions.size(); i++) {
+            rows.add(additions.get(i).toArgs(order + i));
+        }
+        return rows;
+    }
+
+    /**
+     * 插队分支：读出现有 N 行（按 {@code position ASC, rowid ASC}），把 M 条新行
+     * {@code splice} 进 {@code position} 处（桌面 {@code index.ts:87-89}），然后把整个列表的
+     * position 重编号成 {@code 0..n-1}（桌面 {@code :90-92}）。
+     *
+     * <p>返回的行序 = 它们将被 INSERT 的顺序 = 新的物理书写顺序（对 {@code ORDER BY position}
+     * 的读没有影响，但让日志/调试和桌面一致）。
+     */
+    private static List<Object[]> buildRenumberedRows(SQLiteDatabase db, long position, List<ListRow> additions) {
+        List<ListRow> merged = readOrderedRows(db);
+        int at = (int) position;
+        // 走到这里 position 一定在 [0, COUNT) 里（isAppendPosition 已经排除负数与越界）⇒ splice 安全。
+        merged.addAll(at, additions);
+
+        List<Object[]> rows = new ArrayList<>(merged.size());
+        for (int i = 0; i < merged.size(); i++) {
+            rows.add(merged.get(i).toArgs(i));
+        }
+        return rows;
+    }
+
+    /** 逐行 INSERT（{@code execSQL} 的形状与 {@code dbHelper.ts:65-72} 的逐条 {@code run} 一致）。 */
+    private static void writeListRows(SQLiteDatabase db, List<Object[]> rows) {
+        for (Object[] row : rows) db.execSQL(SQL_LIST_INSERT, row);
+    }
+
+    /**
+     * 追加分支的起点：{@code MAX(position) + 1}，空表 ⇒ {@code 0}。
+     *
+     * <p>{@code MAX} 在空表上返回一行一列的 NULL（{@code moveToFirst()} 为真、{@code isNull(0)} 为真），
+     * 所以两种情况都要判，不能只看 {@code moveToFirst()}。
+     */
+    private static long readNextPosition(SQLiteDatabase db) {
+        Cursor cursor = db.rawQuery(SQL_MAX_POSITION, null);
+        try {
+            if (!cursor.moveToFirst() || cursor.isNull(0)) return 0L;
+            return cursor.getLong(0) + 1L;
+        } finally {
+            cursor.close();
+        }
+    }
+
+    /** 插队分支的数据来源：现有全部行，序 = {@code statements.ts:19} 的 {@code ORDER BY "position" ASC, "rowid" ASC}。 */
+    private static List<ListRow> readOrderedRows(SQLiteDatabase db) {
+        List<ListRow> rows = new ArrayList<>();
+        Cursor cursor = db.rawQuery(SQL_LIST_ORDERED, null);
+        try {
+            int idIndex = cursor.getColumnIndexOrThrow(COLUMN_ID);
+            int nameIndex = cursor.getColumnIndexOrThrow(COLUMN_NAME);
+            int sourceIndex = cursor.getColumnIndexOrThrow(COLUMN_SOURCE);
+            int sourceListIdIndex = cursor.getColumnIndexOrThrow(COLUMN_SOURCE_LIST_ID);
+            int timeIndex = cursor.getColumnIndexOrThrow(COLUMN_LOCATION_UPDATE_TIME);
+            while (cursor.moveToNext()) {
+                // id / name 在 tables.ts:129-130 是 NOT NULL：读出来是 NULL 说明这份库的结构或数据
+                // 已经被弄坏了。这里**大声抛错**（而不是把它当 NULL 再 INSERT 回去 —— 那会让这一刀
+                // 既报不出真正的原因，又把坏数据原样重写一遍）。
+                rows.add(new ListRow(
+                    requireNotNullColumn(cursor.getString(idIndex), COLUMN_ID, rows.size()),
+                    requireNotNullColumn(cursor.getString(nameIndex), COLUMN_NAME, rows.size()),
+                    // source / sourceListId 可空：SQL NULL ⇒ JSON null 哨兵（绑定见 ListRow#toArgs）。
+                    jsonNullIfNull(cursor.getString(sourceIndex)),
+                    jsonNullIfNull(cursor.getString(sourceListIdIndex)),
+                    // locationUpdateTime 在 tables.ts:135 是 INTEGER 且可空 ⇒ isNull 要原样保留。
+                    cursor.isNull(timeIndex) ? JSONObject.NULL : Long.valueOf(cursor.getLong(timeIndex))
+                ));
+            }
+        } finally {
+            cursor.close();
+        }
+        return rows;
+    }
+
+    /**
+     * 一行歌单（{@link #SQL_LIST_INSERT} 的 6 列）。
+     *
+     * <p>存在的理由：插队分支要在**写之前**把"N+M 行、每行的新 position"完整算出来
+     * （重编号是整表动作，不能一边读一边写），所以需要一个不依赖 {@code Cursor} 的行表示。
+     */
+    private static final class ListRow {
+
+        private final String id;
+        private final String name;
+        /** {@code source} / {@code sourceListId}：可能是 {@code String} 或 JSON null 哨兵（见 {@link #toArgs}）。 */
+        private final Object source;
+        private final Object sourceListId;
+        /** {@code locationUpdateTime}：可能是 {@code Long} 或 JSON null 哨兵。 */
+        private final Object locationUpdateTime;
+
+        private ListRow(String id, String name, Object source, Object sourceListId, Object locationUpdateTime) {
+            this.id = id;
+            this.name = name;
+            this.source = source;
+            this.sourceListId = sourceListId;
+            this.locationUpdateTime = locationUpdateTime;
+        }
+
+        /** 从调用方载荷里来的一行（{@code id} 必须是非空字符串；{@code name} 必填）。 */
+        static ListRow fromPayload(JSONObject info, int index) {
+            Object rawTime = info.opt(COLUMN_LOCATION_UPDATE_TIME);
+            Object time = (rawTime == null || rawTime == JSONObject.NULL)
+                ? JSONObject.NULL
+                : Long.valueOf(requireIntegerMillis(rawTime, index));
+            return new ListRow(
+                requireAddId(info, index),
+                requireText(info, COLUMN_NAME, index),
+                optionalColumn(info, COLUMN_SOURCE, index),
+                optionalColumn(info, COLUMN_SOURCE_LIST_ID, index),
+                time
+            );
+        }
+
+        /**
+         * 绑定参数，顺序 == {@link #SQL_LIST_INSERT} 里 {@code ?} 的出现顺序
+         * （id, name, source, sourceListId, position, locationUpdateTime）。
+         *
+         * <p>{@code position} 一律换成"重编号后的下标"，**不写** {@code MAX(position)+1} ——
+         * 追加分支由调用方传入正确的 {@code order + index}，插队分支就是 {@code 0..n-1}。
+         *
+         * <p>⚠️ <b>可空列绑的是 {@code JSONObject.NULL} 哨兵，不是 Java {@code null}</b>：
+         * Android 的 {@code SQLiteDatabase.execSQL(String, Object[])} 对 {@code null} 元素的处理
+         * 是本文件**在本机无法验证**的一格（没有 android.jar ⇒ 只能由 CI / 真机证伪）。
+         * {@code org.json} 的哨兵在所有 {@code SQLiteProgram.bind*} 路径上都被明确处理成
+         * SQL NULL（{@code JSONObject.NULL.toString() == "null"} 也有定义），所以本通道把
+         * NATIVE_NULL 的输入统一换成它，把"能不能绑 null"这个问题从**运行期**移走。
+         */
+        Object[] toArgs(long position) {
+            return new Object[] { id, name, source, sourceListId, Long.valueOf(position), locationUpdateTime };
+        }
+    }
+
+    /** 全部载荷行：逐个校验并转成 {@link ListRow}（下标只用于点名第几个元素）。 */
+    private static List<ListRow> buildPayloadRows(JSONArray listInfos) {
+        List<ListRow> rows = new ArrayList<>(listInfos.length());
+        for (int i = 0; i < listInfos.length(); i++) {
+            rows.add(ListRow.fromPayload(requireAddInfoObject(listInfos, i), i));
+        }
+        return rows;
+    }
+
+    // ------------------------------------------------------------------ 参数校验（第九刀-a）
+
+    /**
+     * 取 {@code args[0]} 作为参数对象 {@code {position, listInfos}}（契约 {@code :102}）。
+     *
+     * <p>形状与第八刀的 {@code listInfos[]} 不同：那一条的参数**就是**那个数组，这一条是**一个对象**。
+     * 所以"直接给数组"（照第八刀的形状抄）在这里是**参数错误**，不是"没指定 position" ——
+     * 后者在链上写作 {@code position: -1}（{@code store/list/action.ts:56}），仍然是一个对象。
+     */
+    private static JSONObject readAddParams(List<Object> args) {
+        if (args == null || args.isEmpty() || args.get(0) == null) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 需要一个 `{position, " + FIELD_LIST_INFOS + "}` 参数" +
+                "（契约 docs/android/ipc-contract.md:102：`{position, listInfos}` → `void`），收到 " +
+                describeArgs(args)
+            );
+        }
+        Object first = args.get(0);
+        if (first instanceof JSONObject) return (JSONObject) first;
+        throw new IllegalArgumentException(
+            CHANNEL_LIST_ADD + " 的参数必须是对象（`{position, " + FIELD_LIST_INFOS + "}`），收到 " +
+            first.getClass().getName() + "：" + describeArgs(args) +
+            "（契约是 args=[{position, " + FIELD_LIST_INFOS + "}]，**不是** args=[[" +
+            FIELD_LIST_INFOS + "]] —— 裸数组形状属于 player_list_update/remove）"
+        );
+    }
+
+    /**
+     * {@code position}：必须**存在**、是**数值**、且是**整数**（{@code 1.5} ⇒ 点名报错）。
+     *
+     * <p>⚠️ <b>不校验范围、不拒绝负数</b>：{@code < 0} 是合法的"追加"输入
+     * （桌面 {@code index.ts:72}、渲染层 {@code store/list/action.ts:56,65} 的 {@code -1}）。
+     * 逐条理由见类注释「{@code position} 的校验形状」。
+     */
+    private static long requirePosition(JSONObject params) {
+        Object raw = params.opt(FIELD_POSITION);
+        if (raw == null) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 缺少 `" + FIELD_POSITION + "` 字段（收到的顶层键=" +
+                String.valueOf(params.names()) + "）。契约 :102 的参数是 `{position, " +
+                FIELD_LIST_INFOS + "}`；**没有** position 时请显式传 -1（追加）"
+            );
+        }
+        if (!(raw instanceof Number)) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_POSITION + "` 必须是数字（整数；负数 = 追加），收到 " +
+                raw.getClass().getName()
+            );
+        }
+        Number number = (Number) raw;
+        long value = number.longValue();
+        if (number.doubleValue() != (double) value) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_POSITION + "` 必须是整数，收到 " + number +
+                "（歌单位置是整数下标；本通道不截断）"
+            );
+        }
+        return value;
+    }
+
+    /** {@code listInfos}：必须是数组（元素形状由 {@link #requireAddInfoObject} 逐个判）。 */
+    private static JSONArray requireAddListInfos(JSONObject params) {
+        Object raw = params.opt(FIELD_LIST_INFOS);
+        if (raw == null) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 缺少 `" + FIELD_LIST_INFOS + "` 字段（收到的顶层键=" +
+                String.valueOf(params.names()) + "）；契约 :102 的参数是 `{position, " +
+                FIELD_LIST_INFOS + "}`"
+            );
+        }
+        if (raw instanceof JSONArray) return (JSONArray) raw;
+        throw new IllegalArgumentException(
+            CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 必须是数组，收到 " +
+            raw.getClass().getName()
+        );
+    }
+
+    /** 第 {@code index} 个元素必须是一个对象（{@code {id, name, …}}）。 */
+    private static JSONObject requireAddInfoObject(JSONArray listInfos, int index) {
+        Object raw = listInfos.opt(index);
+        if (raw instanceof JSONObject) return (JSONObject) raw;
+        throw new IllegalArgumentException(
+            CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素必须是对象" +
+            "（{id, name, source?, sourceListId?, locationUpdateTime?}），收到 " +
+            (raw == null ? "null" : raw.getClass().getName())
+        );
+    }
+
+    /**
+     * 元素的 {@code id}：必须**存在**、是**字符串**、且**非空**（{@code my_list} 的主键，
+     * {@code tables.ts:136}）。三种坏形状各一条点名的消息（形状照 {@link #requireId}）。
+     */
+    private static String requireAddId(JSONObject info, int index) {
+        Object raw = info.opt(COLUMN_ID);
+        if (raw == null) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素缺少 `" +
+                COLUMN_ID + "` 字段（收到的顶层键=" + String.valueOf(info.names()) + "）"
+            );
+        }
+        if (!(raw instanceof String)) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素的 `" +
+                COLUMN_ID + "` 必须是字符串，收到 " + raw.getClass().getName()
+            );
+        }
+        String id = (String) raw;
+        if (id.length() == 0) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素的 `" +
+                COLUMN_ID + "` 不能是空字符串（`my_list` 的主键不允许空串）"
+            );
+        }
+        return id;
+    }
+
+    /** 必填文本列（{@code name}，{@code tables.ts:131} 是 {@code TEXT NOT NULL}）：缺失 / NULL ⇒ 点名报错。 */
+    private static String requireText(JSONObject info, String field, int index) {
+        Object raw = info.opt(field);
+        if (raw == null || raw == JSONObject.NULL) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素缺少 `" + field +
+                "`（`my_list` 的这一列是 NOT NULL；本通道**不**替调用方编一个默认名）"
+            );
+        }
+        return String.valueOf(raw);
+    }
+
+    /**
+     * 可空列（{@code source} / {@code sourceListId}）：缺失或 JSON null ⇒
+     * {@code JSONObject.NULL} 哨兵（绑成 SQL NULL，见 {@link ListRow#toArgs}）；在、但不是标量 ⇒ 点名报错。
+     */
+    private static Object optionalColumn(JSONObject info, String field, int index) {
+        Object raw = info.opt(field);
+        if (raw == null || raw == JSONObject.NULL) return JSONObject.NULL;
+        if (raw instanceof String || raw instanceof Number || raw instanceof Boolean) return raw;
+        throw new IllegalArgumentException(
+            CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素的 `" + field +
+            "` 必须是字符串（或数字 / 布尔 / null），收到 " + raw.getClass().getName()
+        );
+    }
+
+    /** 读出来的可空文本：SQL NULL ⇒ JSON null 哨兵，否则原值。 */
+    private static Object jsonNullIfNull(String value) {
+        return value == null ? JSONObject.NULL : value;
+    }
+
+    /** {@code locationUpdateTime}（{@code tables.ts:135}：{@code INTEGER}，可空）⇒ 整数毫秒，不截断。 */
+    private static long requireIntegerMillis(Object raw, int index) {
+        if (!(raw instanceof Number)) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素的 `" +
+                COLUMN_LOCATION_UPDATE_TIME + "` 必须是数字或 null（云端歌单的更新时间戳，毫秒），收到 " +
+                raw.getClass().getName()
+            );
+        }
+        Number number = (Number) raw;
+        long millis = number.longValue();
+        if (number.doubleValue() != (double) millis) {
+            throw new IllegalArgumentException(
+                CHANNEL_LIST_ADD + " 的 `" + FIELD_LIST_INFOS + "` 第 " + index + " 个元素的 `" +
+                COLUMN_LOCATION_UPDATE_TIME + "` 必须是整数毫秒，收到 " + number + "（列是 INTEGER，本通道不截断）"
+            );
+        }
+        return millis;
+    }
+
+    /**
+     * 插队分支读出来的一列必须是 NOT NULL（{@code id} / {@code name}）。
+     * {@code null} ⇒ 抛错点名列与行号：见 {@link #readOrderedRows} 的理由。
+     */
+    private static String requireNotNullColumn(String value, String column, int rowIndex) {
+        if (value != null) return value;
+        throw new IllegalStateException(
+            CHANNEL_LIST_ADD + "：读第 " + rowIndex + " 行时 `my_list`.`" + column + "` 是 NULL，" +
+            "但那一列在 tables.ts 里是 NOT NULL ⇒ 这份库的数据或结构已经坏了。" +
+            "本通道**不会**把 NULL 原样当成一次成功的新建重写回去（那只会把坏数据固化）"
+        );
+    }
+
     // ------------------------------------------------------------------ 参数校验
 
     /**
-     * 取 {@code args[0]} 作为 {@code listInfos} 数组。
+     * 取 {@code args[0]} 作为 {@code listInfos} 数组（{@link #CHANNEL_LIST_UPDATE} 的参数形状）。
      *
      * <p>契约的形状是 {@code args = [ [{id,name,…}, …] ]}（一个数组包着若干对象），
      * 渲染层也是这么发的（{@code rendererInvoke(channel, data)} 的 {@code data} 就是数组 ⇒
      * 信封里 {@code args = [data]}）。
      * 所以"对象"（例如误包成 {@code {listInfos: […]}}）是**参数错误**，不是"空列表"。
+     *
+     * <p>{@code channel} / {@code contract} / {@code shape} 三个参数是**给消息用的**（第九刀-a 把它
+     * 参数化，好让两条通道各自在错误信息里点名自己那一行契约）：本方法只被
+     * {@link #listUpdate} 调用一次，所以它们在真机上恒为
+     * {@code CHANNEL_LIST_UPDATE / docs/android/ipc-contract.md:104 / `listInfos[]`}。
+     * 第九刀-a 的 add 参数是**另一个形状**（对象包着这个数组），所以那一条**没有**复用本方法，
+     * 而是自己写了 {@link #requireAddListInfos} —— 复用会让"传成裸数组"这种写错法在两边的
+     * 消息里长得一样，从而没法区分。
      *
      * <p>只接受 {@code org.json.JSONArray}：Capacitor 的 {@code JSArray} 是它的子类
      * （{@code @capacitor/android} 的 {@code JSArray extends JSONArray}），而
@@ -382,18 +1054,18 @@ public final class RainMusicListWriteChannels {
      * 就是 {@code JSONArray}。多一层 {@code List} 兜底在这里没有意义，反而会让"传错了"
      * 变成"能跑"，所以不加。
      */
-    private static JSONArray readListInfos(List<Object> args) {
+    private static JSONArray readListInfos(List<Object> args, String channel, String contract, String shape) {
         if (args == null || args.isEmpty() || args.get(0) == null) {
             throw new IllegalArgumentException(
-                CHANNEL_LIST_UPDATE + " 需要一个 `" + FIELD_LIST_INFOS + "` 数组参数" +
-                "（契约 docs/android/ipc-contract.md:104：`listInfos[]` → `void`），收到 " +
+                channel + " 需要一个 `" + FIELD_LIST_INFOS + "` 数组参数" +
+                "（契约 " + contract + "：`" + shape + "` → `void`），收到 " +
                 describeArgs(args)
             );
         }
         Object first = args.get(0);
         if (first instanceof JSONArray) return (JSONArray) first;
         throw new IllegalArgumentException(
-            CHANNEL_LIST_UPDATE + " 的参数必须是数组（`" + FIELD_LIST_INFOS + "`），收到 " +
+            channel + " 的参数必须是数组（`" + FIELD_LIST_INFOS + "`），收到 " +
             first.getClass().getName() + "：" + describeArgs(args) +
             "（契约是 args=[[{id,name,…}, …]]，**不是** args=[{" + FIELD_LIST_INFOS + ": […]}]）"
         );

@@ -99,7 +99,7 @@
 | 通道名 | 渲染层封装（文件:行） | 主进程 handler（文件:行） | 参数 → 返回值 | 用途 |
 | --- | --- | --- | --- | --- |
 | `player_list_get` | `getUserLists` `R:listManage:28` | `M:list:6` | 无 → `Rain.List.UserListInfo[]` | 读全部歌单 |
-| `player_list_add` | 双向：`createUserList` `R:listManage:38`；监听 `R:listManage:229` | 接收 `M:list:12`；发送 `M:listSend:10` | `{position, listInfos}` → `void` | 新建歌单 |
+| `player_list_add` | 双向：`createUserList` `R:listManage:38`；监听 `R:listManage:229` | 接收 `M:list:12`；发送 `M:listSend:10` | `{position, listInfos}` → `void` | 新建歌单（**原生已实现**：`RainMusicListWriteChannels.java` 的 `CHANNEL_LIST_ADD`，第九刀-a；本行左侧的契约就是实现的形状） |
 | `player_list_remove` | 双向：`removeUserList` `R:listManage:46`；监听 `R:listManage:230` | 接收 `M:list:15`；发送 `M:listSend:13` | `ids: string[]` → `void` | 删除歌单 |
 | `player_list_update` | 双向：`updateUserList` `R:listManage:55`；监听 `R:listManage:231` | 接收 `M:list:18`；发送 `M:listSend:16` | `listInfos[]` → `void` | 改歌单元信息 |
 | `player_list_update_position` | `updateUserListPosition` `R:listManage:63` | `M:list:21` | `{position, ids}` → `void` | 歌单排序 |
@@ -118,6 +118,8 @@
 > **已发现的缺陷（证据充分，建议实现时一并修）**：`M:listSend:39-41` 的 `list_music_clear` 广播函数错误地发送了 `PLAYER_EVENT_NAME.list_data_overwire` 而不是 `list_music_clear`。因此 `player_list_music_clear` 实际上只有"渲染层 → 主进程"一个方向。Android 侧不需要复制这个 bug，但要注意桌面版的广播语义是错的。
 
 > **上面三条"双向"的广播载荷形状（照抄，别自己包装）**：三条都同时是 invoke 通道和广播通道，但**载荷不同形**——`player_list_add` 的 `M:listSend:10` 发的是 `sendEvent(channel, { position, listInfos })`，事件参数是**对象**；`player_list_remove` 的 `M:listSend:13` 发的是 `ids`、`player_list_update` 的 `M:listSend:16` 发的是 `listInfos`，这两条是**裸数组**（不是 `{ ids }` / `{ listInfos }`）。原生侧用 `ctx.emitTo(channel, payload)` 单参发一条 `{kind:'event', channel, args:[payload]}`，桥把 `args[0]` 原样当作 `params` 交给订阅者（`src/common/platform/ipcBridge/capacitor.js:434-470`）；把那两条**裸数组**包成对象，会让渲染层 `rendererListManage.ts:185-191` 转手给 `action.ts:163-181` 的 `for (const … of …)` 抛 `TypeError`，而那个异常会被桥自己吞成一条 `console.error`（`capacitor.js:464-467`）——表现为"操作没生效"，且调用方拿不到任何 reject。（`player_list_add` 反过来：它必须是对象，发成裸数组时 `rendererListManage.ts:180-184` 的解构同样会炸。）
+>
+> **`player_list_add` 的对象载荷形状（原生已实现，第九刀-a）**：`RainMusicListWriteChannels.java`（`android/app/src/main/java/com/rainmusic/mobile/ipc/`）的 `listAdd` 发的是 `ctx.emitTo(CHANNEL_LIST_ADD, payload)`，`payload` 恰好两个键、键序就是契约那一格的顺序：`position`（**整数，就是调用方传来的原值** —— `-1` / 越界值都原样广播，`.java` 不折算成真实落库位置，因为渲染层 `action.ts:48` 用原值判 `position < 0 || position >= userLists.length`）、`listInfos`（**数组本身**，元素 `{id, name, source?, sourceListId?, locationUpdateTime?}`）。也就是说 wire 上是 `args = [{ position, listInfos }]`，一个外层对象、一个内层数组——**不要**把内层数组再包一层对象（那会让 `rendererListManage.ts:181` 的 `for (const list of listInfos)` 抛 `TypeError`），也**不要**发成 `args = [listInfos]`（那是 `player_list_update` / `player_list_remove` 的形状）。invoke 那一半的落库语义另有两条注：`position` 是 `INTEGER NOT NULL` 且**允许空洞**（库里 `0,1,5` ⇒ 下一个 `6`）；插队分支是"整表 DELETE + 按 `position ASC, rowid ASC` 全量重写 `0..n-1`"。
 
 ### 1.4 收藏 / 不感兴趣
 
