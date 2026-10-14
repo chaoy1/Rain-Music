@@ -739,6 +739,12 @@ import java.util.Map;
  * </ul>
  * 另外它真的**解析**与**序列化**（键顺序按插入顺序、紧凑格式、数字去掉小数点后的 0），
  * 这样"meta 被重新序列化后写回"这件事才是被跑出来的，而不是被假装的。
+ *
+ * ⚠️ 第十一刀：本替身的**每个 public 成员的签名都逐字核对过**真 org.json（含 {@code throws JSONException}）——
+ * 出处是 {@code javap -classpath android-json-0.0.20131108.vaadin1.jar org.json.JSONObject}
+ * （真 AOSP org.json 的编译产物）与 AOSP libcore main 的 {@code json/src/main/java/org/json/JSONObject.java}，
+ * 两者一致。教训：**替身比真机宽松 = 系统性漏检**（另见 android-list-write-channels.test.cjs 里那条负向用例）。
+ * 本类**故意不声明**生产代码没用到、且实现会变得可疑的成员（例如 {@code JSONObject(Map)}、{@code accumulate}）。
  */
 public class JSONObject {
 
@@ -779,7 +785,14 @@ public class JSONObject {
 
     public String getString(String name) throws JSONException { return String.valueOf(get(name)); }
 
-    public List<String> keySet() { return new ArrayList<>(values.keySet()); }
+    /**
+     * ⚠️ 第十一刀（替身签名审计）：这里原来叫 keySet()，返回 List&lt;String&gt; —— 那**不是**真 org.json 的成员
+     * （AOSP main 里是 Set&lt;String&gt; keySet()，而且是 @SystemApi(client = MODULE_LIBRARIES)，
+     * 普通应用拿不到；2013 年的那份 AOSP 里根本没有它）。一个"看起来像真 API"的名字 + 更宽松的返回类型，
+     * 会让生产代码调用它时在本机编过、在真机上编不过 —— 正是"替身比真机宽松"那一类漏检。
+     * 改成**明显是探针内部工具**的名字：生产代码不可能误用它。
+     */
+    public List<String> jsonKeySet() { return new ArrayList<>(values.keySet()); }
 
     @Override public String toString() {
         StringBuilder builder = new StringBuilder();
@@ -1173,7 +1186,7 @@ public final class RainMusicQueueMergeProbe {
     /** keys=…|id=…|name=…|singer=…|source=…|interval=…|meta=…（meta 是对象/JSON null 的紧凑文本）。 */
     private static String describe(JSONObject item) throws Exception {
         StringBuilder builder = new StringBuilder();
-        builder.append("keys=").append(join(item.keySet(), ","));
+        builder.append("keys=").append(join(item.jsonKeySet(), ","));
         for (String key : new String[] { "id", "name", "singer", "source", "interval", "meta" }) {
             builder.append('|').append(key).append('=').append(String.valueOf(item.get(key)));
         }

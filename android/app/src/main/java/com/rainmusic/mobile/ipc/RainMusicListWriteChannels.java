@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteStatement;
 import com.getcapacitor.Logger;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -321,6 +322,13 @@ import java.util.List;
  *   <tr><td><b>语句失败</b>（结构漂移 / {@code name} 为 NULL / id 冲突 / 约束不满足）</td>
  *       <td>reject，事务回滚，**不广播**</td>
  *       <td>绝不 catch 之后返回"成功"（见「emit 的位置」）</td></tr>
+ *   <tr><td><b>广播载荷组装失败</b>（{@code JSONObject.put} 的受检 {@code JSONException} ——
+ *       {@link #listAdd} 因此声明了 {@code throws JSONException}）</td>
+ *       <td>reject，异常原样冒泡成 {@code ok:false}；⚠️ 此时**库已提交、广播没发**（这一分支在真机上
+ *           不可达：键是常量、值不是 NaN / Infinity，见 {@code payload} 那一段）</td>
+ *       <td>本文件全篇零 {@code catch}：受检异常靠<b>声明</b>冒泡，而不是靠一个吞掉它的 {@code catch}
+ *           换一个"看起来干净"的返回值。真 AOSP 声明了这个受检异常，替身也必须声明（否则本机探针
+ *           会比真机宽松，漏掉它 —— CI 上炸过一次）</td></tr>
  * </table>
  *
  * <h2>第十刀-a：{@code player_list_remove}（删除歌单）</h2>
@@ -848,8 +856,13 @@ public final class RainMusicListWriteChannels {
      *                                  {@code listInfos} 不是数组 / 元素不是对象 /
      *                                  {@code id} 不是非空字符串 / 可空列给了错的类型）
      * @throws IllegalStateException    库打不开 / 表缺失 / 语句失败（含 **id 冲突**）—— **不广播**
+     * @throws JSONException            组装广播载荷时 {@code JSONObject.put} 的**受检**异常
+     *                                  （真 AOSP 的 {@code put(String, Object)} 声明了它，见
+     *                                  {@code payload} 那一段的注释）。声明而不是 {@code catch}：
+     *                                  本文件全篇零 {@code catch}，失败一律冒泡成 {@code ok:false}
      */
-    private static Object listAdd(Context context, RainMusicIpcHandlers.RequestContext ctx, List<Object> args) {
+    private static Object listAdd(Context context, RainMusicIpcHandlers.RequestContext ctx, List<Object> args)
+        throws JSONException {
         JSONObject params = readAddParams(args);
         long position = requirePosition(params);
         JSONArray listInfos = requireAddListInfos(params);
@@ -865,6 +878,17 @@ public final class RainMusicListWriteChannels {
         // sendEvent(channel, { position, listInfos }) —— 渲染层 rendererListManage.ts:180
         // 是按这两个键解构的，发成裸数组会在那里立刻炸（见类注释「广播的形状是对象」）。
         // position 用**调用方传来的那个值**，不折算（理由见类注释同一节）。
+        //
+        // ⚠️ 真 AOSP 的 `JSONObject.put(String, Object)` 声明了**受检**异常 `throws JSONException`
+        // （只有"名字是 null"或"数值是 NaN / ±Infinity"才真的抛）：这里的两个键都是常量、两个值分别是
+        // long 与调用方传进来的 JSONArray ⇒ 这个分支在真机上**不可达**。但 Java 编译器不认"不可能
+        // 所以不写"：它要求要么 catch、要么声明。早先的替身把 `put` 写成了不抛异常的版本（比真机宽松），
+        // 本机"真 javac + 手写替身"的探针因此**系统性放过**了这一条，直到 CI 的 `gradlew assembleDebug`
+        // 才报 "unreported exception JSONException"（本文件第 869 / 870 行）。
+        // 处理方式：**声明**（见本方法的 `throws`）而**不**写 `catch` —— 本文件全篇零 `catch`，
+        // 失败一律冒泡出 handler 变成 `ok:false` + 原始异常（见类注释「失败语义」那一节）。
+        // 代价写明：这两行若真的抛，库**已经提交**（applyListAdds 已返回）、广播**没发出去** ——
+        // 渲染层那份 userLists 会与库分叉。这个分支不可达，所以本通道不为它发明一个"假装成功"的退路。
         JSONObject payload = new JSONObject();
         payload.put(FIELD_POSITION, position);
         payload.put(FIELD_LIST_INFOS, listInfos);

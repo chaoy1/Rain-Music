@@ -802,7 +802,10 @@ public class JSONException extends Exception {
 
 import java.util.Map;
 
-/** 只声明本刀用到的成员；put(String, Object) 照 AOSP 声明为 throws JSONException。 */
+/** 只声明本刀用到的成员；put(String, Object) 照 AOSP 声明为 throws JSONException。
+ *  ⚠️ 第十一刀：签名逐字核对过真 org.json（javap -classpath android-json-0.0.20131108.vaadin1.jar
+ *  org.json.JSONObject，以及 AOSP libcore main 的同名源码）；未声明的成员一律**不**声明 —— 少声明
+ *  比"声明一个签名宽松的假方法"安全（生产代码用到时会当场编不过）。*/
 public class JSONObject {
     public static final Object NULL = new Object();
     public JSONObject() {}

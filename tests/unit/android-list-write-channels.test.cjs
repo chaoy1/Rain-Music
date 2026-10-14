@@ -66,9 +66,16 @@
  *    （`arg0=JSONArray`、`wire=["l-1","l-2"]`）、单个 / 不存在的 id 都不被误拒、**`love` 不被拒**、
  *    空数组 ⇒ 0 条 SQL（连 prepare 都不做）、**保留 id（`default` / `temp`）在 `open` 之前就被拒**、
  *    第 2 句失败 ⇒ 回滚（第一句删掉的行走回来）+ 不广播、库打不开 / 表缺失、两个线程并发 remove。
- *    ⚠️ 替身的签名是人手写的，与真框架 API 一旦不一致，这次 `javac` 不会发现；而
- *    `RainMusicDatabase` 在本组里是**替身**（真文件的建表 / 迁移 / `requireTable` 语义不在
- *    本组覆盖范围内，那些由 `android-list-channels.test.cjs` 等用例在源码层面对齐）。
+ *    ⚠️ 第十一刀（`JSONException` 漏检修复）之后，替身的签名**不再是人手照着记忆写的**：`org.json` 那三个
+ *    类的每一个成员都逐字对着真 AOSP 的编译产物（`javap -classpath android-json-0.0.20131108.vaadin1.jar`）
+ *    与 AOSP libcore 源码核过（见 `STUB_JSON_EXCEPTION` 上方的出处说明），并且多了一条**负向**用例：
+ *    "故意不处理 `JSONException` 的调用方必须编不过"——替身一旦又变宽松，那条用例就红。
+ *    这次修复的由来：早先的替身把 `put(String, Object)` 写成了**不抛异常**的版本（比真机宽松），
+ *    本组探针因此系统性放过了 `RainMusicListWriteChannels.java:869-870` 的未处理受检异常，
+ *    直到 CI 的 `gradlew assembleDebug` 才炸出来。
+ *    仍然要注意：`RainMusicDatabase` 在本组里是**替身**（真文件的建表 / 迁移 / `requireTable` 语义不在
+ *    本组覆盖范围内，那些由 `android-list-channels.test.cjs` 等用例在源码层面对齐），
+ *    `android.*` 那几个替身的签名也**没有**对着真 `android.jar` 核过（本机没有 Android SDK）。
  *    本机没有 javac 时这一组跳过。
  *
  * 范围守卫：本文件覆盖**同一个生产文件**里的**三条**通道（第八刀的 `player_list_update`
@@ -756,6 +763,10 @@ test('零新增依赖：import 只允许那几个（框架自带 + JDK + :capaci
   // ⚠️ 第九刀-b：集合**补全到项**（deepEqual 是集合比较）。第九刀-a 新增了两个 import，都是
   // 零 gradle 依赖的：`android.database.Cursor`（Android 框架自带，读 `MAX(position)` /
   // 现有行要用）与 `java.util.ArrayList`（JDK，装插队分支的行）。集合里**多一项就是多一个依赖**。
+  // ⚠️ 第十一刀（JSONException 漏检修复）：新增 `org.json.JSONException` —— 它**不是**新依赖：
+  // 同一个 `org.json` 包（Android 平台自带，见下面两行）里的异常类型，`put(...)` 的 `throws` 子句
+  // 必须点名它。这一项与 `org.json.JSONArray` / `org.json.JSONObject` 同源，判据（第 773 行
+  // 那条 `org.json.` 前缀的白名单）本来就是这么写的。
   assert.deepEqual(imports, [
     'android.content.Context',
     'android.database.Cursor',
@@ -765,6 +776,7 @@ test('零新增依赖：import 只允许那几个（框架自带 + JDK + :capaci
     'java.util.ArrayList',
     'java.util.List',
     'org.json.JSONArray',
+    'org.json.JSONException',
     'org.json.JSONObject',
   ].sort())
   assert.ok(!/kotlin/i.test(writeCode), '没有引入 Kotlin')
@@ -1489,31 +1501,143 @@ public class SQLiteStatement {
 }
 `
 
+/**
+ * ⚠️ 第十一刀（`JSONException` 漏检修复）：org.json 的替身**逐字重抄了真 API 的签名** ——
+ * 包括每一个 `throws JSONException`。
+ *
+ * 为什么要重抄：本文件早先的替身把 `JSONObject.put(String, Object)` 写成了**不抛异常**的版本，
+ * 比真机 API 更宽松 ⇒ "真 javac + 手写替身"这一组探针**系统性放过**了生产代码里未处理的受检异常，
+ * 直到 CI 的 `gradlew assembleDebug` 才报出来（`RainMusicListWriteChannels.java:869-870`）。
+ * 教训：**替身比真机宽松 = 系统性漏检**。下面另有一条**负向**用例钉住这件事：
+ * 故意不处理 `JSONException` 的调用方必须编不过（见「替身不比真机宽松」那一条）。
+ *
+ * 签名出处（逐字核对，**不是凭记忆写的**）：
+ *   1) `javap -classpath android-json-0.0.20131108.vaadin1.jar org.json.JSONObject`（真 AOSP org.json 的编译产物）
+ *      + 同一份 jar 的 `org.json.JSONArray` / `org.json.JSONException`；
+ *   2) AOSP libcore main：`json/src/main/java/org/json/{JSONObject,JSONArray,JSONException,JSON}.java`。
+ *   两者对下面每一个成员的签名**一致**（javap 打印的 `throws` 子句与源码逐行对得上）。
+ *
+ * 行为也照 AOSP 真语义，不是"差不多"：`put(name, null)` **删掉**那个键（不是存一个 Java null）；
+ * 数值是 NaN / ±Infinity ⇒ `JSONException("Forbidden numeric value: …")`；`put(name, null)` 的 null 键
+ * **不**做 checkName（AOSP 如此）；`names()` 在**空对象**上返回 **null**；`isNull(name)` 对**不存在的键**
+ * 返回 true；`JSONObject.NULL` 的 `equals(null) == true`（AOSP 注释明说这是 API 指定的"坏"实现）；
+ * `JSONArray.put(Object)` **不**声明 `throws`（AOSP 里它真的只是 `values.add`，校验在 `put(double)`）。
+ *
+ * ⚠️ 本替身**故意只声明本刀用到的子集**：没有 `new JSONObject(String)` / `JSONTokener` / `getXxx` /
+ * `keys()` / `toString(int)` / `accumulate` / `JSONObject(Map)`。**少声明比"声明一个签名宽松的假方法"安全**：
+ * 生产代码一旦用到没声明的成员，本机就**编不过**（当场暴露），而不是安静地跑在一个假实现上。
+ * 要加成员时照上面的出处抄签名与实现，别凭记忆写。
+ */
+const STUB_JSON_EXCEPTION = String.raw`
+package org.json;
+
+/** 照 AOSP：真 API 有三个构造器，不止 (String)。 */
+public class JSONException extends Exception {
+
+    public JSONException(String message) { super(message); }
+
+    public JSONException(String message, Throwable cause) { super(message, cause); }
+
+    public JSONException(Throwable cause) { super(cause); }
+}
+`
+
+/** 照 AOSP：`JSON` 是**包内可见**的工具类，`checkDouble` 是包内 static。本替身只声明这一个成员。 */
+const STUB_JSON = String.raw`
+package org.json;
+
+final class JSON {
+
+    static double checkDouble(double value) throws JSONException {
+        if (Double.isInfinite(value) || Double.isNaN(value)) {
+            throw new JSONException("Forbidden numeric value: " + value);
+        }
+        return value;
+    }
+
+    private JSON() {}
+}
+`
+
 const STUB_JSON_ARRAY = String.raw`
 package org.json;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/** 手写替身（只实现本刀用到的子集）：长度 / 下标 / put / names() 的文本化。 */
+/**
+ * 手写替身：签名逐字照真 org.json（AOSP libcore），出处见本组 STUB_JSON_OBJECT 上方那段注释。
+ * 真 API 里 put(Object) / put(boolean) / put(int) / put(long) **没有** throws，put(double) **有**；
+ * 本类逐个照抄（早先只实现了 put(Object) 一个）。
+ */
 public class JSONArray {
 
     private final List<Object> values = new ArrayList<Object>();
 
     public JSONArray() {}
 
+    /** 照 AOSP：真的只是 values.add —— **不**校验、**不**声明 throws。 */
     public JSONArray put(Object value) {
+        values.add(value);
+        return this;
+    }
+
+    public JSONArray put(boolean value) {
+        values.add(value);
+        return this;
+    }
+
+    /** 照 AOSP：values.add(JSON.checkDouble(value)) ⇒ NaN / ±Infinity 抛 JSONException。 */
+    public JSONArray put(double value) throws JSONException {
+        values.add(JSON.checkDouble(value));
+        return this;
+    }
+
+    public JSONArray put(int value) {
+        values.add(value);
+        return this;
+    }
+
+    public JSONArray put(long value) {
         values.add(value);
         return this;
     }
 
     public int length() { return values.size(); }
 
+    /** 照 AOSP：对**不存在的下标**也返回 true。 */
+    public boolean isNull(int index) {
+        Object value = opt(index);
+        return value == null || value == JSONObject.NULL;
+    }
+
+    /** 照 AOSP：越界 ⇒ JSONException；值是 Java null ⇒ JSONException。JSONObject.NULL 正常返回。 */
+    public Object get(int index) throws JSONException {
+        if (index < 0 || index >= values.size()) {
+            throw new JSONException("Index " + index + " out of range [0.." + values.size() + ")");
+        }
+        Object value = values.get(index);
+        if (value == null) throw new JSONException("Value at " + index + " is null.");
+        return value;
+    }
+
+    /** 照 AOSP：越界返回 null（**不**抛）。 */
     public Object opt(int index) {
         return index >= 0 && index < values.size() ? values.get(index) : null;
     }
 
-    /** 与 AOSP 的 JSONObject.toString / JSONArray.toString 一样紧凑（逗号后没有空格）。 */
+    /** 照 AOSP：越界返回 null，且什么都没删。 */
+    public Object remove(int index) {
+        if (index < 0 || index >= values.size()) return null;
+        return values.remove(index);
+    }
+
+    /**
+     * 内部工具（**不是**真 API 的替身）：与 AOSP 的 JSONObject.toString / JSONArray.toString 一样紧凑
+     * （逗号后没有空格）。真 API 里的对应物是包内的 JSON.toString(Object) + 各自的 toString()。
+     * ⚠️ 已知差异：AOSP 的 JSONObject.toString() 在内部失败时**吞掉 JSONException 并返回 null**
+     * （它的签名没有 throws，所以只能这么做）；本替身的序列化器不抛，也就不存在那条退路。
+     */
     static String text(Object value) {
         if (value == null || value == JSONObject.NULL) return "null";
         if (value instanceof JSONObject || value instanceof JSONArray) return value.toString();
@@ -1539,39 +1663,103 @@ package org.json;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** 手写替身（只实现本刀用到的子集）。键序 = 插入序（LinkedHashMap），方便断言载荷的键集合。 */
+/**
+ * 手写替身（只实现本刀用到的子集，签名逐字照真 org.json）。
+ * 键序 = 插入序（LinkedHashMap），方便断言载荷的键集合。
+ * 出处与"为什么必须逐字抄"见本组 STUB_JSON_OBJECT 上方那段注释。
+ */
 public class JSONObject {
 
-    /** 与 AOSP 同名哨兵同形：opt(name) 对 JSON null 返回它，调用方用 == 判断。 */
-    public static final Object NULL = new JSONObject.NullValue();
-
-    private static final class NullValue {
+    /**
+     * 照 AOSP 的哨兵：树里显式 JSON null 就是它（opt(name) 取回来，调用方用 == 判断）。
+     * AOSP 明确把 equals(null) == true 当作"API 指定的坏实现"，这里照抄，不顺手改掉。
+     */
+    public static final Object NULL = new Object() {
+        @Override public boolean equals(Object other) { return other == this || other == null; }
+        @Override public int hashCode() { return 0; }
         @Override public String toString() { return "null"; }
-    }
+    };
 
     private final Map<String, Object> values = new LinkedHashMap<String, Object>();
 
     public JSONObject() {}
 
-    public JSONObject put(String name, Object value) {
-        values.put(name, value);
+    public int length() { return values.size(); }
+
+    /** 照 AOSP：名字为 null ⇒ JSONException（消息逐字一致）。 */
+    String checkName(String name) throws JSONException {
+        if (name == null) throw new JSONException("Names must be non-null");
+        return name;
+    }
+
+    public JSONObject put(String name, boolean value) throws JSONException {
+        values.put(checkName(name), Boolean.valueOf(value));
         return this;
     }
+
+    /** 照 AOSP：values.put(checkName(name), JSON.checkDouble(value)) ⇒ NaN / ±Infinity 抛。 */
+    public JSONObject put(String name, double value) throws JSONException {
+        values.put(checkName(name), Double.valueOf(JSON.checkDouble(value)));
+        return this;
+    }
+
+    public JSONObject put(String name, int value) throws JSONException {
+        values.put(checkName(name), Integer.valueOf(value));
+        return this;
+    }
+
+    public JSONObject put(String name, long value) throws JSONException {
+        values.put(checkName(name), Long.valueOf(value));
+        return this;
+    }
+
+    /**
+     * ⚠️ 这就是漏检的那一个：真 AOSP 声明了 throws JSONException（受检异常）。
+     * 语义逐条照抄：Java null ⇒ **删掉**那个键（**不** checkName，AOSP 如此）；Number 先 checkDouble。
+     */
+    public JSONObject put(String name, Object value) throws JSONException {
+        if (value == null) {
+            values.remove(name);
+            return this;
+        }
+        if (value instanceof Number) {
+            JSON.checkDouble(((Number) value).doubleValue());
+        }
+        values.put(checkName(name), value);
+        return this;
+    }
+
+    /** 照 AOSP：名字或值为 null ⇒ 原样返回 this（**不**抛、也**不**删键）。 */
+    public JSONObject putOpt(String name, Object value) throws JSONException {
+        if (name == null || value == null) return this;
+        return put(name, value);
+    }
+
+    public Object remove(String name) { return values.remove(name); }
 
     public Object opt(String name) { return values.get(name); }
 
     public boolean has(String name) { return values.containsKey(name); }
 
-    public boolean isNull(String name) { return values.containsKey(name) && values.get(name) == NULL; }
+    /** 照 AOSP：**不存在的键**也算 null ⇒ true（与"键在、值是 Java null"不可区分，AOSP 就是如此）。 */
+    public boolean isNull(String name) {
+        Object value = values.get(name);
+        return value == null || value == NULL;
+    }
 
-    public int length() { return values.size(); }
-
+    /** 照 AOSP：**空对象上返回 null**（不是空数组）。 */
     public JSONArray names() {
+        if (values.isEmpty()) return null;
         JSONArray array = new JSONArray();
         for (String key : values.keySet()) array.put(key);
         return array;
     }
 
+    /**
+     * 内部工具（**故意不是**真 API 的替身）：真 API 的 quote(String) 是 **public static**，而且还会转义
+     * 控制字符。这里保持**包内可见 + 简化转义** —— 方向是"比真机严"：生产代码若真的调用 quote，
+     * 本机会**编不过**（暴露），而不会静默跑在一个简化实现上。
+     */
     static String quote(String value) {
         StringBuilder builder = new StringBuilder("\"");
         for (int i = 0; i < value.length(); i++) {
@@ -1662,6 +1850,7 @@ import android.content.Context;
 import android.database.sqlite.SQLiteDatabase;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.FileDescriptor;
@@ -2158,7 +2347,7 @@ public final class WriteProbe {
         EMIT_SHAPES.clear();
     }
 
-    static JSONObject obj(Object... pairs) {
+    static JSONObject obj(Object... pairs) throws JSONException {
         JSONObject object = new JSONObject();
         for (int i = 0; i < pairs.length; i += 2) object.put((String) pairs[i], pairs[i + 1]);
         return object;
@@ -2177,7 +2366,7 @@ public final class WriteProbe {
     }
 
     /** 第九刀-a 的载荷：{@code args = [{position, listInfos}]}（**对象**，不是裸数组）。 */
-    static List<Object> addArgs(long position, JSONArray listInfos) {
+    static List<Object> addArgs(long position, JSONArray listInfos) throws JSONException {
         List<Object> list = new ArrayList<Object>();
         list.add(obj("position", Long.valueOf(position), "listInfos", listInfos));
         return list;
@@ -2251,6 +2440,9 @@ const STUBS = {
   'android/database/Cursor.java': STUB_CURSOR,
   'android/database/sqlite/SQLiteDatabase.java': STUB_SQLITE_DATABASE,
   'android/database/sqlite/SQLiteStatement.java': STUB_SQLITE_STATEMENT,
+  'org/json/JSONException.java': STUB_JSON_EXCEPTION,
+  // ⚠️ 第十一刀起：JSON.java 只提供包内 static 的 checkDouble（照 AOSP 的位置与可见性）。
+  'org/json/JSON.java': STUB_JSON,
   'org/json/JSONArray.java': STUB_JSON_ARRAY,
   'org/json/JSONObject.java': STUB_JSON_OBJECT,
   'com/rainmusic/mobile/ipc/RainMusicIpcPlugin.java': STUB_PLUGIN,
@@ -2345,6 +2537,50 @@ const order = events => key => events.indexOf(key)
 test('JVM 探针：真 javac 把本刀编过一遍（语法 / 类型自洽，exit 0）', { skip: SKIP_REASON }, () => {
   const build = compileOnce()
   assert.ok(build.ok, `javac 编不过：\n${build.log}`)
+})
+
+/**
+ * ⚠️ 第十一刀（JSONException 漏检修复）的**负向**用例：证明这套替身**不比真机宽松**。
+ *
+ * 它拿同一套替身去编一个**故意没处理受检异常**的调用方（`put` 既不 catch、也不声明 throws）。
+ * 真 org.json 的签名下这**必须**编不过；本文件早先的替身（`put` 不带 `throws`）会让它编过 ——
+ * 那正是这次漏检本身：`RainMusicListWriteChannels.java` 那两行在本机"编过了"，却在 CI 上炸。
+ *
+ * 所以：**这条用例变红 = 替身又变宽松了**（不是环境问题，也不要靠改这条用例来绕过它）。
+ * 失败的判据有两条，缺一不可：javac 必须非 0 退出，**且**失败原因必须是那个受检异常本身
+ * （否则它可能只是因为别的原因编不过 —— 那这条用例就在骗人）。
+ */
+test('JVM 探针（第十一刀）：替身不比真机宽松 —— 不处理 JSONException 的调用方必须编不过', { skip: SKIP_REASON }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rain-stub-strict-'))
+  temporaryDirs.push(dir)
+  const stubRoot = path.join(dir, 'stub')
+  const outDir = path.join(dir, 'out')
+  fs.mkdirSync(outDir, { recursive: true })
+  for (const [relative, source] of Object.entries(STUBS)) {
+    const file = path.join(stubRoot, ...relative.split('/'))
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, source)
+  }
+  // 故意写坏的调用方：`put` 既不 catch、也不声明 throws（真 API 下必须编不过）。
+  const laxFile = path.join(stubRoot, 'com/rainmusic/mobile/ipc/LaxPayloadProbe.java')
+  fs.writeFileSync(laxFile, [
+    'package com.rainmusic.mobile.ipc;',
+    '',
+    'import org.json.JSONObject;',
+    '',
+    'public class LaxPayloadProbe {',
+    '    static JSONObject build() {',
+    '        JSONObject payload = new JSONObject();',
+    '        payload.put("position", 1L);',
+    '        return payload;',
+    '    }',
+    '}',
+    '',
+  ].join('\n'))
+  const compiled = spawnSync('javac', ['-encoding', 'UTF-8', '-sourcepath', stubRoot, '-d', outDir, laxFile], { encoding: 'utf8' })
+  const log = `${compiled.stdout ?? ''}${compiled.stderr ?? ''}`
+  assert.notEqual(compiled.status, 0, `替身太宽松：不处理 JSONException 的调用方居然编过了 ⇒ 本机探针会系统性漏检这类错误：\n${log}`)
+  assert.match(log, /JSONException/, `javac 确实拒绝了，但原因不是那个受检异常 —— 这条用例在骗人：\n${log}`)
 })
 
 test('JVM 探针：注册 + 正常一条 —— 事务里一次 UPDATE、4 列 + id 的绑定顺序、commit 之后才 emit', { skip: SKIP_REASON }, () => {
