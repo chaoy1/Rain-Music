@@ -113,7 +113,7 @@
 
 ---
 
-## 5. 🔴 当前唯一阻塞：CI `debug-apk` 红（修复进行中）
+## 5. ✅ 曾经的唯一阻塞（已修复并推送）—— 但它留下一条最重要的教训
 
 ### 真错误（由 CI annotation 报出，精确到行）
 
@@ -127,19 +127,27 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 **为什么本机没发现（本会话最深的一条教训）**：各刀用的"真 javac + 手写替身"探针里，**替身把 `put` 声明成了不抛异常的版本** ⇒ **替身比真机宽松**，于是**系统性地**接受了编译器会拒绝的代码。
 ⇒ **替身必须逐字照抄真实签名（含 `throws`）**，否则"本机编译通过"这句话不成立。
 
-### 修复的当前状态（未提交）
+### 修复结果（已提交推送，HEAD `21bffcec`；单测 368/368 全绿）
 
-工作区有 **3 个文件的未提交改动**（属本修复）：
-```
- M android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.java   ← 处理受检异常
- M tests/unit/android-list-write-channels.test.cjs                                     ← 替身签名补 throws
- M tests/unit/android-playback-queue-merge.test.cjs                                    ← 另一份替身同步
-```
-子代理（`c8f9f596-4df3-4683-99ba-83932d3a49aa`）在收尾时**被中断**，最后一次观测：
-- 曾达到 **368 / 368 全绿**（367 + 1 新用例）
-- 但随后又在编辑 ⇒ 观测到 **357 tests / 1 fail**（中途态）
+**修法是"声明 `throws JSONException`"，不是"包装成未受检异常"。** 依据：本文件的**零 `catch` 是被用例钉住的**（`android-list-write-channels.test.cjs:654,671` 断言 `!/catch\s*\(/`），包装必然引入 catch ⇒ 要放宽两条断言。而 `RainMusicIpcHandlers.Handler.handle(...) throws Exception` ⇒ 声明的异常冒泡进 `dispatch` 的 catch ⇒ `ok:false` + 原始异常，正是本文件文档化的语义。
+（⚠️ `21bffcec` 的提交信息说异常"is wrapped into the same unchecked type"，**与代码不符** —— 已由后续更正提交记录在案。以代码为准。）
 
-### 立即要做的三件事
+**替身签名已按真产物修正**：出处是本机 `~/.m2` 里真 AOSP org.json 的编译产物（`javap`）+ AOSP libcore 源码，逐条一致。
+
+**仓库外真 javac 证据**（`%TEMP%\rain-json-probe`，非仓库内）：
+```
+旧宽松替身 + 修复前文件      → exit 0     ← 复现当初的漏检
+新严格替身 + 修复前文件      → exit 1，恰好 :869/:870 报 JSONException
+新严格替身 + 当前文件        → exit 0
+真 AOSP org.json jar + 当前文件 → exit 0
+真 android.jar + 真 org.json  → exit 0
+整模块 13 文件（修复前）      → 恰好 2 个 error，都在 869/870  ⇒ CI 的 10 条 annotation 上限没有掩盖别的错误
+```
+**新增负向回归守卫**：用同一套替身编一个"故意不处理 `JSONException`"的调用方，断言 javac 非 0 **且失败原因就是 JSONException** ⇒ 替身一旦再变宽松就会变红（368 例）。
+
+**遗留待办**：另两套 org.json 替身也补负向用例；测试里的 `android.*` 替身签名**没有对着真 `android.jar` 核过**；真 `assembleDebug` 仍未在本机跑过（无 SDK）。
+
+### 复核清单（若要重跑这次修复的验证）
 
 1. **确认修复的最终状态**：跑 `node --test tests\unit\*.test.cjs`，看 `ℹ tests/pass/fail` 三个数。目标是 **≥368 且 fail 0**。
    - 若仍有失败：读失败断言，判断是"替身同步未完成"还是"生产代码还有同类受检异常处"（后者必须修）。
