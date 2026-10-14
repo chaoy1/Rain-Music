@@ -60,12 +60,94 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36'
 
+      # 编译失败时日志需要 token 才能读，所以这里把编译错误本身变成
+      # `::error title=gradle::...` workflow command（check annotation，免 token 可读）：
+      #   1) `2>&1 | Tee-Object` 原样保留日志输出，同时留一份文件给 artifact；
+      #   2) $LASTEXITCODE 不受其后的 cmdlet 影响，因此仍是 gradlew 的真实退出码；
+      #   3) 只挑含 error: / e: / FAILURE: / What went wrong 的行，
+      #      每行截断到 300 字符，最多 30 行写进 step summary；
+      #      逐行 annotation 最多 10 条（见下面的 $maxAnnotations，GitHub 每个 step
+      #      只展示 10 条 error annotation，多发会被静默丢弃）；
+      #   4) 全量日志由后面 `if: always()` 的 upload-artifact 步骤留档。
       - name: Build debug APK
+        id: gradle_assemble_debug
         working-directory: android
-        run: .\gradlew.bat assembleDebug --no-daemon --stacktrace
+        shell: pwsh
+        run: |
+          # runner 的 pwsh 包装脚本会设 $ErrorActionPreference='stop'：gradle 往 stderr
+          # 写一行就可能被当成终止错误，提前打断 Tee 并丢掉后续编译错误。这里显式放回
+          # 'Continue'，真正的成败只看 $LASTEXITCODE。
+          $ErrorActionPreference = 'Continue'
+
+          $dir = Join-Path $env:GITHUB_WORKSPACE '.design/android'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $log = Join-Path $dir 'gradle-assembleDebug.log'
+
+          .\gradlew.bat assembleDebug --no-daemon --stacktrace 2>&1 | Tee-Object -FilePath $log
+          # $LASTEXITCODE 由原生命令设置，后面的 cmdlet（Tee-Object）不会重置它。
+          $code = $LASTEXITCODE
+          # 不把退出码追加进日志文件：Tee-Object 与 Out-File 的默认编码不同，混写会让
+          # 文件尾部变成乱码（本机 5.1 实测：Tee 写 UTF-16LE，Out-File -Encoding UTF8
+          # 追加 UTF-8）。退出码已经落在 step summary、annotation 和 job 日志里。
+          Write-Host "exit code: $code"
+
+          # 只保留最相关的诊断行：javac 的 "error:"、Kotlin 的 "e: "、Gradle 的
+          # "FAILURE:" / "What went wrong"。(-match 默认大小写不敏感。)
+          $hits = @(Get-Content -Path $log -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match 'error:|\be: |FAILURE:|What went wrong' } |
+            Select-Object -Unique)
+          $maxSummaryLines = 30
+          $clean = @()
+          foreach ($h in ($hits | Select-Object -First $maxSummaryLines)) {
+            $t = ($h -replace '[\r\n]+', ' ').Trim()
+            # 剥掉 PowerShell 包裹原生命令 stderr 的前缀（"gradlew.bat : FAILURE: ..."）。
+            $t = ($t -replace '^\s*\S+\.(exe|cmd|bat|ps1)\s*:\s*', '').Trim()
+            if ($t.Length -gt 300) { $t = $t.Substring(0, 300) + '...' }
+            if ($t.Length -gt 0) { $clean += $t }
+          }
+
+          $block = @('### gradle assembleDebug', '', '```', "exit code: $code")
+          $block += "matched diagnostics: $($hits.Count) (showing first $maxSummaryLines)"
+          if ($clean.Count -eq 0) { $block += '(no error: / e: / FAILURE: / What went wrong line found)' }
+          $block += $clean
+          $block += @('```', '',
+            "full log: .design/android/gradle-assembleDebug.log (uploaded as artifact rain-music-android-gradle-output)")
+          $block | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
+          if ($code -ne 0) {
+            # GitHub 每个 step 最多展示 10 条 error annotation：超出部分会被丢弃。
+            # 所以逐行最多发 10 条；超过时留 1 条给“还有 N 行”的提示，正文限制在
+            # 300 字符以内，绝不把整份日志塞进 annotation。
+            $maxAnnotations = 10
+            $lines = $clean
+            $overflow = 0
+            if ($lines.Count -gt $maxAnnotations) {
+              $overflow = $lines.Count - $maxAnnotations + 1
+              $lines = @($lines | Select-Object -First ($maxAnnotations - 1))
+            }
+            if ($lines.Count -eq 0) {
+              Write-Host "::error title=gradle::assembleDebug failed with exit code $code and no matching diagnostic line"
+            }
+            foreach ($l in $lines) { Write-Host "::error title=gradle::$l" }
+            if ($overflow -gt 0) {
+              Write-Host "::error title=gradle::$overflow more matching line(s) omitted; see the step summary and the rain-music-android-gradle-output artifact"
+            }
+            exit $code
+          }
+          Write-Host 'assembleDebug passed'
 
       - uses: actions/upload-artifact@v4
         with:
           name: rain-music-android-debug
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # 全量 gradle 输出留档：即使编译失败也要上传（上面那个既有 artifact 只收 APK，
+      # 且没有 if: always()，失败时会被跳过），所以这里单独加一个 always() 的上传。
+      - name: Upload gradle output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rain-music-android-gradle-output
+          path: .design/android/*.log
+          if-no-files-found: warn

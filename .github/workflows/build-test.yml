@@ -20,7 +20,193 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm run verify
+
+      # ── `npm run verify` 的逐步拆解 ─────────────────────────────────────
+      # package.json:53 → "verify": "npm run typecheck && npm run test:unit && npm run build"
+      # 原来是一整步 `npm run verify`：CI 只回一个退出码，无法知道是 lint/类型/单测/
+      # 打包里的哪一件事红的（本机三门全绿，所以必须让 CI 自己指名道姓）。
+      # 每一步：唯一 id + continue-on-error（只用于收集信息，不让后面的步骤被跳过），
+      # 把输出尾部 60 行写进 $GITHUB_STEP_SUMMARY 和 .design/verify/<step>.log，
+      # 失败时发一条 `::error` workflow command —— 它会成为 check annotation，
+      # 不需要 token 就能读。
+      # 该失败的最终仍然失败：末尾的 "Verify matrix" 在任一 outcome != success 时 exit 1。
+      #
+      # ⚠️ step id 只允许下划线：GitHub 表达式不支持连字符属性访问，
+      #    steps.verify-typecheck.outcome 会被解析成减法、值变空，
+      #    聚合步骤就会无论成败都失败。
+      - id: verify_typecheck
+        name: Verify / typecheck
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # runner 的 pwsh 包装脚本会设 $ErrorActionPreference='stop'：原生命令只要往
+          # stderr 写一行（npm 就会）就可能被当成终止错误，提前打断 Tee。这里显式放回
+          # 'Continue'，成败一律以退出码为准。
+          $ErrorActionPreference = 'Continue'
+
+          $dir = '.design/verify'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $log = "$dir/typecheck.log"
+          $title = 'Verify / typecheck'
+
+          npm run typecheck 2>&1 | Tee-Object -FilePath $log
+          # $LASTEXITCODE 由原生命令设置，其后的 cmdlet（Tee-Object）不会重置它，
+          # 所以这里拿到的仍是 npm 的真实退出码。
+          $code = $LASTEXITCODE
+          # 不把退出码追加进日志文件：Tee-Object 与 Out-File 的默认编码不同，混写会让
+          # 文件尾部变成乱码（本机 5.1 实测：Tee 写 UTF-16LE，Out-File -Encoding UTF8
+          # 追加 UTF-8）。退出码已经落在 step summary、annotation 和 job 日志里。
+          Write-Host "exit code: $code"
+
+          $tail = @(Get-Content -Path $log -Tail 60 -ErrorAction SilentlyContinue)
+          $block = @("### $title", '', '```', "exit code: $code")
+          $block += $tail
+          $block += @('```', '')
+          $block | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
+          Write-Host "----- $title : last 60 lines -----"
+          $tail | ForEach-Object { Write-Host $_ }
+
+          if ($code -ne 0) {
+            # 先从尾部剔除 PowerShell 把原生命令 stderr 包成 ErrorRecord 的噪音
+            # （CategoryInfo / FullyQualifiedErrorId / NativeCommandError / "+ ..." /
+            #  "At line:..." / 栈帧），否则它们会抢在真正的诊断前面被当成“首行错误”。
+            $diag = @($tail | Where-Object {
+              ($_ -match '\S') -and
+              ($_ -notmatch 'CategoryInfo|FullyQualifiedErrorId|NativeCommandError|^\s*\+|^\s*At line:|^\s*at ')
+            })
+            # 再剥掉 PowerShell 包裹原生命令 stderr 的前缀（"npm.ps1 : 真正内容"），
+            # 并丢掉 npm 自己的收尾噪音（"npm error code 2" / "npm error command failed"），
+            # 否则 annotation 里只会出现这两类东西，看不到真正的诊断。
+            $norm = @($diag | ForEach-Object {
+              ($_ -replace '^\s*\S+\.(exe|cmd|bat|ps1)\s*:\s*', '').Trim()
+            } | Where-Object { ($_ -match '\S') -and ($_ -notmatch '^npm (error|warn)\b') } | Select-Object -Unique)
+            # 依次尝试：结构化诊断 → 宽松关键字 → 清理后的第一行 → 原始第一行。
+            $first = $norm | Where-Object { $_ -match 'error TS\d+|error:|\berror\b|not ok \d+|# fail|AssertionError|Cannot find module|SyntaxError|TypeError' } | Select-Object -First 1
+            if (-not $first) { $first = $norm | Where-Object { $_ -match 'fail|problem|exception' } | Select-Object -First 1 }
+            if (-not $first) { $first = $norm | Select-Object -First 1 }
+            if (-not $first) { $first = $diag | Select-Object -First 1 }
+            if (-not $first) { $first = '(no output)' }
+            $first = ($first -replace '[\r\n]+', ' ').Trim()
+            if ($first.Length -gt 300) { $first = $first.Substring(0, 300) + '...' }
+            Write-Host "::error title=$title::exit $code :: $first"
+            exit $code
+          }
+          Write-Host "$title passed"
+
+      - id: verify_unit
+        name: Verify / test:unit
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # 同 typecheck：避免 runner 包装脚本的 'stop' 让原生 stderr 提前中断 Tee。
+          $ErrorActionPreference = 'Continue'
+
+          $dir = '.design/verify'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $log = "$dir/unit.log"
+          $title = 'Verify / test:unit'
+
+          npm run test:unit 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          # 不把退出码追加进日志文件：Tee-Object 与 Out-File 的默认编码不同，混写会让
+          # 文件尾部变成乱码（本机 5.1 实测：Tee 写 UTF-16LE，Out-File -Encoding UTF8
+          # 追加 UTF-8）。退出码已经落在 step summary、annotation 和 job 日志里。
+          Write-Host "exit code: $code"
+
+          $tail = @(Get-Content -Path $log -Tail 60 -ErrorAction SilentlyContinue)
+          $block = @("### $title", '', '```', "exit code: $code")
+          $block += $tail
+          $block += @('```', '')
+          $block | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
+          Write-Host "----- $title : last 60 lines -----"
+          $tail | ForEach-Object { Write-Host $_ }
+
+          if ($code -ne 0) {
+            # 先从尾部剔除 PowerShell 把原生命令 stderr 包成 ErrorRecord 的噪音
+            # （CategoryInfo / FullyQualifiedErrorId / NativeCommandError / "+ ..." /
+            #  "At line:..." / 栈帧），否则它们会抢在真正的诊断前面被当成“首行错误”。
+            $diag = @($tail | Where-Object {
+              ($_ -match '\S') -and
+              ($_ -notmatch 'CategoryInfo|FullyQualifiedErrorId|NativeCommandError|^\s*\+|^\s*At line:|^\s*at ')
+            })
+            # 再剥掉 PowerShell 包裹原生命令 stderr 的前缀（"npm.ps1 : 真正内容"），
+            # 并丢掉 npm 自己的收尾噪音（"npm error code 2" / "npm error command failed"），
+            # 否则 annotation 里只会出现这两类东西，看不到真正的诊断。
+            $norm = @($diag | ForEach-Object {
+              ($_ -replace '^\s*\S+\.(exe|cmd|bat|ps1)\s*:\s*', '').Trim()
+            } | Where-Object { ($_ -match '\S') -and ($_ -notmatch '^npm (error|warn)\b') } | Select-Object -Unique)
+            # 依次尝试：结构化诊断（node --test 形如 "# fail 3" / "not ok 12 - name"、
+            # tsc 的 "error TS2322"、node 的 "Cannot find module"）→ 宽松关键字 →
+            # 清理后的第一行 → 原始第一行（保底，宁可难看也别空手）。
+            $first = $norm | Where-Object { $_ -match 'error TS\d+|error:|\berror\b|not ok \d+|# fail|AssertionError|Cannot find module|SyntaxError|TypeError' } | Select-Object -First 1
+            if (-not $first) { $first = $norm | Where-Object { $_ -match 'fail|problem|exception' } | Select-Object -First 1 }
+            if (-not $first) { $first = $norm | Select-Object -First 1 }
+            if (-not $first) { $first = $diag | Select-Object -First 1 }
+            if (-not $first) { $first = '(no output)' }
+            $first = ($first -replace '[\r\n]+', ' ').Trim()
+            if ($first.Length -gt 300) { $first = $first.Substring(0, 300) + '...' }
+            Write-Host "::error title=$title::exit $code :: $first"
+            exit $code
+          }
+          Write-Host "$title passed"
+
+      - id: verify_build
+        name: Verify / build
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # 同 typecheck：避免 runner 包装脚本的 'stop' 让原生 stderr 提前中断 Tee。
+          $ErrorActionPreference = 'Continue'
+
+          $dir = '.design/verify'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $log = "$dir/build.log"
+          $title = 'Verify / build'
+
+          npm run build 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          # 不把退出码追加进日志文件：Tee-Object 与 Out-File 的默认编码不同，混写会让
+          # 文件尾部变成乱码（本机 5.1 实测：Tee 写 UTF-16LE，Out-File -Encoding UTF8
+          # 追加 UTF-8）。退出码已经落在 step summary、annotation 和 job 日志里。
+          Write-Host "exit code: $code"
+
+          $tail = @(Get-Content -Path $log -Tail 60 -ErrorAction SilentlyContinue)
+          $block = @("### $title", '', '```', "exit code: $code")
+          $block += $tail
+          $block += @('```', '')
+          $block | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+
+          Write-Host "----- $title : last 60 lines -----"
+          $tail | ForEach-Object { Write-Host $_ }
+
+          if ($code -ne 0) {
+            # 先从尾部剔除 PowerShell 把原生命令 stderr 包成 ErrorRecord 的噪音
+            # （CategoryInfo / FullyQualifiedErrorId / NativeCommandError / "+ ..." /
+            #  "At line:..." / 栈帧），否则它们会抢在真正的诊断前面被当成“首行错误”。
+            $diag = @($tail | Where-Object {
+              ($_ -match '\S') -and
+              ($_ -notmatch 'CategoryInfo|FullyQualifiedErrorId|NativeCommandError|^\s*\+|^\s*At line:|^\s*at ')
+            })
+            # 再剥掉 PowerShell 包裹原生命令 stderr 的前缀（"npm.ps1 : 真正内容"），
+            # 并丢掉 npm 自己的收尾噪音（"npm error code 2" / "npm error command failed"），
+            # 否则 annotation 里只会出现这两类东西，看不到真正的诊断。
+            $norm = @($diag | ForEach-Object {
+              ($_ -replace '^\s*\S+\.(exe|cmd|bat|ps1)\s*:\s*', '').Trim()
+            } | Where-Object { ($_ -match '\S') -and ($_ -notmatch '^npm (error|warn)\b') } | Select-Object -Unique)
+            # 依次尝试：结构化诊断 → 宽松关键字 → 清理后的第一行 → 原始第一行。
+            $first = $norm | Where-Object { $_ -match 'error TS\d+|error:|\berror\b|not ok \d+|# fail|AssertionError|Cannot find module|SyntaxError|TypeError' } | Select-Object -First 1
+            if (-not $first) { $first = $norm | Where-Object { $_ -match 'fail|problem|exception' } | Select-Object -First 1 }
+            if (-not $first) { $first = $norm | Select-Object -First 1 }
+            if (-not $first) { $first = $diag | Select-Object -First 1 }
+            if (-not $first) { $first = '(no output)' }
+            $first = ($first -replace '[\r\n]+', ' ').Trim()
+            if ($first.Length -gt 300) { $first = $first.Substring(0, 300) + '...' }
+            Write-Host "::error title=$title::exit $code :: $first"
+            exit $code
+          }
+          Write-Host "$title passed"
 
       # UI suites run as separate steps so a failure names the culprit.
       # continue-on-error keeps the rest running and builds a full matrix.
@@ -102,3 +288,27 @@ jobs:
             exit 1
           }
           Write-Host 'all UI suites passed'
+
+      # 放在最后 + if: always()：这样即使 verify 的三个步骤有失败（它们带
+      # continue-on-error，不会中断 job），UI 套件仍然会跑，矩阵也一定被打印出来。
+      # 这里才真正决定 verify 的成败：任一 outcome != success 就 exit 1。
+      - name: Verify matrix
+        if: always()
+        shell: pwsh
+        run: |
+          $rows = [ordered]@{
+            'verify/typecheck' = '${{ steps.verify_typecheck.outcome }}'
+            'verify/test:unit' = '${{ steps.verify_unit.outcome }}'
+            'verify/build'     = '${{ steps.verify_build.outcome }}'
+          }
+          $all = ($rows.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
+          Write-Host "verify result: $all"
+          $all | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
+          # annotation 免 token 可读；每步只发 2 条，远低于 GitHub 每步 10 条的 error 上限。
+          Write-Host "::error title=Verify matrix::$all"
+          $bad = @($rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key })
+          if ($bad.Count -gt 0) {
+            Write-Host "::error title=Failing verify steps::$($bad -join ', ')"
+            exit 1
+          }
+          Write-Host 'all verify steps passed'
