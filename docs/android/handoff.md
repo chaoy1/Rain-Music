@@ -30,7 +30,10 @@
     **没有 blocker**，但有一条 **high**：自定义源的 HTTP 请求体编码与桌面不一致
     （脚本用 `body` + `Content-Type: application/json` 会被**表单序列化**，头却还是 json）——
     而且**根因在 `platform/http/web.js` 的 `buildRequest` 少了 needle 那条"头是 json 就当 json"的规则**，
-    所以**要改两处**。另有一条 medium：**初始化成功之后的一次未捕获错误会把整个源毁掉**。见 **§6.4**。**全部未修。**
+    所以**要改两处**。**W1 本轮已修**（含 2 个变异验证：单独改任一处都过不了）。
+    仍未修的是：**W2**（初始化成功之后的一次未捕获错误会把整个源毁掉，medium）、
+    **W3/W4**（medium）、**W5–W9**（low）、以及**本轮新发现的 W10**（`formData` 被完全忽略 ⇒
+    发空请求）。见 **§6.4 / §6.4.1 / §6.4.2**。
 
 ---
 
@@ -462,7 +465,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
   persist→complete 的顺序与 `data.ts:7-25` 一致，`complete()` 先按键删再清 `queueStartupRestorePending`
   （与 `dbService/index.ts:218-221` 同序），两个调用者都持列表锁 ⇒ **不会删掉更新的队列状态的快照**。
 
-### 6.4 渲染层 / Web 侧：独立审查确认的问题（**已确认、未修**；2026-10-15）
+### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1 本轮已修，其余未修**；2026-10-15）
 
 审查对象：提交 `2a3e4a7c` 的渲染层新代码（`userApi/{host,worker-runtime,web,contract}.js`、
 `platform/download/{android,pure}.ts`、`filePicker/web.js`、`fs/web.js`、`fileUrl/web.js`、
@@ -471,7 +474,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 
 | # | 严重度 | 位置 | 桌面依据 | 差异与后果 | 我复核了吗 |
 |---|---|---|---|---|---|
-| **W1** | **high** | `src/renderer/platform/userApi/web.js:38` —— 把 `json: false` **写死**给每一次社区脚本请求 | `src/main/modules/userApi/renderer/preload.js:172-188`（**只有** `form`/`formData` 才置 `json = false`，`body` **不置**）+ `vendor/needle/lib/needle.js:305-306` | 脚本用 `body`（对象）+ `Content-Type: application/json` 发 POST 时，桌面发 `{"a":1}`、Android 发 `a=1`，而**头仍然是 json** ⇒ 服务器按 JSON 解析直接失败。**一整类社区音源脚本在 Android 上不可用** | **已复核，并且发现比审查者说的更宽 —— 见下面 W1 展开** |
+| **W1** | **high** | `src/renderer/platform/userApi/web.js:38` —— 把 `json: false` **写死**给每一次社区脚本请求 | `src/main/modules/userApi/renderer/preload.js:172-188`（**只有** `form`/`formData` 才置 `json = false`，`body` **不置**）+ `vendor/needle/lib/needle.js:305-306` | 脚本用 `body`（对象）+ `Content-Type: application/json` 发 POST 时，桌面发 `{"a":1}`、Android 发 `a=1`，而**头仍然是 json** ⇒ 服务器按 JSON 解析直接失败。**一整类社区音源脚本在 Android 上不可用** | **已复核 + 本轮已修** —— 见 §6.4.1 |
 | W2 | medium | `userApi/host.js:123` + `worker-runtime.js:31-32` | `preload.js:163` `if (isInitedApi) return` | 初始化**成功之后**，脚本里任何一次未捕获错误 / 未处理 rejection 都走 `fatal` ⇒ 状态翻假、worker 终止、在途请求 reject、弹"源码初始化失败"。**一个本来能用的源被一次异步小错毁掉** | 未复核 |
 | W3 | medium | `userApi/contract.js:18-22`（经 `host.js:115-119`） | — | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）⇒ 就绪闸门打开、`assertApiSupport()` 为真，但 `userApi.apis[source]` 里没有 `getMusicUrl` ⇒ 播放死在后面的 TypeError 上，而不是在初始化时就明确报错 | 未复核 |
 | W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
@@ -480,8 +483,65 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | W7 | low | `filePicker/web.js:34` | — | 取消判定靠 `focus` + 300 ms 定时器读 `input.files`；WebView 若"先 focus、后填 FileList"，会把**真选择当成取消**静默丢掉 | 未复核（需真机） |
 | W8 | low（**旧问题**，不是本次引入） | `build-config/renderer/webpack.config.web.js:46-96` + `src/common/utils/index.ts:1` | — | web 产物里**仍然有 `electron-log` 的 Node 构建**（`src/node/*`、File transport、`fs` 被替成空模块）⇒ 配置里"没有任何 Node-only 模块能进 web 产物"这句话对**日志**这条不成立（只在真写日志时才炸，而且被 electron-log 自己吞掉） | 未复核 |
 | W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | 未复核 |
+| **W10** | medium（**本轮新发现**，不在原审查清单里） | `userApi/web.js` 的 `userApiHttpRequest` | `preload.js:180-185`（桌面把 `formData` 交给 needle 发 multipart） | 适配器**完全忽略 `formData`**：既不把它当 data，也不置 `json`，等于发一个**没有 body** 的请求。桌面那条路是能用的 ⇒ 用 `formData` 的社区脚本在 Android 上会静默发出空请求 | 已复核（我改 W1 时读出来的）。**本轮没修**：修它需要 `platform/http/web.js` 支持原样 body（`FormData`/`Blob`/`URLSearchParams` 直传 + 不自动写 Content-Type，让 fetch 自己产生 multipart boundary），那是另一件事，已登记 |
 
-**W1 展开（我自己复核出来的，比审查者的结论更宽 —— 这条也说明审查结论必须回代到代码）**
+#### 6.4.1 本轮已修：W1（自定义源的请求体编码）
+
+**根因有两处，必须同时改**（这是审查者没说全的地方）：
+
+1. `src/renderer/platform/http/web.js` 的 `buildRequest` 里原来是
+   `const json = options.json === true` —— **完全没有实现** needle 那条
+   "`options.json !== false` 且（小写）`content-type` **字面等于** `application/json` 就算 json"
+   的规则（`vendor/needle/lib/needle.js:305-306`）。只把 `userApi/web.js` 的 `json: false` 去掉
+   **不够** —— 请求照样会被表单序列化。
+   现在补成 `Boolean(explicitJson) || (explicitJson !== false && headerValue(headers,'content-type') === 'application/json')`，
+   并新增 `headerValue()` 做**大小写不敏感**取值（needle 那边 headers 是规范化成小写的）。
+   **两条容易踩的细节，都照抄了 needle**：
+   - 比较是**字面相等**：`application/json; charset=utf-8` **不**触发（放宽它就会与桌面产生新的不一致）；
+   - 下面那条 `Accept` 规则用的是 **`options.json`（选项本身）**，不是这个派生值 —— needle 源码就是
+     这么写的，混用会给"靠头推导出 json"的请求多加一个 `Accept`。这一点**只有真的去读 needle 才能发现**。
+2. `src/renderer/platform/userApi/web.js` 的 `userApiHttpRequest` 把 `json: false` **写死**在每次请求上
+   （显式 `false` 会压过上面那条规则）。改成与桌面 `preload.js:172-188` 同形：
+   `body` ⇒ 不置 json（交给 Content-Type 推导）；`form` ⇒ 显式 `json: false`。
+   顺带把数据选择从 `options.body ?? options.form` 改成与桌面一致的**真值链**
+   （`if (body) … else if (form) …`），并且**不转发脚本的 `json`** —— 桌面那份解构里根本没有它。
+
+**调用点审计**（这是修之前必须做的，它决定严重度上限）：全仓**只有两个** `transport.request` 调用者 ——
+`src/renderer/utils/request.js:23` 与 `userApi/web.js:35`。
+`request.js` 自己的 `body`/`form`/`formData` 形状与桌面**逐字相同**（`request.js:10-20`），
+且它的 `httpRequest` 是**显式**传 `json: format === 'json'`（`request.js:136`）⇒ **内置音源不受影响**。
+所以实际受影响面就是**自定义源**（已修），加上"任何显式写 `Content-Type: application/json` 且不传 json
+的渲染层调用点"—— 本轮没有发现别的，但两边修完后这类调用点**都**归到同一条 needle 规则上了。
+
+**证据**：
+
+- `tests/unit/web-http-transport.test.cjs` 新增一条用例，四个断言分别钉住：
+  头推导出 json 时对象 body 走 `JSON.stringify` **且调用方给的头原样保留**、**不补 `Accept`**、
+  `json: false` 压过头、带 `charset` 的**不**触发、头名大小写不敏感。
+- `tests/unit/android-user-api-web.test.cjs` 新增一条**真 HTTP 服务器**的集成用例：
+  `body` + `Content-Type: application/json` 到了服务端必须是 `{"a":1,"b":"x y"}` 而不是 `a=1&b=x+y`。
+- **两个变异都被捕获**（在 `%TEMP%\rain-w1-mut\<kind>\` 的整份 `src/` 副本里注入，用 `NODE_PATH`
+  指回仓库的 `node_modules`；仓库文件一个字节都没动）：
+
+  | 变异 | 结果 |
+  |---|---|
+  | 把 `buildRequest` 改回 `options.json === true` | 传输用例 fail 1（`actual: 'a=1&b=x+y'`）**且** 集成用例 fail 1 |
+  | 让 `userApi/web.js` 对 `body` 重新写死 `json: false` | 传输用例 **fail 0**（说明它只测传输规则）、集成用例 fail 1 |
+
+  第二条尤其重要：它证明**这个修复是两处的**，只改一处过不了集成用例。
+
+> ⚠️ **踩过的坑（写在这里省下一次）**：变异工装一开始用
+> `Get-Content -Raw` 读文件，**把副本里的中文注释按 GBK 重新编码、文件直接坏掉**，
+> 于是 13 个用例全红、看起来像"变异被捕获"（其实是假信号）。
+> 改成 `[System.IO.File]::ReadAllText/WriteAllText` + `UTF8Encoding($false)` 之后才拿到上表这种
+> **"只红该红的那条"** 的结果。**假绿和假红都要警惕：失败数量不合理时先怀疑工装。**
+
+
+
+#### 6.4.2 当时的原始分析（保留为历史证据 —— 注意其中第 2 条已被本轮审计**推翻并取代**）
+
+> 下面这三条是**修之前**写的。第 1、3 条与 §6.4.1 一致；**第 2 条说"没有做调用点审计"已经过时** ——
+> 审计在 §6.4.1 里做了（结论：全仓只有两个 `transport.request` 调用者，内置音源不受影响）。
 
 1. **根不只在 `userApi/web.js:38`**，还在 `src/renderer/platform/http/web.js:220`：
    那里是 `const json = options.json === true` —— **完全没实现** needle 那条
@@ -493,7 +553,8 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
    `src/renderer/utils/request.js:136` 是**显式**传 `json: format === 'json'`（默认就是 `true`），不依赖头推导。
    **自定义源受影响**（`userApi/web.js` 强制 false）。
    还剩一类：渲染层里任何 `request({ body: …, headers: { 'Content-Type': 'application/json' } })`
-   且**不显式传 `json`** 的调用点 —— **本轮没有做这个调用点审计**，**下一轮要先做**，它决定严重度的上限。
+   且**不显式传 `json`** 的调用点 —— ~~**本轮没有做这个调用点审计**，**下一轮要先做**~~
+   **已在 §6.4.1 做完**：全仓只有两个 `transport.request` 调用者，没发现别的这类调用点。
 3. **needle 的比较是字面相等** `== 'application/json'`，
    所以 `application/json; charset=utf-8` **不触发**它。修的时候要**照抄这条**（否则引入新的不一致），
    并用一个**对照 needle 本体的用例**钉住，别凭直觉。
@@ -679,13 +740,12 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **§6.2 的下载执行层本轮已修 6 处（含那处 high），并做了 6 个变异验证**；剩下 2 处需要先拍板。
-   于是**下一轮的第一优先变成**：
-   - **§6.4 的 W1**（自定义源 `body` + `Content-Type: application/json` 被表单序列化 ⇒
-     **一整类社区音源脚本不可用**；要**同时**改 `platform/http/web.js` 与 `userApi/web.js`，
-     并先做"还有哪些调用点依赖头推导"的审计）；
+5. **§6.2 的下载执行层本轮已修 6 处（含那处 high）**，**§6.4 的 W1 也已修**（两处根因 + 2 个变异验证）；
+   两处都留下了"仍然没修、并且说明了为什么"的清单。于是**下一轮的第一优先**是：
+   - **§6.4 的 W2 / W3**（medium，都在自定义源这条首版链上：初始化成功后被一次未捕获错误毁掉、
+     以及"零个可用平台"被当成成功发布）；
    - 然后是 **§6.3 的 L1 / L2 / L6** —— 尤其 **L6 要先把替身改成与真 API 同严格**，
      否则本机关于"坏歌词行"的结论继续不成立；
-   - 最后才是 §6.2 剩下的第 4、5 处。
+   - 再往后是 §6.2 剩下的第 4、5 处与 §6.4 的 W10（`formData` 发空请求）。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

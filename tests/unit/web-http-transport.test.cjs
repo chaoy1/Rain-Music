@@ -95,6 +95,31 @@ test('调用形状：GET + 非 json 数据拼到 query，POST + 对象 → JSON 
   assert.equal(post.init.body, JSON.stringify({ appid: 1001, data: [1, 2] }))
 })
 
+test('needle 的 json 判定：Content-Type 字面等于 application/json 时，对象 body 走 JSON 而不是表单', async() => {
+  const fetchImpl = makeFetch()
+  const { transport } = loadModule({ fetch: fetchImpl })
+
+  // 社区音源脚本的形状：**自己写 Content-Type**，且不传 json。
+  await requestOnce(transport, 'post', 'http://a.test/api', { a: 1, b: 'x y' }, { headers: { 'Content-Type': 'application/json' } })
+  const first = fetchImpl.calls[0].init
+  assert.equal(first.body, JSON.stringify({ a: 1, b: 'x y' }))
+  assert.equal(first.headers['Content-Type'], 'application/json', '调用方给的头必须原样保留')
+  assert.equal(first.headers.Accept, undefined, 'needle 只在 options.json 为真时补 Accept，由 Content-Type 推导出来的不算')
+
+  // 显式 json:false 必须压过 Content-Type —— needle 的条件里写着 `options.json !== false`。
+  await requestOnce(transport, 'post', 'http://a.test/api', { a: 1 }, { json: false, headers: { 'Content-Type': 'application/json' } })
+  assert.equal(fetchImpl.calls[1].init.body, 'a=1')
+
+  // needle 是**字面相等**比较，带 charset 的**不**触发（这是 needle 自己的怪癖，别"顺手"放宽：
+  // 放宽就会与桌面产生新的不一致）。
+  await requestOnce(transport, 'post', 'http://a.test/api', { a: 1 }, { headers: { 'Content-Type': 'application/json; charset=utf-8' } })
+  assert.equal(fetchImpl.calls[2].init.body, 'a=1')
+
+  // 头名大小写不敏感（needle 那边 headers 是规范化成小写的）。
+  await requestOnce(transport, 'post', 'http://a.test/api', { a: 1 }, { headers: { 'content-type': 'application/json' } })
+  assert.equal(fetchImpl.calls[3].init.body, JSON.stringify({ a: 1 }))
+})
+
 test('form → application/x-www-form-urlencoded，且不改动 needle 的 URLSearchParams 语义', async() => {
   const fetchImpl = makeFetch()
   const { transport } = loadModule({ fetch: fetchImpl })

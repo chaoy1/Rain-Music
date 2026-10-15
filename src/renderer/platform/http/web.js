@@ -13,8 +13,9 @@
  * | 语义 | needle（桌面） | 本适配器 |
  * | --- | --- | --- |
  * | 请求体 | `data` 是 string 就用原样，否则 `json ? JSON.stringify(data) : 表单序列化` | 同（`URLSearchParams` 做表单序列化） |
+ * | **`json` 怎么定** | `options.json \|\| (options.json !== false && 小写 content-type **字面等于** 'application/json')`（`needle.js:305-306`） | **同**（2026-10-15 补上；此前只认 `options.json === true`） |
  * | Content-Type | 未显式给出时：json → `application/json; charset=utf-8`，否则 `application/x-www-form-urlencoded` | 同 |
- * | Accept | `json` 请求且未显式给出 accept → `application/json` | 同 |
+ * | Accept | **`options.json`** 为真且未显式给出 accept → `application/json`（注意用的是**选项**，不是派生的 json） | 同 |
  * | GET + 非 json 数据 | 拼到 URL 的 query 上 | 同 |
  * | 超时 | `response_timeout`（到**响应头**为止） | 计时器在响应头到达时清除，语义相同 |
  * | 超时错误码 | Node `ETIMEDOUT` | 抛出的 error 带 `code = 'ETIMEDOUT'` |
@@ -208,6 +209,12 @@ const resolveFetch = () => {
 
 const hasHeader = (headers, name) => Object.keys(headers).some(key => key.toLowerCase() === name)
 
+/** 按**大小写不敏感**的头名取值（needle 的 `config.headers` 是规范化成小写的）。 */
+const headerValue = (headers, name) => {
+  for (const key of Object.keys(headers)) if (key.toLowerCase() === name) return headers[key]
+  return undefined
+}
+
 const toFormBody = data => {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(data)) params.append(key, value == null ? '' : String(value))
@@ -217,7 +224,15 @@ const toFormBody = data => {
 /** 把 needle 风格的 (method, data, options) 折算出真正的 url / body / headers。 */
 const buildRequest = (method, rawUrl, data, options) => {
   const headers = Object.assign({}, options.headers)
-  const json = options.json === true
+  // needle 的 `json` 判定（`vendor/needle/lib/needle.js:305-306`）：
+  //   var json = options.json || (options.json !== false && config.headers['content-type'] == 'application/json');
+  // 两条容易踩的细节：
+  // 1. `config.headers['content-type']` 是**小写键**，所以取值必须大小写不敏感；
+  // 2. 它是**字面相等**比较 —— `application/json; charset=utf-8` **不**触发（照抄，别"顺手"放宽）。
+  // 少了这条规则时，调用方自己写 `Content-Type: application/json` + 对象 body 的请求会被
+  // **表单序列化**、而头仍然是 json ⇒ 服务端按 JSON 解析直接失败（社区音源脚本就这么写）。
+  const explicitJson = options.json
+  const json = Boolean(explicitJson) || (explicitJson !== false && headerValue(headers, 'content-type') === 'application/json')
   let url = rawUrl
   let body
 
@@ -235,7 +250,9 @@ const buildRequest = (method, rawUrl, data, options) => {
     }
   }
   // needle: `if (options.json && !options.accept && !options.headers.accept) config.headers.accept = 'application/json'`
-  if (json && !hasHeader(headers, 'accept')) headers.Accept = 'application/json'
+  // ⚠️ 这里用的是 **`options.json`**（选项本身），**不是**上面那个派生出来的 `json` ——
+  // needle 源码就是这么写的，混用会给"靠 Content-Type 推导出 json"的请求多加一个 Accept 头。
+  if (Boolean(explicitJson) && !hasHeader(headers, 'accept')) headers.Accept = 'application/json'
 
   return { url, body, headers }
 }

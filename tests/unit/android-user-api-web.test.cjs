@@ -45,3 +45,28 @@ test('WebView HTTP adapter uses real transport and preserves JSON body/raw bytes
   assert.deepEqual(result.response.body,result.body)
   assert.deepEqual(JSON.parse(Buffer.from(result.response.raw).toString()),result.body)
 })
+
+test('WebView HTTP adapter sends an object body as JSON when the script sets a JSON content type', async t => {
+  // 这条钉的是"社区脚本的典型形状"：**对象 body + 自己写 Content-Type: application/json**，且
+  // **不传 json**。适配器以前把 `json: false` 写死，于是这种请求被表单序列化、头却还是 json，
+  // 服务端按 JSON 解析直接失败 —— 一整类社区音源脚本因此不可用。
+  let observed
+  const server = http.createServer((request,response) => {
+    let body = ''
+    request.on('data',data=>{body+=data})
+    request.on('end',()=> {
+      observed={method:request.method,body,headers:request.headers}
+      response.writeHead(200,{'Content-Type':'application/json'})
+      response.end('{"ok":true}')
+    })
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  t.after(()=>server.close())
+  const {userApiHttpRequest} = web()
+  await new Promise((resolve,reject)=> userApiHttpRequest(`http://127.0.0.1:${server.address().port}/test`, {method:'post',body:{a:1,b:'x y'},headers:{'Content-Type':'application/json'},timeout:1000}, (error,response,body)=> error?reject(error):resolve(body)))
+  assert.equal(observed.headers['content-type'],'application/json','调用方给的头必须原样保留')
+  assert.equal(observed.body,JSON.stringify({a:1,b:'x y'}),'JSON 内容类型必须产生 JSON body，而不是表单字节')
+  // 派生出来的 json **不**补 Accept（needle 用的是 options.json 本身）；真实 fetch 自己可能补别的值，
+  // 所以只断言"不是 application/json"。
+  assert.notEqual(observed.headers.accept,'application/json')
+})

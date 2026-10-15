@@ -32,11 +32,28 @@ export const createUserApiSession = (onMessage, onError) => {
 // Runs in the WebView so CapacitorHttp's injected fetch transport is reachable.
 // No plugin object or callable bridge ever crosses into the Worker.
 export const userApiHttpRequest = (url, options, callback) => {
-  const request = transport.request(options.method || 'get', url, options.body ?? options.form, {
+  // 与桌面 `src/main/modules/userApi/renderer/preload.js:172-188` 逐条对齐。
+  // 社区脚本只能给 `body` / `form` / `formData` —— **给不了 `json`**（桌面那份解构里就没有它），
+  // 所以这里也不转发脚本的 json：
+  //   - `body` ⇒ **不置** json，由 `Content-Type` 推导（needle 规则，见 `platform/http/web.js`）；
+  //   - `form` ⇒ 显式 `json: false`（表单序列化）。
+  // 原来这里把 `json: false` **写死**，于是"对象 body + `Content-Type: application/json`"会被
+  // **表单序列化**、而头仍然是 json ⇒ 服务端按 JSON 解析直接失败。**一整类社区音源脚本因此不可用。**
+  let data
+  const requestOptions = {
     headers: options.headers,
     response_timeout: options.timeout,
-    json: false,
-  }, (error, response) => {
+  }
+  if (options.body) {
+    data = options.body
+  } else if (options.form) {
+    data = options.form
+    requestOptions.json = false
+  }
+  // ⚠️ `formData`（桌面走 needle 的 multipart）**目前没有等价实现**：这里既不传数据也不置 json，
+  // 等于发一个没有 body 的请求。**已登记**在 `docs/android/handoff.md` §6.4 的 W10，
+  // 不要以为它已经能用。
+  const request = transport.request(options.method || 'get', url, data, requestOptions, (error, response) => {
     if (error) { callback(error, null, null); return }
     let body = response.raw.toString()
     try { body = JSON.parse(body) } catch (_) {}
