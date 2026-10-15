@@ -154,6 +154,9 @@ public class RainMusicIpcPlugin extends Plugin {
         // 第九 / 第十刀再做，届时它们与本刀同一个文件（三条写通道共用那一把 LIST_WRITE_LOCK）。
         RainMusicListWriteChannels.register(this);
 
+        // Song insertion shares the list write lock with deletion and default queue repair.
+        RainMusicListMusicAddChannels.register(this);
+
         Logger.info(
             TAG,
             "IPC 传输桥已加载：plugin=" + PLUGIN_NAME + ", event=" + EVENT_NAME +

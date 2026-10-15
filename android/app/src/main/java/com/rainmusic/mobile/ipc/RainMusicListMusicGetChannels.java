@@ -201,7 +201,7 @@ import java.util.Set;
  *       （库仍是脏的），缓存与库**永久分叉** —— 这是本刀明确禁止的写法。</li>
  * </ul>
  *
- * <h2>并发：一把**只护 default 去重写回**的专用锁（{@link #DEFAULT_QUEUE_MERGE_LOCK}）</h2>
+ * <h2>并发：default 去重与列表写通道共用 monitor（{@link #DEFAULT_QUEUE_MERGE_LOCK}）</h2>
  * <p><b>为什么需要</b>：P0-1 的 handler 跑在 **2 线程池**里（{@code RainMusicIpcPlugin.java:347-361}），
  * 并发的两次 {@code invoke(player_list_music_get, 'default')} 会真的同时跑。桌面靠
  * {@code dbService/index.ts:29-45} 的 {@code serializeCalls} 把**所有** dbService 调用排成一条队列
@@ -222,14 +222,12 @@ import java.util.Set;
  *       （{@code RainMusicDatabase.java:418-424}），SQL 一行都不在它里面跑；</li>
  *   <li>{@link RainMusicLogThrottle} 的锁只护几个计数器（两条日志各自的闸门），不护数据。</li>
  * </ul>
- * <p><b>为什么不新开一个文件放这把锁</b>：它保护的是**本文件里唯一一处**代码（default 分支），
- * 全仓库只有这一个获取点。单独一个文件只会是"一个字段 + 一句注释"，而把锁与它保护的临界区放在同一个
- * 文件里，"谁拿了它、护了哪一段"一眼可见。（这与第三刀的 {@link RainMusicStoreLock} 不同：
- * 那把锁被两个通道文件共用，所以它必须单独成文件。）
+ * <p>歌曲写入接入后，monitor 已抽到 {@link RainMusicListWriteLock}；本文件保留私有别名。
+ * default 修复、歌曲新增、歌单删除共用同一把锁，避免修复旧快照覆盖新歌曲。
  *
  * <p>⚠️ <b>锁的边界（不要当成万能的）</b>：Java 监视器只在本进程、本类加载器里有效，**管不到别的连接**
- * —— 将来的线 A（JS 侧 SQLite 驱动）或别的原生写通道与这里并发时，靠的是 SQLite 自己的文件锁与
- * 事务（这一次写回本身就是一个事务）。这就是"只护自己这一段的 read-modify-write"。
+ * —— 将来的线 A（JS 侧 SQLite 驱动）或没有接入共用 monitor 的原生写通道与这里并发时，
+ * 仍靠 SQLite 自己的文件锁与事务（这一次写回本身就是一个事务）。
  *
  * <p><b>这把锁也负责"同一次合并里快照只插一次"</b>：快照的"查在不在 → 插"两步与 DELETE / INSERT
  * 同在临界区里（{@link #overwriteDefaultQueue} 被 {@link #readListMusics} 在锁内调用），
@@ -547,14 +545,15 @@ public final class RainMusicListMusicGetChannels {
      */
 
     /**
-     * {@code default} 去重写回的**专用锁**（理由见类注释「并发」）。
+     * {@code default} 去重写回的锁别名（理由见类注释「并发」）。
      *
      * <p>它保护的是 {@link #getListMusics} 里 {@code default} 分支的**整段**
      * "SELECT → 判重 → DELETE ×2 → INSERT ×2N → setTransactionSuccessful"，
-     * 不保护非 default 的读（那些没有 read-modify-write）。
+     * 不保护非 default 的读（那些没有 read-modify-write）。monitor 与歌曲新增及歌单写通道共用，
+     * 避免合并读到旧快照后覆盖刚插入的歌，或在歌单删除后把旧歌曲写回。
      * ⚠️ 它与 {@link RainMusicStoreLock#WRITE_LOCK}（SharedPreferences）**没有**任何关系。
      */
-    private static final Object DEFAULT_QUEUE_MERGE_LOCK = new Object();
+    private static final Object DEFAULT_QUEUE_MERGE_LOCK = RainMusicListWriteLock.LOCK;
 
     /**
      * 合并成功那条警告的节流窗口（毫秒）。取 60 秒：队列修好之后就不会再进这一支

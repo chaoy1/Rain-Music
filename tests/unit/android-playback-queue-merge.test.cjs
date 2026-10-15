@@ -68,6 +68,7 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const { test, after } = require('node:test')
 const load = require('./load-ts.cjs')
+const assertCheckedJsonSignatures = require('./json-checked-exception-probe.cjs')
 
 const ROOT = path.join(__dirname, '../..')
 const PACKAGE = 'com.rainmusic.mobile.ipc'
@@ -1244,6 +1245,17 @@ const SKIP_REASON = JAVAC_AVAILABLE
   ? false
   : '本机没有可用的 javac（JDK）⇒ 这一组"用假 SQLite 把这一刀跑起来"的用例无法执行'
 
+test('JSON 替身负向验证：合并探针的六个受检异常入口必须拒绝未处理的调用方', { skip: SKIP_REASON }, () => {
+  assertCheckedJsonSignatures(STUBS, [
+    ['UncheckedObjectPut', 'new JSONObject().put("name", (Object) "value")'],
+    ['UncheckedObjectConstructor', 'new JSONObject("{}")'],
+    ['UncheckedObjectGet', 'new JSONObject().get("name")'],
+    ['UncheckedObjectGetString', 'new JSONObject().getString("name")'],
+    ['UncheckedArrayGet', 'new JSONArray().get(0)'],
+    ['UncheckedArrayGetObject', 'new JSONArray().getJSONObject(0)'],
+  ])
+})
+
 const temporaryDirs = []
 after(() => {
   for (const dir of temporaryDirs) fs.rmSync(dir, { recursive: true, force: true })
@@ -1323,6 +1335,7 @@ const compileOnce = (() => {
         path.join(javaDir, 'RainMusicLogThrottle.java'),
         path.join(javaDir, 'RainMusicDatabase.java'),
         path.join(javaDir, 'RainMusicIpcHandlers.java'),
+        path.join(javaDir, 'RainMusicListWriteLock.java'),
       ],
       dir,
       path.join(dir, 'javac.log'),

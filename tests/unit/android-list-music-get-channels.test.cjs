@@ -66,6 +66,7 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const { test, after } = require('node:test')
 const load = require('./load-ts.cjs')
+const assertCheckedJsonSignatures = require('./json-checked-exception-probe.cjs')
 
 const ROOT = path.join(__dirname, '../..')
 const BRIDGE_MODULE = 'src/common/platform/ipcBridge/capacitor.js'
@@ -687,10 +688,10 @@ test('合并警告：只在 default 上判、节流、说的是"已去重写回"
   assert.equal((getCode.match(/Logger\.warn\(/g) ?? []).length, 2, '两处 warn：meta 为 NULL、合并成功')
 })
 
-test('并发：一把只护 default 去重写回的专用锁（从 SELECT 之前开始），非 default 不进锁', () => {
-  // 只有一个 synchronized，锁是一个 private static final 的专用对象（不是 WRITE_LOCK、不是 DB 的单例）。
+test('并发：default 去重使用列表共用写锁（从 SELECT 之前开始），非 default 读不进锁', () => {
+  // 保留本文件的锁别名，共用 monitor 还覆盖歌曲新增和歌单删除。
   assert.equal((getCode.match(/synchronized/g) ?? []).length, 1, '这条通道只该有一处 synchronized')
-  assert.match(getCode, /private static final Object DEFAULT_QUEUE_MERGE_LOCK = new Object\(\);/)
+  assert.match(getCode, /private static final Object DEFAULT_QUEUE_MERGE_LOCK = RainMusicListWriteLock\.LOCK;/)
   assert.match(getCode, /synchronized \(DEFAULT_QUEUE_MERGE_LOCK\) \{\s*return readListMusics\(context, listId, true\);/)
   assert.ok(!getCode.includes('WRITE_LOCK'), '这条通道与第三刀那把 SharedPreferences 写锁无关（不许混用）')
   assert.ok(!getCode.includes('RainMusicStoreLock'), '不许引用 SharedPreferences 那把锁')
@@ -844,6 +845,13 @@ const SKIP_REASON = JAVAC_AVAILABLE
   ? false
   : '本机没有可用的 javac（JDK）⇒ 这一条"用手写替身编过一遍"的用例无法执行'
 
+test('JSON 替身负向验证：读通道的 put / 字符串构造器必须要求处理 JSONException', { skip: SKIP_REASON }, () => {
+  assertCheckedJsonSignatures(STUBS, [
+    ['UncheckedObjectPut', 'new JSONObject().put("name", (Object) "value")'],
+    ['UncheckedObjectConstructor', 'new JSONObject("{}")'],
+  ])
+})
+
 const temporaryDirs = []
 after(() => {
   for (const dir of temporaryDirs) fs.rmSync(dir, { recursive: true, force: true })
@@ -884,6 +892,7 @@ test('用 javac + 手写替身把本刀的文件（含没改过的 DB / 注册�
     path.join(javaDir, 'RainMusicLogThrottle.java'),
     path.join(javaDir, 'RainMusicDatabase.java'),
     path.join(javaDir, 'RainMusicIpcHandlers.java'),
+    path.join(javaDir, 'RainMusicListWriteLock.java'),
   ]
   // -sourcepath 指向替身目录：这样 javac 只会去那里找 RainMusicIpcPlugin（而不是仓库里那个真的，
   // 那个依赖整个 Capacitor SDK）。仓库里的 5 个真文件是**显式**列出来的，照样编。

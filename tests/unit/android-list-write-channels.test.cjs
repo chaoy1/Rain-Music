@@ -537,11 +537,11 @@ test('事务：整批改名在一个事务里（对齐 dbHelper.ts:99-105 的 up
 // 3. 锁与 emit 的位置（本刀最容易写错、且写错了本机完全静默的两处）
 // ---------------------------------------------------------------------------
 
-test('锁：private static final Object LIST_WRITE_LOCK（三条写通道共用；不是 RainMusicStoreLock）', () => {
+test('锁：LIST_WRITE_LOCK 与歌曲新增 / default 去重共用列表写锁；不是 RainMusicStoreLock', () => {
   assert.match(
     writeCode,
-    /private\s+static\s+final\s+Object\s+LIST_WRITE_LOCK\s*=\s*new\s+Object\(\)\s*;/,
-    '锁必须是文件私有的 static final Object（三条写通道共用同一把）',
+    /private\s+static\s+final\s+Object\s+LIST_WRITE_LOCK\s*=\s*RainMusicListWriteLock\.LOCK\s*;/,
+    '三条写通道的别名必须指向列表共用 monitor',
   )
   // ⚠️ 第九刀-b：本文件有**两个**临界区（第八刀改名的 `applyListUpdates` + 第九刀-a 新建的
   // `applyListAdds`）；第十刀-b 起是**三个**（第十刀-a 删除的 `applyListRemoves`）。**一条都不许省**：
@@ -611,7 +611,7 @@ test('emit 在**提交成功之后**、**锁外**；update / remove 的载荷是
 
   const emitIndex = writeCode.indexOf('ctx.emitTo(CHANNEL_LIST_UPDATE, listInfos)')
   assert.ok(emitIndex > -1, 'emit 调用必须逐字是 ctx.emitTo(CHANNEL_LIST_UPDATE, listInfos)')
-  assert.ok(emitIndex > writeCode.indexOf('applyListUpdates(db, listInfos);'), 'emit 必须晚于写库调用（提交成功之后）')
+  assert.match(writeCode, /RainMusicListWriteLock\.runAndBroadcast\(\s*\(\) -> applyListUpdates\(db, listInfos\),\s*\(\) -> ctx\.emitTo\(CHANNEL_LIST_UPDATE, listInfos\)\s*\)/)
 
   // ⚠️ 第九刀-b：**两条通道的载荷形状不同形**，所以这里必须是**两条**断言，而不是一条
   // 打不中的正则（`readListInfos` 被参数化之后是跨行调用，`/…readListInfos\(args\)/` 匹配不到）。
@@ -635,7 +635,7 @@ test('emit 在**提交成功之后**、**锁外**；update / remove 的载荷是
   assert.ok(!addWriteMethod.body.includes('emitTo'), 'add 的写库方法里也不许 emit')
   assert.ok(!addWriteMethod.body.includes('RequestContext'), 'add 的写库方法连 ctx 都不该拿到')
   assert.ok(
-    writeCode.indexOf('ctx.emitTo(CHANNEL_LIST_ADD, payload)') > writeCode.indexOf('applyListAdds(db, position, additions);'),
+    /RainMusicListWriteLock\.runAndBroadcast\(\s*\(\) -> applyListAdds\(db, position, additions\),\s*\(\) -> ctx\.emitTo\(CHANNEL_LIST_ADD, payload\)\s*\)/.test(writeCode),
     'add 的 emit 必须晚于写库调用（提交成功之后）',
   )
   // (c) 第十刀-b：remove 也是**裸数组**（与 update 同形、与 add 不同形）—— `readRemoveIds` 把
@@ -647,7 +647,7 @@ test('emit 在**提交成功之后**、**锁外**；update / remove 的载荷是
   assert.ok(!removeWriteMethod.body.includes('emitTo'), 'remove 的写库方法里也不许 emit')
   assert.ok(!removeWriteMethod.body.includes('RequestContext'), 'remove 的写库方法连 ctx 都不该拿到')
   assert.ok(
-    writeCode.indexOf('ctx.emitTo(CHANNEL_LIST_REMOVE, ids)') > writeCode.indexOf('applyListRemoves(db, ids);'),
+    /RainMusicListWriteLock\.runAndBroadcast\(\s*\(\) -> applyListRemoves\(db, ids\),\s*\(\) -> ctx\.emitTo\(CHANNEL_LIST_REMOVE, ids\)\s*\)/.test(writeCode),
     'remove 的 emit 必须晚于写库调用（提交成功之后）',
   )
   // 三条 emit 都在**锁块外**：三块里一块都不许出现 emitTo（逐块，不是"整份源码 indexOf"）。
@@ -2488,6 +2488,7 @@ const compileOnce = (() => {
       path.join(stubRoot, 'com/rainmusic/mobile/ipc/WriteProbe.java'),
       path.join(ROOT, JAVA_REL_DIR, 'RainMusicListWriteChannels.java'),
       path.join(ROOT, JAVA_REL_DIR, 'RainMusicIpcHandlers.java'),
+      path.join(ROOT, JAVA_REL_DIR, 'RainMusicListWriteLock.java'),
     ], { encoding: 'utf8' })
     cached = {
       outDir,
@@ -3107,9 +3108,11 @@ test('JVM 探针（第十刀-a）：两个线程同时 remove ⇒ 同一时刻�
   assert.equal(field(report, s, 'commitCount'), '2')
   assert.equal(field(report, s, 'emitCount'), '2')
   assert.equal(field(report, s, 'executed'), '12', '两趟各 2 个 id × 3 句')
-  assert.equal(field(report, s, 'binds'),
-    '1:a-1,1:a-1,1:a-1,1:a-2,1:a-2,1:a-2,1:b-1,1:b-1,1:b-1,1:b-2,1:b-2,1:b-2',
-    '两趟各自的"每个 id 三句"都完整（没有交错成一个 id 一句）')
+  const bindings = field(report, s, 'binds').split(',')
+  assert.deepEqual([bindings.slice(0, 6).join(','), bindings.slice(6).join(',')].sort(), [
+    '1:a-1,1:a-1,1:a-1,1:a-2,1:a-2,1:a-2',
+    '1:b-1,1:b-1,1:b-1,1:b-2,1:b-2,1:b-2',
+  ].sort(), '每趟的三句绑定必须连续；JVM 可以先调度任一线程，不能要求 a 线程一定先拿锁')
 })
 
 test('JVM 探针（第十刀-b）：插队整表重写时 sourceListId 的 ".0" 已被归一（老库 "123.0" ⇒ 写回 "123"）', { skip: SKIP_REASON }, () => {

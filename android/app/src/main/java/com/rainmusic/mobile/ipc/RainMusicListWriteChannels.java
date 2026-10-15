@@ -146,9 +146,9 @@ import java.util.List;
  *
  * <h2>{@code LIST_WRITE_LOCK}：它护什么、护不到什么</h2>
  *
- * <p>{@link #LIST_WRITE_LOCK} 是 <b>{@code static final} 的文件私有锁</b>，三条写通道
+ * <p>{@link #LIST_WRITE_LOCK} 是 <b>{@code static final} 的文件私有别名</b>，指向列表共用 monitor；三条写通道
  * （第八刀的 {@code player_list_update}，第九刀-a 的 {@code player_list_add}，第十刀-a 的
- * {@code player_list_remove}）**共用**它。临界区 = {@code [beginTransaction … commit]} 那一段，
+ * {@code player_list_remove}）以及歌曲新增与 default 去重**共用**它。临界区 = {@code [beginTransaction … commit]} 那一段，
  * 也就是"[改 {@code my_list} 的那条（那几条）SQL]"，**不是**整个 handler。
  *
  * <p><b>为什么需要它</b>：handler 跑在 {@link RainMusicIpcPlugin} 的**固定 2 线程池**里
@@ -170,7 +170,7 @@ import java.util.List;
  *       与 {@code my_list} 的 SQL 是两个完全不同的资源、不同的失败模式。
  *       <b>不要把两者合并、也不要互相嵌套</b>：它们没有共同的顺序问题，混用只会制造
  *       一把更宽的锁与一处新的死锁风险。</li>
- *   <li><b>广播</b>。见下：emit 刻意在锁外。</li>
+ *   <li><b>广播</b>。事件在提交后、锁内入 FIFO，锁外串行发布，避免提交与广播逆序。</li>
  * </ol>
  *
  * <h2>emit 的位置：提交成功之后、锁外</h2>
@@ -324,7 +324,7 @@ import java.util.List;
  *       <td>绝不 catch 之后返回"成功"（见「emit 的位置」）</td></tr>
  *   <tr><td><b>广播载荷组装失败</b>（{@code JSONObject.put} 的受检 {@code JSONException} ——
  *       {@link #listAdd} 因此声明了 {@code throws JSONException}）</td>
- *       <td>reject，异常原样冒泡成 {@code ok:false}；⚠️ 此时**库已提交、广播没发**（这一分支在真机上
+ *       <td>reject，异常原样冒泡成 {@code ok:false}；载荷在写库前构造，此时**尚未提交、广播没发**（这一分支在真机上
  *           不可达：键是常量、值不是 NaN / Infinity，见 {@code payload} 那一段）</td>
  *       <td>本文件全篇零 {@code catch}：受检异常靠<b>声明</b>冒泡，而不是靠一个吞掉它的 {@code catch}
  *           换一个"看起来干净"的返回值。真 AOSP 声明了这个受检异常，替身也必须声明（否则本机探针
@@ -558,12 +558,12 @@ public final class RainMusicListWriteChannels {
      * 三条歌单写通道（{@code player_list_add} / {@code player_list_update} /
      * {@code player_list_remove}）**共用**的串行化锁。
      *
-     * <p>{@code static final} ⇒ 进程内唯一；{@code private} ⇒ 只有本文件的 handler 能拿它，
-     * 名符其实地"文件私有"。它**不是** {@link RainMusicStoreLock}（那把锁护
+     * <p>{@code private} 只限制这个别名的可见性；实际对象来自 {@link RainMusicListWriteLock}，
+     * 与歌曲写入及 default 去重共用。它**不是** {@link RainMusicStoreLock}（那把锁护
      * {@code SharedPreferences} 的整份快照），**也管不到别的 SQLite 连接**（线 A / 插件）——
      * 逐条理由见类注释「{@code LIST_WRITE_LOCK}：它护什么、护不到什么」。
      */
-    private static final Object LIST_WRITE_LOCK = new Object();
+    private static final Object LIST_WRITE_LOCK = RainMusicListWriteLock.LOCK;
 
     /**
      * 改一行歌单。逐字抄 {@code src/main/worker/dbService/modules/list/statements.ts:56-62}
@@ -792,13 +792,15 @@ public final class RainMusicListWriteChannels {
         );
 
         SQLiteDatabase db = RainMusicDatabase.open(context, RainMusicDatabase.TABLE_MY_LIST);
-        applyListUpdates(db, listInfos);
+        RainMusicListWriteLock.runAndBroadcast(
+            () -> applyListUpdates(db, listInfos),
+            () -> ctx.emitTo(CHANNEL_LIST_UPDATE, listInfos)
+        );
 
         // 只有走到这里才广播：SQL 已经提交（applyListUpdates 正常返回 ⇒ 事务成功），
         // 且**在锁外**（见类注释「emit 的位置」）。载荷 = 调用方传来的那个数组本身，
         // 与桌面 ListEvent.ts:73 把**同一个 lists 对象**往后传是同一件事
         // （桌面也从不回读库来拼广播的载荷）。
-        ctx.emitTo(CHANNEL_LIST_UPDATE, listInfos);
 
         Logger.info(
             TAG,
@@ -871,7 +873,6 @@ public final class RainMusicListWriteChannels {
         List<ListRow> additions = buildPayloadRows(listInfos);
 
         SQLiteDatabase db = RainMusicDatabase.open(context, RainMusicDatabase.TABLE_MY_LIST);
-        applyListAdds(db, position, additions);
 
         // 只有走到这里才广播：事务**已提交**（applyListAdds 正常返回）且**在锁外**。
         // 载荷是**对象** {position, listInfos}，逐字对齐 winRendererEvent.ts:10 的
@@ -887,12 +888,14 @@ public final class RainMusicListWriteChannels {
         // 才报 "unreported exception JSONException"（本文件第 869 / 870 行）。
         // 处理方式：**声明**（见本方法的 `throws`）而**不**写 `catch` —— 本文件全篇零 `catch`，
         // 失败一律冒泡出 handler 变成 `ok:false` + 原始异常（见类注释「失败语义」那一节）。
-        // 代价写明：这两行若真的抛，库**已经提交**（applyListAdds 已返回）、广播**没发出去** ——
-        // 渲染层那份 userLists 会与库分叉。这个分支不可达，所以本通道不为它发明一个"假装成功"的退路。
+        // 现在在写库前组装载荷；序列化失败时尚未提交，避免库与渲染层分叉。
         JSONObject payload = new JSONObject();
         payload.put(FIELD_POSITION, position);
         payload.put(FIELD_LIST_INFOS, listInfos);
-        ctx.emitTo(CHANNEL_LIST_ADD, payload);
+        RainMusicListWriteLock.runAndBroadcast(
+            () -> applyListAdds(db, position, additions),
+            () -> ctx.emitTo(CHANNEL_LIST_ADD, payload)
+        );
 
         Logger.info(
             TAG,
@@ -1335,7 +1338,10 @@ public final class RainMusicListWriteChannels {
             TABLE_MY_LIST_MUSIC_INFO,
             TABLE_MY_LIST_MUSIC_INFO_ORDER
         );
-        applyListRemoves(db, ids);
+        RainMusicListWriteLock.runAndBroadcast(
+            () -> applyListRemoves(db, ids),
+            () -> ctx.emitTo(CHANNEL_LIST_REMOVE, ids)
+        );
 
         // 只有走到这里才广播：事务**已提交**（applyListRemoves 正常返回）且**在锁外**。
         // 载荷 = 调用方传来的那个数组本身（与桌面 ListEvent.ts:63 把**同一个 ids** 往后传一致），
@@ -1343,7 +1349,6 @@ public final class RainMusicListWriteChannels {
         // 渲染层 rendererListManage.ts:185-188 的 `list_remove = ({params: ids}) => …` 是按数组解的。
         // 包成 `{ids: […]}` 会让 action.ts:163 的 `for (const id of ids)` 立刻 TypeError，而那个异常
         // 会被桥吞成一条 console.error（capacitor.js:464-467）⇒ 界面完全不动、调用方也拿不到 reject。
-        ctx.emitTo(CHANNEL_LIST_REMOVE, ids);
 
         Logger.info(
             TAG,

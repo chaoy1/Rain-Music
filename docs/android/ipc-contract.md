@@ -105,7 +105,7 @@
 | `player_list_update_position` | `updateUserListPosition` `R:listManage:63` | `M:list:21` | `{position, ids}` → `void` | 歌单排序 |
 | `player_list_data_overwire` | 双向：`overwriteUserLists` `R:listManage:149`；监听 `R:listManage:228` | 接收 `M:list:9`；发送 `M:listSend:7` | `Rain.List.ListActionDataOverwrite` → `void` | 整表覆盖（导入备份） |
 | `player_list_music_get` | `getListMusics` `R:listManage:73` | `M:list:24` | `listId: string` → `Rain.Music.MusicInfo[]` | 读歌单内歌曲 |
-| `player_list_music_add` | `addListMusics` `R:listManage:82` | `M:list:27` | `{id, musicInfos, addMusicLocationType}` → `void` | 加歌 |
+| `player_list_music_add` | 双向：`addListMusics` `R:listManage:82`；监听 `list_music_add` | 接收 `M:list:27`；发送 `M:listSend` 的 `list_music_add` | `{id, musicInfos, addMusicLocationType}` → `void`；同名广播同形对象 | 加歌（Android 已接入） |
 | `player_list_music_move` | `moveListMusics` `R:listManage:90` | `M:list:30` | `{fromId, toId, musicInfos, addMusicLocationType}` → `void` | 跨歌单移动 |
 | `player_list_music_remove` | `removeListMusics` `R:listManage:98` | `M:list:33` | `{listId, ids}` → `void` | 移除歌曲 |
 | `player_list_music_update` | `updateListMusics` `R:listManage:106` | `M:list:36` | `musicInfos[]` → `void` | 更新歌曲元信息 |
