@@ -55,6 +55,18 @@ public final class RainMusicDownloadTaskChannels {
         if (!(value instanceof JSONObject)) throw new IllegalArgumentException(name + " must be an object");
         return (JSONObject)value;
     }
+    /**
+     * 已下载字节数。**空/缺省当 0**，但**类型不对就大声抛**（不猜、不当 0 —— 见类注释的"不假装成功"）。
+     * 桌面侧的对应取值是 `downloadInfo.downloaded`（`store/download/action.ts` 的列表项字段）。
+     */
+    private static long number(JSONObject object, String name, long fallback) {
+        Object value = object.opt(name);
+        if (value == null || value == JSONObject.NULL) return fallback;
+        if (!(value instanceof Number)) throw new IllegalArgumentException(name + " must be a number");
+        double raw = ((Number)value).doubleValue();
+        if (!Double.isFinite(raw) || raw < 0) throw new IllegalArgumentException(name + " must be a non-negative finite number");
+        return (long)raw;
+    }
     private static JSONObject json(Object... pairs) throws Exception {
         JSONObject value = new JSONObject();
         for(int i=0; i<pairs.length; i+=2) value.put((String)pairs[i], pairs[i+1]);
@@ -99,7 +111,7 @@ public final class RainMusicDownloadTaskChannels {
         JSONObject metadata = object(info, "metadata");
         String id = string(info, "id");
         File file = target(metadata, params);
-        Task task = new Task(id, string(params, "token"), url(string(metadata, "url")), file, proxy(params), Boolean.TRUE.equals(params.opt("skipExistFile")), ctx);
+        Task task = new Task(id, string(params, "token"), url(string(metadata, "url")), file, proxy(params), Boolean.TRUE.equals(params.opt("skipExistFile")), number(info, "downloaded", 0L), ctx);
         synchronized(gate) {
             for (Task active : tasks.values()) if (!active.cancelled && !active.id.equals(id) && active.file.equals(file)) throw new IllegalStateException("Another task already owns this download path");
             Task previous = tasks.put(id, task);
@@ -115,7 +127,7 @@ public final class RainMusicDownloadTaskChannels {
             Task old = tasks.get(id);
             if (old == null || old.cancelled) throw new IllegalStateException("No live download task for " + id);
             if (params.opt("token") instanceof String && !old.token.equals(params.opt("token"))) return null;
-            Task next = new Task(id, old.token, url, old.file, old.proxy, old.skip, ctx);
+            Task next = new Task(id, old.token, url, old.file, old.proxy, old.skip, old.downloaded, ctx);
             old.stop(); tasks.put(id, next); executor.execute(() -> transfer(next));
         }
         return null;
@@ -130,6 +142,9 @@ public final class RainMusicDownloadTaskChannels {
         }
         // Removing a queue item never deletes a completed media file. A .part
         // is retained too, so deleting/recreating the record can safely resume.
+        // (A *rejected* resume is the opposite case: `resumeRejected()` discards
+        // the unusable partial, because keeping it makes every retry fail
+        // identically forever. See that method.)
     }
     private boolean live(Task task) { return tasks.get(task.id) == task && !task.cancelled; }
     private Object lock(File path) { return pathLocks.computeIfAbsent(path.getPath(), key -> new Object()); }
@@ -148,7 +163,14 @@ public final class RainMusicDownloadTaskChannels {
                 if (!live(task)) return;
                 File parent = task.file.getParentFile();
                 if (!parent.isDirectory() && !parent.mkdirs()) throw new IOException("Cannot create private download directory");
-                if (task.skip && task.file.exists()) throw new IOException("Destination already exists");
+                // 桌面等价物：`src/renderer/worker/download/download.ts:73-84`。
+                // "跳过已存在文件"这条检查**只在还没下过任何字节时（`downloaded == 0`）**生效，
+                // 且**只有大于 100 字节**的残留才算"已存在"（≤100 字节当作没有，直接重下）。
+                // 原来的写法是无条件 `file.exists()` ⇒ 只要目标文件在，**每一次重试都失败**：
+                // 典型触发是"文件已改名、但按 100 ms 节流写的 DB 还没来得及记完成"
+                // （`store/download/action.ts` 的节流写入），此后这条记录永远下不了。
+                // `skip == false` 分支不需要先删：下面 `move()` 是原子替换，等价于桌面的先删后写。
+                if (task.downloaded == 0 && task.skip && task.file.isFile() && task.file.length() > 100) throw new IOException("Destination already exists");
                 File part = new File(task.file.getPath() + ".part");
                 File manifest = new File(task.file.getPath() + ".resume");
                 Properties saved = new Properties();
@@ -170,7 +192,7 @@ public final class RainMusicDownloadTaskChannels {
                 if (status == 401 || status == 403 || status == 410) { emit(task, "refreshUrl", null); return; }
                 if (status != 200 && status != 206) throw new IOException("HTTP " + status);
                 String encoding = connection.getHeaderField("Content-Encoding");
-                if (encoding != null && !encoding.equalsIgnoreCase("identity")) throw new IOException("Encoded response cannot be resumed safely");
+                if (encoding != null && !encoding.equalsIgnoreCase("identity")) throw resumeRejected(part, manifest, offset, "Encoded response cannot be resumed safely");
                 long length = parseLong(connection.getHeaderField("Content-Length"), -1);
                 if (length < 1) throw new IOException("A positive Content-Length is required to verify download completeness");
                 long total = length;
@@ -180,12 +202,12 @@ public final class RainMusicDownloadTaskChannels {
                 if (status == 206) {
                     // Redirect destinations are resource identities too: equal
                     // validators at distinct targets cannot authorize append.
-                    if (offset > 0 && !responseUrl.equals(saved.getProperty("responseUrl"))) throw new IOException("Resume redirect target changed");
+                    if (offset > 0 && !responseUrl.equals(saved.getProperty("responseUrl"))) throw resumeRejected(part, manifest, offset, "Resume redirect target changed");
                     Matcher match = RANGE.matcher(Objects.toString(connection.getHeaderField("Content-Range"), ""));
-                    if (!match.matches()) throw new IOException("Invalid Content-Range");
+                    if (!match.matches()) throw resumeRejected(part, manifest, offset, "Invalid Content-Range");
                     long begin = Long.parseLong(match.group(1)), end = Long.parseLong(match.group(2));
                     total = Long.parseLong(match.group(3));
-                    if (begin != offset || end < begin || end != total - 1 || end - begin + 1 != length || (offset > 0 && (savedTotal != total || !validator.equals(currentValidator)))) throw new IOException("Resume validation failed");
+                    if (begin != offset || end < begin || end != total - 1 || end - begin + 1 != length || (offset > 0 && (savedTotal != total || !validator.equals(currentValidator)))) throw resumeRejected(part, manifest, offset, "Resume validation failed");
                 } else offset = 0; // Server ignored Range/If-Range: replace the partial body.
                 Properties resume = new Properties();
                 resume.setProperty("total", Long.toString(total));
@@ -212,10 +234,12 @@ public final class RainMusicDownloadTaskChannels {
                     if (downloaded != total) throw new EOFException("Truncated response: " + downloaded + "/" + total);
                     output.flush(); output.getFD().sync();
                 }
+                // 清单要在改名**之前**删掉：删不动就抛，此时媒体文件还没提交 ⇒ 这次失败是
+                // "什么都没发生"（`.part` 还在、可以重试），而不是"文件已经落盘了却被报成 error"。
                 synchronized(gate) {
                     if (!live(task)) return;
-                    move(part, task.file);
                     if (manifest.exists() && !manifest.delete()) throw new IOException("Cannot remove resume manifest");
+                    move(part, task.file);
                     emit(task, "complete", null);
                 }
             } catch(Exception error) {
@@ -228,6 +252,31 @@ public final class RainMusicDownloadTaskChannels {
         }
     }
     private static long parseLong(String text, long fallback) { try {return Long.parseLong(text);} catch(Exception ignored) {return fallback;} }
+    /**
+     * 服务器**拒绝这次续传**时用：先把接不上的部分下载丢掉，再抛出**同一条**错误。
+     *
+     * 桌面等价物：`src/renderer/worker/download/download.ts:145-155` —— 收到
+     * `Resume failed` 时**先删掉那个文件，再从头重启**。原生的部分数据在 `.part` / `.resume`
+     * （以及 `.resume` 的临时文件 `.resume.part`）里，所以等价动作是把这三个删掉。
+     *
+     * **不删的后果是永久卡死**：下一次重试会发出**一模一样**的 `Range` + `If-Range`
+     * （`id` / `url` / 校验子都没变），得到一模一样的拒绝；而 `remove` 又刻意保留这两个文件
+     * （见 `cancel()` 的注释），于是除了清应用数据没有别的出路。
+     *
+     * **只对"服务器明确拒绝了这次续传"的场合调用**（编码异常、重定向目标变了、
+     * `Content-Range` 非法、range/校验子对不上）；瞬时错误（5xx / 超时 / 断流）**不**丢进度。
+     * `offset <= 0` 时根本没有 `.part` 可丢，直接返回原错误。
+     *
+     * 清理失败**不吞**：把它并进错误信息，所以调用方看到的仍然是一条大声的失败，而不是"重置成功"。
+     */
+    private static IOException resumeRejected(File part, File manifest, long offset, String message) {
+        if (offset <= 0) return new IOException(message);
+        String failed = null;
+        for (File file : new File[] { part, manifest, new File(manifest.getPath() + ".part") }) {
+            if (file.exists() && !file.delete() && failed == null) failed = file.getPath();
+        }
+        return new IOException(failed == null ? message : message + "；且无法清理部分下载文件：" + failed);
+    }
     private static void move(File from, File to) throws Exception { Os.rename(from.getPath(), to.getPath()); }
     private static void atomicProperties(File file, Properties properties) throws Exception {
         File temp = new File(file.getPath()+".part");
@@ -263,15 +312,23 @@ public final class RainMusicDownloadTaskChannels {
             frame(frames,"TALB",textFrame(params.opt("album")));
             Object lyric = params.opt("lyrics");
             if (lyric instanceof String && !((String)lyric).isEmpty()) {
-                ByteArrayOutputStream content=new ByteArrayOutputStream();content.write(new byte[]{1,'e','n','g',0,0});content.write(((String)lyric).getBytes(StandardCharsets.UTF_16));frame(frames,"USLT",content.toByteArray());
+                // 桌面等价物：`src/common/utils/musicMeta/mp3Meta.js:9-12` 的 `language: 'zho'`
+                // （原来写的是 'eng'，同一首歌在两个平台会带不同的歌词帧）。
+                ByteArrayOutputStream content=new ByteArrayOutputStream();content.write(new byte[]{1,'z','h','o',0,0});content.write(((String)lyric).getBytes(StandardCharsets.UTF_16));frame(frames,"USLT",content.toByteArray());
             }
             Object picture=params.opt("APIC");
             if (picture != null && picture != JSONObject.NULL && !"".equals(picture)) {
                 if (!(picture instanceof String)) throw new IllegalArgumentException("APIC must be an HTTP(S) URL");
-                byte[] image=cover(url((String)picture),proxy(params));
-                String mime=image.length>=8 && image[0]==(byte)0x89 && image[1]=='P' && image[2]=='N' && image[3]=='G'?"image/png":image.length>=3 && image[0]==(byte)0xff && image[1]==(byte)0xd8 && image[2]==(byte)0xff?"image/jpeg":null;
-                if(mime==null) throw new IOException("Cover must be a PNG or JPEG image");
-                ByteArrayOutputStream content=new ByteArrayOutputStream();content.write(0);content.write(mime.getBytes(StandardCharsets.ISO_8859_1));content.write(new byte[]{0,3,0});content.write(image);frame(frames,"APIC",content.toByteArray());
+                // 封面是**尽力而为**：桌面 `mp3Meta.js:29-36` 在封面下载失败时
+                // `delete meta.APIC`，然后**照样把标签写下去**。所以这里取不到图、或拿到的不是
+                // PNG/JPEG（例如 webp）时，只丢封面 —— **不能**让整个 write_meta 作废，
+                // 否则标题、歌手、专辑和歌词会因为一张图全部写不进去。
+                // 非 http(s) 的 APIC 也走这条（桌面 `mp3Meta.js:19-22` 同样是丢掉它继续写）。
+                Proxy coverProxy=proxy(params);
+                byte[] image=null;
+                try{image=cover(coverUrl((String)picture),coverProxy);}catch(Exception ignored){image=null;}
+                String mime=image==null?null:image.length>=8 && image[0]==(byte)0x89 && image[1]=='P' && image[2]=='N' && image[3]=='G'?"image/png":image.length>=3 && image[0]==(byte)0xff && image[1]==(byte)0xd8 && image[2]==(byte)0xff?"image/jpeg":null;
+                if(mime!=null){ByteArrayOutputStream content=new ByteArrayOutputStream();content.write(0);content.write(mime.getBytes(StandardCharsets.ISO_8859_1));content.write(new byte[]{0,3,0});content.write(image);frame(frames,"APIC",content.toByteArray());}
             }
             byte[] tag=frames.toByteArray();
             if(tag.length>0x0fffffff)throw new IOException("ID3 tag too large");
@@ -303,6 +360,19 @@ public final class RainMusicDownloadTaskChannels {
         if(content.length==0)return;
         output.write(name.getBytes(StandardCharsets.ISO_8859_1));int size=content.length;output.write(new byte[]{(byte)(size>>24),(byte)(size>>16),(byte)(size>>8),(byte)size,0,0});output.write(content);
     }
+    /**
+     * 封面 URL 的桌面等价物：`src/common/utils/musicMeta/mp3Meta.js:28`。
+     *
+     * 网易云的图要追加 `param=500y500`，否则拿到的是 CDN 默认尺寸的那张 ——
+     * 与桌面嵌进标签的**不是同一张图**。
+     * 这里**复用** `url()` 的校验，所以非 http(s) / 带 userinfo 的地址会抛；
+     * 调用方把这次抛出当成"封面拿不到"，按桌面 `mp3Meta.js:19-22` 丢掉封面继续写标签。
+     */
+    private static URL coverUrl(String raw) throws Exception {
+        String value = raw;
+        if (value.contains("music.126.net")) value += (value.contains("?") ? "&" : "?") + "param=500y500";
+        return url(value);
+    }
     private static byte[] cover(URL url,Proxy proxy) throws Exception {
         HttpURLConnection connection=(HttpURLConnection)url.openConnection(proxy);
         connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
@@ -316,9 +386,9 @@ public final class RainMusicDownloadTaskChannels {
         } finally {connection.disconnect();}
     }
     private static final class Task {
-        final String id,token;final URL url;final File file;final Proxy proxy;final boolean skip;final RainMusicIpcHandlers.RequestContext ctx;
+        final String id,token;final URL url;final File file;final Proxy proxy;final boolean skip;final long downloaded;final RainMusicIpcHandlers.RequestContext ctx;
         volatile boolean cancelled;volatile HttpURLConnection connection;
-        Task(String id,String token,URL url,File file,Proxy proxy,boolean skip,RainMusicIpcHandlers.RequestContext ctx){this.id=id;this.token=token;this.url=url;this.file=file;this.proxy=proxy;this.skip=skip;this.ctx=ctx;}
+        Task(String id,String token,URL url,File file,Proxy proxy,boolean skip,long downloaded,RainMusicIpcHandlers.RequestContext ctx){this.id=id;this.token=token;this.url=url;this.file=file;this.proxy=proxy;this.skip=skip;this.downloaded=downloaded;this.ctx=ctx;}
         void stop(){cancelled=true;HttpURLConnection current=connection;if(current!=null)current.disconnect();}
     }
 }

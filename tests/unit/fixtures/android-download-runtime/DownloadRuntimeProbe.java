@@ -19,6 +19,7 @@ public final class DownloadRuntimeProbe {
     static volatile boolean ranged;
     static volatile boolean changedValidator;
     static volatile boolean redirectChanged;
+    static volatile String coverQuery;
     static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
     static JSONObject json(Object... values) throws Exception { JSONObject object = new JSONObject(); for (int i=0;i<values.length;i+=2) object.put((String)values[i],values[i+1]); return object; }
     static Object invoke(String name, JSONObject value) throws Exception { return RainMusicIpcHandlers.get("winMain_download_task_"+name).handle(Collections.singletonList(value),new RainMusicIpcHandlers.RequestContext("p", name)); }
@@ -42,7 +43,8 @@ public final class DownloadRuntimeProbe {
                 if(route.equals("/expired")){exchange.sendResponseHeaders(403,-1);return;}
                 if(route.equals("/error")){exchange.sendResponseHeaders(500,-1);return;}
                 if(route.equals("/redirect")){exchange.getResponseHeaders().set("Location",redirectChanged?"/other":"/slow");exchange.sendResponseHeaders(302,-1);return;}
-                if(route.equals("/cover")){byte[] image={(byte)0xff,(byte)0xd8,(byte)0xff,(byte)0xd9};exchange.sendResponseHeaders(200,image.length);exchange.getResponseBody().write(image);return;}
+                if(route.equals("/cover126")){coverQuery=exchange.getRequestURI().getQuery();}
+                if(route.equals("/cover")||route.equals("/cover126")){byte[] image={(byte)0xff,(byte)0xd8,(byte)0xff,(byte)0xd9};exchange.sendResponseHeaders(200,image.length);exchange.getResponseBody().write(image);return;}
                 int offset=0; String range=exchange.getRequestHeaders().getFirst("Range");
                 if(range!=null){offset=Integer.parseInt(range.substring(6,range.length()-1));ranged=true;}
                 if(!route.equals("/no-validator"))exchange.getResponseHeaders().set("ETag",route.equals("/changed-etag")&&changedValidator?"\"changed\"":"\"stable\"");
@@ -70,26 +72,47 @@ public final class DownloadRuntimeProbe {
             start("slow","/slow","slow.mp3");waitFor("slow","complete");check(ranged,"paused part resumed with Range after executor restart");check(Arrays.equals(DATA,Files.readAllBytes(new File(root,"downloads/slow.mp3").toPath())),"resume bytes");
             start("bad","/bad-range","bad.mp3");waitFor("bad","progress");invoke("pause",json("id","bad"));Thread.sleep(100);
             start("bad","/bad-range","bad.mp3");waitFor("bad","error");check(!has("bad","complete"),"invalid Content-Range cannot complete");
+            // 被拒的续传必须把接不上的部分丢掉，否则每次重试都发一模一样的 Range/If-Range、
+            // 得到一模一样的失败 ⇒ 永久卡死（而 remove 又刻意保留这两个文件）。
+            check(!new File(root,"downloads/bad.mp3.part").exists(),"a rejected resume must discard the unusable partial");
+            check(!new File(root,"downloads/bad.mp3.resume").exists(),"a rejected resume must discard the resume manifest");
+            start("bad","/bad-range","bad.mp3");waitFor("bad","complete");check(Arrays.equals(DATA,Files.readAllBytes(new File(root,"downloads/bad.mp3").toPath())),"a retry after a rejected resume must succeed");
             start("ignored","/ignore","ignored.mp3");waitFor("ignored","progress");invoke("pause",json("id","ignored"));Thread.sleep(100);
             start("ignored","/ignore","ignored.mp3");waitFor("ignored","complete");check(Arrays.equals(DATA,Files.readAllBytes(new File(root,"downloads/ignored.mp3").toPath())),"200 after Range must restart");
             start("changed","/changed-etag","changed.mp3");waitFor("changed","progress");invoke("pause",json("id","changed"));Thread.sleep(100);changedValidator=true;
-            start("changed","/changed-etag","changed.mp3");waitFor("changed","error");check(!has("changed","complete"),"changed validator must never append");
+            start("changed","/changed-etag","changed.mp3");waitFor("changed","error");check(!has("changed","complete"),"changed validator must never append");check(!new File(root,"downloads/changed.mp3.resume").exists(),"a changed validator must discard the resume manifest");
             start("cross","/slow","cross.mp3");waitFor("cross","progress");invoke("pause",json("id","cross"));Thread.sleep(100);
             start("cross","/other","cross.mp3");waitFor("cross","complete");byte[] expectedCross=new byte[DATA.length];Arrays.fill(expectedCross,(byte)42);check(Arrays.equals(expectedCross,Files.readAllBytes(new File(root,"downloads/cross.mp3").toPath())),"cross-resource ETag must not mix bytes");
             start("redirect","/redirect","redirect.mp3");waitFor("redirect","progress");invoke("pause",json("id","redirect"));Thread.sleep(100);redirectChanged=true;
-            start("redirect","/redirect","redirect.mp3");waitFor("redirect","error");check(!has("redirect","complete"),"redirect target change must not mix bytes");
+            start("redirect","/redirect","redirect.mp3");waitFor("redirect","error");check(!has("redirect","complete"),"redirect target change must not mix bytes");check(!new File(root,"downloads/redirect.mp3.resume").exists(),"a changed redirect target must discard the resume manifest");
             start("generation","/slow","generation.mp3");waitFor("generation","start");invoke("pause",json("id","generation","token","stale"));invoke("update_url",json("id","generation","token","stale","url",base+"/expired"));waitFor("generation","complete");check(!has("generation","refreshUrl"),"stale command must not affect live generation");
             try{start("escape","/ok","../escape.mp3");throw new AssertionError("traversal accepted");}catch(IllegalArgumentException expected){}
             File lyric=new File(root,"downloads/good.lrc");invoke("save_lyric",json("filePath",lyric.getPath(),"text","中文歌词","format","utf8"));check(Files.readString(lyric.toPath()).equals("\ufeff中文歌词"),"real UTF8 lyric");
             invoke("save_lyric",json("filePath",lyric.getPath(),"text","中文歌词","format","gbk"));check(Arrays.equals("中文歌词".getBytes(java.nio.charset.Charset.forName("GBK")),Files.readAllBytes(lyric.toPath())),"real GBK lyric");
             invoke("write_meta",json("filePath",good.getPath(),"title","标题","artist","Artist","album","Album","lyrics","歌词"));byte[] tagged=Files.readAllBytes(good.toPath());check(tagged[0]=='I'&&tagged[1]=='D'&&tagged[2]=='3',"real ID3 header");check(Arrays.equals(DATA,Arrays.copyOfRange(tagged,tagged.length-DATA.length,tagged.length)),"metadata preserves audio bytes");
+            int tagSize=0;for(int i=6;i<10;i++)tagSize=(tagSize<<7)|(tagged[i]&0x7f);
+            String tagRegion=new String(tagged,0,10+tagSize,StandardCharsets.ISO_8859_1);
+            check(tagRegion.contains("USLT"),"lyric frame written");
+            check(tagRegion.contains("\u0001zho\u0000\u0000"),"USLT language must match the desktop (zho, not eng)");
+            invoke("write_meta",json("filePath",good.getPath(),"title","网易","APIC",base+"/cover126?src=music.126.net"));tagged=Files.readAllBytes(good.toPath());
+            check("src=music.126.net&param=500y500".equals(coverQuery),"a music.126.net cover must get the desktop's param=500y500 rewrite");
             invoke("write_meta",json("filePath",good.getPath(),"title","标题","APIC",base+"/cover"));tagged=Files.readAllBytes(good.toPath());check(new String(tagged,StandardCharsets.ISO_8859_1).contains("APIC"),"cover is embedded as APIC");check(Arrays.equals(DATA,Arrays.copyOfRange(tagged,tagged.length-DATA.length,tagged.length)),"rewriting tags preserves audio bytes");
-            byte[] unchanged=tagged;
-            try{invoke("write_meta",json("filePath",good.getPath(),"title","Changed","APIC",base+"/expired"));throw new AssertionError("cover failure ignored");}catch(IOException expected){}
-            check(Arrays.equals(unchanged,Files.readAllBytes(good.toPath())),"failed metadata write preserves original");
+            // 封面失败**不能**让整条 write_meta 作废：桌面 `mp3Meta.js:29-36` 是丢掉 APIC 继续写。
+            invoke("write_meta",json("filePath",good.getPath(),"title","Changed","APIC",base+"/expired"));tagged=Files.readAllBytes(good.toPath());
+            check(Arrays.equals(DATA,Arrays.copyOfRange(tagged,tagged.length-DATA.length,tagged.length)),"a failed cover must still preserve audio bytes");
+            tagSize=0;for(int i=6;i<10;i++)tagSize=(tagSize<<7)|(tagged[i]&0x7f);
+            tagRegion=new String(tagged,0,10+tagSize,StandardCharsets.ISO_8859_1);
+            check(tagRegion.contains("TIT2"),"a failed cover must not drop the other frames");
+            check(!tagRegion.contains("APIC"),"a failed cover must be dropped, not embedded");
             try{invoke("save_lyric",json("filePath",new File(good,"x.lrc").getPath(),"text","lyric","format","utf8"));throw new AssertionError("write failure ignored");}catch(IOException expected){}
-            File skip=new File(root,"downloads/skip.mp3");Files.write(skip.toPath(),new byte[]{1,2,3});
-            invoke("start",json("token","skip","downloadInfo",json("id","skip","metadata",json("url",base+"/ok","fileName","skip.mp3")),"savePath","","skipExistFile",true));waitFor("skip","error");check(Arrays.equals(Files.readAllBytes(skip.toPath()),new byte[]{1,2,3}),"skip existing preserves original");
+            // 桌面契约（download.ts:73-84）："跳过已存在文件"只在 downloaded == 0 时生效，
+            // 并且只有**大于 100 字节**的残留才算"已存在"。
+            File tiny=new File(root,"downloads/tiny.mp3");Files.write(tiny.toPath(),new byte[]{1,2,3});
+            invoke("start",json("token","tiny","downloadInfo",json("id","tiny","downloaded",0,"metadata",json("url",base+"/ok","fileName","tiny.mp3")),"savePath","","skipExistFile",true));waitFor("tiny","complete");check(Arrays.equals(DATA,Files.readAllBytes(tiny.toPath())),"a leftover of 100 bytes or less must not block the download");
+            File existing=new File(root,"downloads/existing.mp3");Files.write(existing.toPath(),new byte[200]);
+            invoke("start",json("token","existing","downloadInfo",json("id","existing","downloaded",0,"metadata",json("url",base+"/ok","fileName","existing.mp3")),"savePath","","skipExistFile",true));waitFor("existing","error");check(Files.readAllBytes(existing.toPath()).length==200,"a real existing file must be preserved when skipping");
+            File resumed=new File(root,"downloads/resumed.mp3");Files.write(resumed.toPath(),new byte[200]);
+            invoke("start",json("token","resumed","downloadInfo",json("id","resumed","downloaded",1024,"metadata",json("url",base+"/ok","fileName","resumed.mp3")),"savePath","","skipExistFile",true));waitFor("resumed","complete");check(Arrays.equals(DATA,Files.readAllBytes(resumed.toPath())),"a task that already downloaded bytes must not be blocked by its own file");
             try{invoke("write_meta",json("filePath",new File(root,"downloads/x.flac").getPath()));throw new AssertionError("unsupported tag accepted");}catch(UnsupportedOperationException expected){}
             try{invoke("save_lyric",json("filePath",new File(root,"../escape.lrc").getPath(),"text","escape","format","utf8"));throw new AssertionError("outside write accepted");}catch(IllegalArgumentException expected){}
             System.out.println("DOWNLOAD_RUNTIME_OK");

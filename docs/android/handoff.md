@@ -19,7 +19,10 @@
 6. **产物互斥在真实 bundle 上复核通过**：`dist-web` 中 `ipcBridge/desktop` **0 次**、`ipcBridge/capacitor` 命中；`ipcRenderer` 出现的 4 次全部在 `src/renderer/platform/ipcRenderer/web.js` **那句故意抛错的文案里**，不是 Electron 被打了进来。
 7. **新增缺口清单**：主题、不喜欢、换源缓存、音效预设、缓存大小/清缓存、另存对话框、系统字体等通道在原生侧**一条都没注册** —— 见 §6.1。这是当前最明确的“未实现功能面”，比“待真机验收”更值得先决策。
 8. **对已推送的下载执行层做了一轮独立审查**：确认 **8 处与桌面契约不一致**，其中 **1 处 high**
-   （`skip` 检查无条件抛、resume 失败与部分文件永不回收）—— 见 **§6.2**。**全部未修**，这是下一轮的第一优先。
+   （`skip` 检查无条件抛、resume 失败后部分文件永不回收 ⇒ 用户无法自救）。
+   **本轮已修 6 处**（第 1、2、3、6、7、8，含那处 high）并做了 **6 个变异验证**；
+   剩第 4（部分文件何时回收，**需要先拍板**）与第 5（有界重试，单独立一刀）
+   —— 见 **§6.2**、**§6.2.1**、**§6.2.2**。
 9. **对歌单写入 / 媒体缓存 / 播放队列恢复做了一轮独立审查**：**没有 blocker**，
    问题集中在 `data_overwire` 的入参宽容度；其中一条（**测试替身比真 API 宽松**，
    `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。**全部未修。**
@@ -305,7 +308,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 > 但其中**主题**是用户明确点过名的方向，而且它是**唯一**会出现"未处理 rejection + 功能静默为空"的一块，
 > 所以要么补原生实现，要么在渲染层按既有 `ipcFallback` 体例显式降级 —— 不要让它停在现在这个状态。
 
-### 6.2 下载执行层：独立审查确认的 8 处与桌面不一致（**已确认、未修**；2026-10-15）
+### 6.2 下载执行层：独立审查确认的 8 处与桌面不一致（**本轮修了 6 处，剩 2 处**；2026-10-15）
 
 审查对象：提交 `2a3e4a7c` 的 `RainMusicDownloadTaskChannels.java`。方法：把原生行为逐条与桌面
 `src/renderer/worker/download/download.ts`、`src/common/utils/musicMeta/mp3Meta.js` 对照。
@@ -326,6 +329,68 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 > 真正的桌面依据是 `src/renderer/worker/download/download.ts:145-155`。
 > **"依据优先于权威"对审查结果同样适用**：本节每一行都是我按上表两侧路径复核过的。
 > （这也解释了为什么"子代理说的"不能直接当结论。）
+
+#### 6.2.1 本轮已修（第 1、2、3、6、7、8 处）
+
+改的全在 `RainMusicDownloadTaskChannels.java` 一个文件里，主题是**"一次失败或一次续传之后，任务必须还能恢复"**：
+
+1. **第 1 处（high）**：`transfer()` 里的 skip 检查改成桌面那条三门条件
+   —— `task.downloaded == 0 && task.skip && file.isFile() && file.length() > 100`。
+   为此 `Task` 多带一个 `downloaded` 字段，由 `start()` 从 `downloadInfo.downloaded` 读（新增
+   `number()`：**缺省当 0，类型不对大声抛**），`update_url()` 换 URL 时把它带过去。
+   `skip == false` 分支不预先删文件 —— 下面的 `move()` 是**原子替换**，等价于桌面的先删后写（已写进注释）。
+2. **第 3 处**：新增 `resumeRejected(part, manifest, offset, message)`，在**四个**"服务器明确拒绝这次续传"的
+   抛出点（编码异常、重定向目标变了、`Content-Range` 非法、range/校验子对不上）先删掉
+   `.part` / `.resume` / `.resume.part` **再**抛同一条错误。
+   - **只**对这些场合调用：5xx / 超时 / 断流这类**瞬时**错误**不丢进度**。
+   - `offset <= 0` 时没有 `.part` 可丢，直接返回原错误。
+   - **清理失败不吞**：把它并进错误信息（"…；且无法清理部分下载文件：<路径>"），
+     所以调用方看到的仍是一条大声的失败，而不是"重置成功"。
+3. **第 2 处**：封面改成**尽力而为** —— 取图/识别格式失败只**丢掉 APIC**，标签其余部分照写
+   （桌面 `mp3Meta.js:29-36` 就是这个形状）。非 http(s) 的 APIC 也由此自然落到"丢掉继续写"。
+   为此把代理求值提到 try 外（代理坏了仍然大声抛），并新增 `coverUrl()`（第 7 处）。
+4. **第 6 处**：USLT 的 `language` 由 `'eng'` 改成桌面用的 `'zho'`。
+5. **第 7 处**：新增 `coverUrl()`，对含 `music.126.net` 的封面 URL 追加 `param=500y500`
+   （分隔符按 URL 里有没有 `?` 选 `&`/`?`，与 `mp3Meta.js:28` 一致）。
+6. **第 8 处**：完成路径改成**先删清单、再改名**。删不动就抛，而那时媒体文件还没提交
+   ⇒ 这次失败是"什么都没发生"（`.part` 还在、可重试），而不是"文件已经落盘了却报 error"。
+
+**证据**：
+
+- 探针 `tests/unit/fixtures/android-download-runtime/DownloadRuntimeProbe.java` 新增/改写了断言：
+  `tiny`（≤100 字节残留必须能下）/ `existing`（>100 字节且 `downloaded==0` 必须被保住）/
+  `resumed`（`downloaded>0` 时不能被自己的文件挡住）/ 被拒续传必须丢掉 `.part` 与 `.resume`
+  并且**再试一次必须成功**（`bad` 那条）/ `changed-etag`、`redirect` 也要丢清单 /
+  USLT 的 `zho`（**只在 ID3 标签区间内**按字节找，避免碰随机音频数据）/
+  `music.126.net` 必须带 `param=500y500`（服务器记下真实 query 再比对）/
+  封面 403 后**标签仍要写成**、其余帧不许丢、`APIC` 不许嵌入。
+- `tests/unit/android-download-runtime-native.test.cjs` 新增第 3 个用例，用**源码顺序**钉住第 8 处
+  （"先删清单再改名"）。之所以用源码顺序：JVM 探针**没法**只让 `delete()` 失败、而让更早的
+  清单**写入**成功（把清单做成非空目录会让写入就先炸），所以这条排序性质在这台机器上
+  **无法用运行时断言表达** —— 与仓库里 `MainActivity` 注册顺序的做法同型，**不是**在测实现细节。
+- **6 个变异全部被捕获**（注入在仓库外副本 `%TEMP%\rain-dl-mut\<kind>\`，用
+  `RAIN_DOWNLOAD_JAVA_SOURCE` 指过去；一处在仓库文件上都没改）：
+
+  | 变异 | 被哪条断言抓住 |
+  |---|---|
+  | 还原无条件 skip 检查 | `tiny missing complete`（error 文本正是 "Destination already exists"） |
+  | `resumeRejected` 不删部分文件 | `a rejected resume must discard the unusable partial` |
+  | USLT 写回 `eng` | `USLT language must match the desktop (zho, not eng)` |
+  | 让封面失败重新中断整个写入 | `java.io.IOException: Cover HTTP 403` 直接穿出 `write_meta` |
+  | 去掉 `param=500y500`（换成 999x999） | `a music.126.net cover must get the desktop's param=500y500 rewrite` |
+  | 换回"先改名再删清单" | `the manifest must be deleted BEFORE the rename…` |
+
+#### 6.2.2 仍然没修（第 4、5 处）—— **需要先拍板，不是漏掉**
+
+- **第 4 处（部分文件永不回收）**：`cancel()` 保留 `.part` / `.resume` 是**代码里写明的有意选择**
+  （"删掉记录再重建可以安全续传"），而桌面 `removeTask` 会回收。两个方向都有道理：
+  保留 = 省流量；回收 = 省空间（且用户看不见那个私有目录）。
+  **本轮不动它**，因为改错方向会退化一个明确写下来的特性。要改的话请先定：删除记录时
+  是"保留进度"还是"释放空间"，或者给一条显式的清理入口。`.meta.part` 在失败路径上**已经**会删。
+- **第 5 处（没有有界重试）**：桌面失败会**重试 3 次**（`retryNum > 2`，延时 1 s，`ENOTFOUND` 还会
+  发 `refreshUrl`），原生一次失败直接 `error`。补它要同时定"重试期间怎么发事件"
+  （进度事件会重复、`error` 只该在最后一次发），而且会改动 façade 与 store 的现有期望
+  ⇒ 单独立一刀，别混在本次的"可恢复性"修复里。
 
 **审查同时确认了这些部分是对的**（记下来，避免下一个人重查一遍）：
 
@@ -614,10 +679,13 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **下一轮的第一优先不是设备验收，而是两处 high**：
-   - **§6.2 的下载执行层**（8 处，1 处 high：`skip` 无条件抛 + resume 失败/部分文件永不回收 ⇒ 用户无法自救）；
-   - **§6.4 的 W1**（自定义源 `body` + `Content-Type: application/json` 被表单序列化 ⇒ **一整类社区音源脚本不可用**；
-     注意要**同时**改 `platform/http/web.js` 与 `userApi/web.js`，并先做"还有哪些调用点依赖头推导"的审计）。
-   §6.3 的 L1/L2/L6 紧随其后 —— 尤其 **L6 要先把替身改成与真 API 同严格**，否则本机结论继续不成立。
+5. **§6.2 的下载执行层本轮已修 6 处（含那处 high），并做了 6 个变异验证**；剩下 2 处需要先拍板。
+   于是**下一轮的第一优先变成**：
+   - **§6.4 的 W1**（自定义源 `body` + `Content-Type: application/json` 被表单序列化 ⇒
+     **一整类社区音源脚本不可用**；要**同时**改 `platform/http/web.js` 与 `userApi/web.js`，
+     并先做"还有哪些调用点依赖头推导"的审计）；
+   - 然后是 **§6.3 的 L1 / L2 / L6** —— 尤其 **L6 要先把替身改成与真 API 同严格**，
+     否则本机关于"坏歌词行"的结论继续不成立；
+   - 最后才是 §6.2 剩下的第 4、5 处。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

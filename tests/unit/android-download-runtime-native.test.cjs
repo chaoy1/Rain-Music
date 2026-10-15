@@ -36,6 +36,19 @@ test('native HTTP/filesystem probe: exact bytes, HTTP errors, range validation, 
   } finally { fs.rmSync(temp, { recursive: true, force: true }) }
 })
 
+test('completion deletes the resume manifest before renaming the media file into place', () => {
+  // Ordering-only invariant: a failed manifest delete must leave the task retryable, so the
+  // delete has to happen *before* the rename. The JVM probe cannot force `File.delete()` to
+  // fail while the earlier manifest *write* still succeeds, so this is pinned by source order
+  // (same technique the repo uses for the MainActivity plugin-registration ordering).
+  const source = fs.readFileSync(path.join(java, 'RainMusicDownloadTaskChannels.java'), 'utf8')
+  const deleteAt = source.indexOf('Cannot remove resume manifest')
+  const moveAt = source.indexOf('move(part, task.file);')
+  assert.ok(deleteAt > 0, 'the completion path must delete the resume manifest')
+  assert.ok(moveAt > 0, 'the completion path must rename the partial into place')
+  assert.ok(deleteAt < moveAt, 'the manifest must be deleted BEFORE the rename, otherwise a failed delete reports an already-committed file as an error')
+})
+
 test('native compiler checks against real Android Context and checked AOSP JSON signatures', { skip: !fs.existsSync(path.join(os.tmpdir(), 'rain-json-probe/vendor/android-json-aosp.jar')) && 'Real Android/AOSP jars are not installed on this host' }, () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'rain-download-api-'))
   try {
