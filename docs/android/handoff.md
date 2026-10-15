@@ -30,10 +30,12 @@
     **没有 blocker**，但有一条 **high**：自定义源的 HTTP 请求体编码与桌面不一致
     （脚本用 `body` + `Content-Type: application/json` 会被**表单序列化**，头却还是 json）——
     而且**根因在 `platform/http/web.js` 的 `buildRequest` 少了 needle 那条"头是 json 就当 json"的规则**，
-    所以**要改两处**。**W1 本轮已修**（含 2 个变异验证：单独改任一处都过不了）。
-    仍未修的是：**W2**（初始化成功之后的一次未捕获错误会把整个源毁掉，medium）、
-    **W3/W4**（medium）、**W5–W9**（low）、以及**本轮新发现的 W10**（`formData` 被完全忽略 ⇒
-    发空请求）。见 **§6.4 / §6.4.1 / §6.4.2**。
+    所以**要改两处**。**W1 与 W2 本轮都已修**（W1 含 2 个变异验证：单独改任一处都过不了；
+    W2 含 2 个变异验证：初始化成功后的一次脚本错误不再拆掉整个源）。
+    仍未修的是：**W3/W4**（medium，W3 是"零个可用平台被当成成功发布"、
+    W4 是本地音乐把会话级 `blob:` URL 当身份持久化）、**W5–W9**（low）、
+    以及**本轮新发现的 W10**（`formData` 被完全忽略 ⇒ 发空请求）。
+    见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3**。
 
 ---
 
@@ -465,7 +467,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
   persist→complete 的顺序与 `data.ts:7-25` 一致，`complete()` 先按键删再清 `queueStartupRestorePending`
   （与 `dbService/index.ts:218-221` 同序），两个调用者都持列表锁 ⇒ **不会删掉更新的队列状态的快照**。
 
-### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1 本轮已修，其余未修**；2026-10-15）
+### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1、W2 本轮已修**；2026-10-15）
 
 审查对象：提交 `2a3e4a7c` 的渲染层新代码（`userApi/{host,worker-runtime,web,contract}.js`、
 `platform/download/{android,pure}.ts`、`filePicker/web.js`、`fs/web.js`、`fileUrl/web.js`、
@@ -475,7 +477,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | # | 严重度 | 位置 | 桌面依据 | 差异与后果 | 我复核了吗 |
 |---|---|---|---|---|---|
 | **W1** | **high** | `src/renderer/platform/userApi/web.js:38` —— 把 `json: false` **写死**给每一次社区脚本请求 | `src/main/modules/userApi/renderer/preload.js:172-188`（**只有** `form`/`formData` 才置 `json = false`，`body` **不置**）+ `vendor/needle/lib/needle.js:305-306` | 脚本用 `body`（对象）+ `Content-Type: application/json` 发 POST 时，桌面发 `{"a":1}`、Android 发 `a=1`，而**头仍然是 json** ⇒ 服务器按 JSON 解析直接失败。**一整类社区音源脚本在 Android 上不可用** | **已复核 + 本轮已修** —— 见 §6.4.1 |
-| W2 | medium | `userApi/host.js:123` + `worker-runtime.js:31-32` | `preload.js:163` `if (isInitedApi) return` | 初始化**成功之后**，脚本里任何一次未捕获错误 / 未处理 rejection 都走 `fatal` ⇒ 状态翻假、worker 终止、在途请求 reject、弹"源码初始化失败"。**一个本来能用的源被一次异步小错毁掉** | 未复核 |
+| W2 | medium | `userApi/host.js:123` + `worker-runtime.js:31-32` | `preload.js:163` `if (isInitedApi) return` | 初始化**成功之后**，脚本里任何一次未捕获错误 / 未处理 rejection 都走 `fatal` ⇒ 状态翻假、worker 终止、在途请求 reject、弹"源码初始化失败"。**一个本来能用的源被一次异步小错毁掉** | **已复核 + 本轮已修** —— 见 §6.4.3 |
 | W3 | medium | `userApi/contract.js:18-22`（经 `host.js:115-119`） | — | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）⇒ 就绪闸门打开、`assertApiSupport()` 为真，但 `userApi.apis[source]` 里没有 `getMusicUrl` ⇒ 播放死在后面的 TypeError 上，而不是在初始化时就明确报错 | 未复核 |
 | W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
 | W5 | low | `userApi/worker-runtime.js:25` 的能力黑名单 | — | 漏了 `navigator.sendBeacon`（Beacon 是 `[Exposed=(Window,Worker)]`）⇒ 脚本仍可绕过父侧那条被校验的 HTTP 通道直接外联 | 未复核（需真机 WebView） |
@@ -559,7 +561,47 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
    所以 `application/json; charset=utf-8` **不触发**它。修的时候要**照抄这条**（否则引入新的不一致），
    并用一个**对照 needle 本体的用例**钉住，别凭直觉。
 
-**这一轮审查确认"没问题"的部分**（省下一次重查）：
+#### 6.4.3 本轮已修：W2（初始化成功后的脚本错误不再拆掉整个源）
+
+**桌面依据**：`src/main/modules/userApi/renderer/preload.js:161-166` 的 `onError()` **第一行**就是
+`if (isInitedApi) return` —— 已经初始化成功之后，脚本自己的错误**不再**上报成初始化失败。
+
+**为什么在 Android 上后果特别大**：`worker-runtime.js:31-32` 把 worker 的 `error` 与
+`unhandledrejection` **都**接到 `fatal` 上，而 `host.js` 原来的 `case 'fatal'` **没有**任何守卫。
+社区脚本里一次"发了不管的异步调用"（`lx.request(...)` 不带 catch 之类的常见写法）出错，
+就会把一个**本来完全能用**的源拆掉：状态翻假 → worker 终止 → 在途请求全部 reject →
+渲染层弹"源码初始化失败"。
+
+**改法**（`host.js`）：
+
+- 新增 `isInitialized()`（就是 `status.status === true` —— `status` 只有**成功**那条会置 true），
+  以及 `ignorePostInitError()`；
+- `case 'fatal'` 与 `createSession(...)` 的 **error 回调**两处都加守卫：
+  已初始化 ⇒ 忽略（**不 stop、不改 status、不发事件**），未初始化 ⇒ 照旧 `fail()`；
+- **与桌面唯一的差别**：忽略时留一条 `console.warn`（同一文案只报一次）。桌面那条路径是**直接丢掉**的，
+  但完全静默会让人以为"这个源从来没出过错"。
+- **只管脚本来源的失败**：host/worker 之间的**协议**异常（`onMessage` 的 `default` 分支）仍然大声失败 ——
+  那说明两侧版本不一致，不是脚本的问题。
+
+**证据**：
+
+- `tests/unit/android-user-api-host.test.cjs` 新增一条用例：用**假 session**（而不是真 worker）
+  精确制造"init 成功 → 紧接着一条脚本来源的 fatal"，断言
+  `status.status === true`、`terminate` 调用次数为 0、**只发布了一条**状态事件且它是成功。
+  用真 worker 测不准：Node 的 `worker_threads` 夹具**不会**产生 `unhandledrejection`，
+  所以那条路径在夹具里根本触发不了。
+- **2 个变异都被捕获**（注入在 `%TEMP%\rain-w2-mut\<kind>\` 的 `src/` 副本里，
+  用 `RAIN_USER_API_TEST_ROOT` + `NODE_PATH` 指过去）：
+  `isInitialized()` 改成恒 `false`、以及单独删掉 `fatal` 那一处守卫 —— 两个都是一样的
+  `fail 1`，失败的正是新用例那条断言。**"只红该红的那条"**，说明它真的在守这个性质。
+- ⚠️ **工装第二次骗了我**：第一次跑出 `fail 9`（连"初始化前就报错"的老用例都红了），
+  看上去像"变异影响面很大"，其实是**忘了设 `NODE_PATH`** ⇒ 副本里的 `utils.js`
+  `Cannot find module 'crypto-js'` ⇒ 模块加载失败 ⇒ 9 个用例全红。
+  **判据很朴素：失败数量和失败原因要能对上。对不上就先怀疑工装，别急着写结论。**
+
+
+
+**对 6.4 这一轮审查确认"没问题"的部分**（省下一次重查）：
 
 - **沙箱边界**：`lx` 与 `rain` 是同一个冻结对象；白名单 `['tx','kg','wy','local']` 封闭；
   `Object.hasOwn` 挡住 `__proto__`/`constructor`；脚本在自己的 worker realm 里改
@@ -740,12 +782,13 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **§6.2 的下载执行层本轮已修 6 处（含那处 high）**，**§6.4 的 W1 也已修**（两处根因 + 2 个变异验证）；
-   两处都留下了"仍然没修、并且说明了为什么"的清单。于是**下一轮的第一优先**是：
-   - **§6.4 的 W2 / W3**（medium，都在自定义源这条首版链上：初始化成功后被一次未捕获错误毁掉、
-     以及"零个可用平台"被当成成功发布）；
+5. **本轮实际修掉了 8 处**：§6.2 的下载执行层 6 处（含那处 high）+ §6.4 的 W1、W2（两处都在自定义源这条首版链上），
+   每修一处都配了断言与**变异验证**（下载 6 个、W1 两个、W2 两个，逐个被对应断言捕获）。
+   两节都留了"仍然没修、并且说明了为什么"的清单。**下一轮的第一优先**是：
+   - **§6.4 的 W3**（medium：`filterSources` 会留下 `actions` 为空的平台，
+     而"一个可用平台都没有"也被当成功发布 ⇒ 播放死在后面的 TypeError 上，而不是初始化时明确报错）；
    - 然后是 **§6.3 的 L1 / L2 / L6** —— 尤其 **L6 要先把替身改成与真 API 同严格**，
      否则本机关于"坏歌词行"的结论继续不成立；
-   - 再往后是 §6.2 剩下的第 4、5 处与 §6.4 的 W10（`formData` 发空请求）。
+   - 再往后是 §6.2 剩下的第 4、5 处、§6.4 的 W4 与 W10。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

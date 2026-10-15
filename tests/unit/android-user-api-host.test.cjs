@@ -195,3 +195,33 @@ test('the private worker protocol cannot be spoofed through global postMessage a
   assert.deepEqual(Object.keys((await a.host.getStatus()).apiInfo.sources), ['tx'])
   assert.equal((await a.host.request(req('safe'))).data.url, 'https://safe.test/music')
 })
+
+test('a script fatal that arrives after a successful init is ignored, matching the desktop preload', async t => {
+  // 用假 session 而不是真 worker：这里要的是**确定的消息顺序**（init 成功 → 脚本来源的 fatal），
+  // 而 `fatal` 在真 worker 里由 `error` / `unhandledrejection` 触发，Node 的 worker_threads
+  // 夹具**不会**产生 `unhandledrejection`，用真 worker 就测不准。
+  const { createUserApiHost } = load(hostPath)
+  let saved = null
+  const events = []
+  const storage = { read: async() => saved, write: async value => { saved = structuredClone(value) } }
+  let terminated = 0
+  const createSession = onMessage => ({
+    post(message) {
+      if (message.kind !== 'load') return
+      queueMicrotask(() => {
+        onMessage({ kind: 'init', info: { sources: { tx: { type: 'music', actions: ['musicUrl'], qualitys: ['flac'] } } } })
+        // worker 的 `error` 与 `unhandledrejection` 都接到这条消息上（worker-runtime.js:31-32）。
+        onMessage({ kind: 'fatal', message: 'late script failure' })
+      })
+    },
+    terminate() { terminated++ },
+  })
+  const host = createUserApiHost({ storage, createSession, emit: (channel, data) => events.push({ channel, data }) })
+  t.after(() => host.dispose())
+  const { apiInfo } = await host.importApi(script('lx.on(lx.EVENT_NAMES.request, async () => "https://media.test/music");'))
+  await host.setApi(apiInfo.id)
+  assert.equal((await host.getStatus()).status, true, '初始化成功后的一次脚本错误不能把源翻成失败（桌面 preload.js:163）')
+  assert.equal(terminated, 0, 'worker 不能被终止')
+  assert.equal(events.length, 1, '只应发布成功那一条状态事件；失败状态一条都不能发')
+  assert.equal(events[0].data.status, true)
+})

@@ -78,6 +78,29 @@ export const createUserApiHost = ({ storage, createSession, httpRequest, emit = 
     stop(errorText(error))
     publish({ status: false, apiInfo, message: errorText(error) })
   }
+  /**
+   * 桌面等价物：`src/main/modules/userApi/renderer/preload.js:161-166` 的 `onError()` **第一行**
+   * 就是 `if (isInitedApi) return` —— **初始化成功之后**，脚本自己的错误**不再拆掉这个源**。
+   *
+   * 为什么必须这样：worker 把 `error` 与 `unhandledrejection` 都接到 `fatal`
+   * （`worker-runtime.js:31-32`），所以社区脚本里一次"发了不管的异步调用"出错，
+   * 就会把一个**本来完全能用**的源拆掉（状态翻假、worker 终止、在途请求全 reject、
+   * 渲染层还弹一个"源码初始化失败"）。那是一次异步小错，不该有这种后果。
+   *
+   * 与桌面**唯一的差别**：这里留一条 `console.warn`（同一个文案只报一次）。
+   * 完全静默会让人以为"这个源从来没出过错"，而桌面那条路径确实是直接丢掉的。
+   * **注意**：这条宽容只覆盖**脚本来源**的失败（`fatal` 与 session 的 error 回调）；
+   * host/worker 之间的协议异常（下面的 `default` 分支）仍然大声失败。
+   */
+  const warnedPostInit = new Set()
+  const ignorePostInitError = message => {
+    const text = errorText(message)
+    if (warnedPostInit.has(text)) return
+    warnedPostInit.add(text)
+    console.warn(`[userApi] 源已初始化，按桌面语义忽略其后的脚本错误（preload.js:163）：${text}`)
+  }
+  /** 当前会话是否已经成功初始化过（`status` 只有成功那条会置 true）。 */
+  const isInitialized = () => status.status === true
   const startHttp = (message, currentGeneration) => {
     const key = message.id
     const reply = (error, response, body) => {
@@ -120,7 +143,12 @@ export const createUserApiHost = ({ storage, createSession, httpRequest, emit = 
           resolve()
         } catch (error) { fail(error) }
         break
-      case 'fatal': fail(new Error(message.message)); break
+      case 'fatal': {
+        // 脚本来源的失败：初始化成功之后按桌面语义忽略（见 ignorePostInitError）。
+        if (isInitialized()) { ignorePostInitError(new Error(message.message)); break }
+        fail(new Error(message.message))
+        break
+      }
       case 'response': {
         const request = pending.get(message.requestKey)
         if (!request) return
@@ -194,7 +222,12 @@ export const createUserApiHost = ({ storage, createSession, httpRequest, emit = 
       return new Promise((resolve, reject) => {
         initPending = { resolve, reject, timer: setTimeout(() => fail(new Error('User API init timeout')), initTimeoutMs) }
         try {
-          session = createSession(message => onMessage(message, currentGeneration), error => { if (generation === currentGeneration) fail(error) })
+          session = createSession(message => onMessage(message, currentGeneration), error => {
+            if (generation !== currentGeneration) return
+            // 与 'fatal' 同一条语义：脚本来源的失败在初始化成功后不再拆掉这个源。
+            if (isInitialized()) { ignorePostInitError(error); return }
+            fail(error)
+          })
           session.post({ kind: 'load', api: selected })
         } catch (error) { fail(error) }
       })
