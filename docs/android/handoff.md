@@ -25,7 +25,9 @@
    —— 见 **§6.2**、**§6.2.1**、**§6.2.2**。
 9. **对歌单写入 / 媒体缓存 / 播放队列恢复做了一轮独立审查**：**没有 blocker**，
    问题集中在 `data_overwire` 的入参宽容度；其中一条（**测试替身比真 API 宽松**，
-   `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。**全部未修。**
+   `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。
+   **其中 L6 本轮已处理**：替身改成与真 API 同严格，并**拍板**"坏 base64 就大声抛、
+   不跟桌面一起宽容"，理由与代价写在 §6.3.1；L1/L2 等其余各条仍未修。
 10. **渲染层 / Web 侧也做了一轮独立审查**（这一份回来得比前两份晚很多，中途一度以为丢了 —— 所以**不要因为没等到就当作没审**）：
     **没有 blocker**，但有一条 **high**：自定义源的 HTTP 请求体编码与桌面不一致
     （脚本用 `body` + `Content-Type: application/json` 会被**表单序列化**，头却还是 json）——
@@ -420,7 +422,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 - `.mp3` 判定用 `toLowerCase(Locale.ROOT)`，两个文件里没有 `trim()` / 默认 Locale 比较
   ⇒ **§8 第 2 类（Java/JS 去重键不等价）缺陷在下载执行层不存在**。
 
-### 6.3 歌单写入 / 媒体缓存 / 播放队列恢复：独立审查确认的问题（**已确认、未修**；2026-10-15）
+### 6.3 歌单写入 / 媒体缓存 / 播放队列恢复：独立审查确认的问题（**L6 本轮已处理，其余未修**；2026-10-15）
 
 审查对象：`RainMusicListMutationChannels.java`、`RainMusicMediaCacheChannels.java`、`RainMusicPlaybackQueueRestore.java`。
 审查者另外用**真 Java + 真 SQLite** 探针跑了 16 个作者用例之外的场景（`%TEMP%\rain-review-probe\probe.cjs`）。
@@ -434,7 +436,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | L3 | low | `:59` 拒绝 `fromId == toId` | `.../list/index.ts:292-324` 允许同歌单移动 | 同歌单移动在桌面合法、Android 直接拒 | **未逐行复核**。审查者说当前 UI 到不了（`useListInfo.js:12`、`FavoriteButton.vue:44` 已排除源歌单）⇒ 先记为"待确认的死输入" |
 | L4 | low | `:16,21,33` 在 `player_list_music_clear` 上广播 | `winRendererEvent.ts:51-53` 桌面把 `list_music_clear` 发在 `player_list_data_overwire` 上，**而桌面自己的订阅者挂在 `list_music_clear`**（`rendererListManage.ts:239`） | 桌面这条广播**自己接不到**；Android 选了唯一能被消费的那个 | **未复核**。`clearListMusics` 当前**没有活调用者** ⇒ 记录为**有意分歧**即可，别为它改代码 |
 | L5 | low | `:164` `meta=object(o.opt("meta")).toString()` ⇒ `meta:null` 抛 "Expected object" | `.../list/index.ts:44` 的 `JSON.stringify(info.meta)` ⇒ 落库成文本 `"null"`；而 Android 自己的**读**路径容忍 NULL meta（`RainMusicListMusicGetChannels.java:574-588`） | 一条 meta 为 NULL 的行，会让它**所在的歌单再也写不进去** | **部分复核**（写侧的 `string/object` 用法读了；读侧的容忍未读） |
-| L6 | low，**但属于本项目最深的那条教训** | `RainMusicMediaCacheChannels.java:107` 用**严格**的 `android.util.Base64.decode(text, DEFAULT)` | `src/main/worker/dbService/modules/lyric/index.ts:49-54,80-81` 用 `Buffer.from(text,'base64')`（**宽容**） | **测试替身比真 API 宽松**：`android-media-cache-channels.test.cjs:47` 把 `decode` 实现成 `java.util.Base64.getMimeDecoder().decode(text)` —— MIME 解码器**忽略字母表外的字符**，而真 `android.util.Base64.decode(String,DEFAULT)` 对坏 base64 **抛 `IllegalArgumentException`** ⇒ 一条坏歌词行在**真机上抛错**、在桌面上返回宽容解码的文本 | **已复核**（替身源码 + 真 `android-4.1.1.4.jar` 的 `javap` ABI）。**这就是 §5 那条"替身必须逐字照抄真实行为"的同类问题**，只是这次差在**行为**而不是**签名** ⇒ **CI 编译抓不到**。两件事要分开做：(a) 先把替身改成与真 API 同严格（否则本机结论继续不成立）；(b) 再决定坏 base64 到底该抛还是该宽容 |
+| L6 | low，**但属于本项目最深的那条教训** | `RainMusicMediaCacheChannels.java:107` 用**严格**的 `android.util.Base64.decode(text, DEFAULT)` | `src/main/worker/dbService/modules/lyric/index.ts:49-54,80-81` 用 `Buffer.from(text,'base64')`（**宽容**） | **测试替身比真 API 宽松**：`android-media-cache-channels.test.cjs:47` 把 `decode` 实现成 `java.util.Base64.getMimeDecoder().decode(text)` —— MIME 解码器**忽略字母表外的字符**，而真 `android.util.Base64.decode(String,DEFAULT)` 对坏 base64 **抛 `IllegalArgumentException`** ⇒ 一条坏歌词行在**真机上抛错**、在桌面上返回宽容解码的文本 | **已复核**（替身源码 + 真 `android-4.1.1.4.jar` 的 `javap` ABI）。**这就是 §5 那条"替身必须逐字照抄真实行为"的同类问题**，只是这次差在**行为**而不是**签名** ⇒ **CI 编译抓不到**。两件事要分开做：(a) 先把替身改成与真 API 同严格（否则本机结论继续不成立）；(b) 再决定坏 base64 到底该抛还是该宽容 | **两条都已落地，见 §6.3.1** |
 | L7 | low | `RainMusicPlaybackQueueRestore.java:16-20`：非整数 `index` 抛错 | `.../list/index.ts:210-216` 返回 `-1`（容忍垃圾） | 损坏的 `playInfo` 会让启动期 `get_data` **抛**，而桌面返回 `null` | **前半已复核**（restore 的抛错代码读了）。⚠️ 审查者给的第二个位置 `RainMusicDataChannels.java:129-131` **对不上** —— 那几行是 `saveData` 的"缺 `data` 字段"报错，**不是** playInfo 类型校验 |
 
 > **两位审查者一共给错了两处引用**（`Downloader.ts:301-310` 那个文件根本不存在；`RainMusicDataChannels.java:129-131` 对不上）。
@@ -466,6 +468,38 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
   再按 id + 身份键与**去重后的当前队列**重新比对；未命中返回 `null`（**不是**半成品对象）且**不删快照**；
   persist→complete 的顺序与 `data.ts:7-25` 一致，`complete()` 先按键删再清 `queueStartupRestorePending`
   （与 `dbService/index.ts:218-221` 同序），两个调用者都持列表锁 ⇒ **不会删掉更新的队列状态的快照**。
+
+#### 6.3.1 本轮已处理：L6（替身严格度 + 坏 base64 的取舍）
+
+**决定（写死在 `docs/android/media-cache.md`）**：Android 侧**保持"抛"**，不跟桌面一起宽容。
+桌面 `Buffer.from(text,'base64')` 会忽略字母表外的字符、长度不合法也不抛；真
+`android.util.Base64.decode(text, DEFAULT)` 抛 `IllegalArgumentException("bad base-64")`。
+选"抛"的理由是本项目"**坏数据不能在静默中被降级成空/乱码**"的不变量，
+同类既有取舍还有保留 id 的拒绝与 `position` 的校验。**调用方拿到异常而不是空歌词**，
+而**计数不经过 base64** ⇒ "有 2 行"这件事仍然看得出，**空 / 坏仍然可分辨**。
+
+**替身改成与真 API 同严格**：`tests/unit/android-media-cache-channels.test.cjs` 里的
+`android/util/Base64.java` 替身原来用 `java.util.Base64.getMimeDecoder()` —— **MIME 解码器会忽略字母表外
+的字符，比真 API 宽松**，于是"坏行会怎样"在本机**永远测不到**（§5 那条教训的同类，差在行为不在签名，
+所以 CI 编译抓不到）。现在用 basic decoder，并先剥掉 CR/LF（真 DEFAULT 容忍换行）。
+这条替换本身也按纪律做了变异：再换回 MIME ⇒ 用例变红。
+
+**新增 `corrupt` 用例，输入是特意挑的**：`<合法 base64> + "!!!"`。
+这个输入**只有宽松解码器会接受**（MIME 忽略 `!!!` 后还能解出文本；严格解码器直接抛），
+所以它检验的是**替身的严格度**，不是"异常文案是否含 base64"。
+（第一版我挑的输入 `'!!!not-base-64!!!'` 在**两种**解码器下都会抛 —— 变异跑出来才发现它其实
+没法区分，于是重挑了输入。**这是变异工装的第二个用处：它也会告诉你用例本身够不够利。**）
+
+**证据**：
+
+- 正常跑：`android-media-cache-channels.test.cjs` **8 项全过**（原 7 项 + `corrupt`），
+  说明严格化没有破坏任何合法往返（所有写入路径产出的都是规范 base64）。
+- 变异（仓库外副本 `%TEMP%\rain-l6-mut-node\`，`getDecoder` → `getMimeDecoder`）：
+  **fail 1**，失败的正是"坏 base64 的歌词行必须大声失败，不能返回乱码或空串" ⇒ 替身一旦再变宽松就变红。
+- ⚠️ **工装第三次骗我**：这次是 PowerShell 侧——脚本里读文件用默认编码，
+  复制/改写的副本先后出过两种假信号（全红 8 条 / 缺文件 ENOENT），
+  最后把整条变异工装**改用 Node 写**（`fs.cpSync` + `readFileSync('utf8')`）才稳定。
+  **教训：变异工装本身不要用会按 ANSI 读文件的工具去搬 UTF-8 源码。**
 
 ### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1、W2 本轮已修**；2026-10-15）
 
@@ -699,6 +733,20 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 - **变异注入放仓库外的副本工程**（`%TEMP%`），**不要在仓库文件上注入再还原** —— 那会篡改共享文件、抹掉并行工作（本会话发生过一次：变异批次把另一刀的实现抹掉，还把 MUTATION 注入留在了文件里）。
 - 探针产物**一律放 `%TEMP%`**；仓库根**不许**留 `.tmp-*`（已清理过两次）。
 - **替身签名必须逐字照抄真实 API**（含 `throws`）—— 见 §5 的教训。
+  **行为也一样**：替身可以**更严格**（多声明 `throws`、少几个方法、拒绝更多输入），
+  **绝不能更宽松** —— 一个宽松的替身会让"本机全绿"变成假话。见 §6.3.1（`android.util.Base64`
+  的 MIME 解码器 vs 真 API 的严格解码）。
+- **看失败数量，不只看红绿**：变异跑出来如果**红了一大片**（比如 13/13、8/8），
+  **先怀疑工装**，别急着当成"变异影响面大"。本会话工装骗过我**三次**：
+  1. 用 `Get-Content -Raw` 读文件 → 副本里的中文注释按 GBK 重编码、文件坏掉 → 13 条全红；
+  2. 忘了设 `NODE_PATH` → 副本里 `Cannot find module 'crypto-js'` → 9 条全红；
+  3. 副本少拷了一个被测试依赖的文件 → `ENOENT` → 8 条全红。
+  三次的**正确信号**都是"**只红该红的那条**"。
+  ⇒ **变异工装一律用 Node 写**（`fs.cpSync` + `readFileSync(...,'utf8')`），
+  不要用会按 ANSI/GBK 读文件的 shell 工具去搬 UTF-8 源码。
+- **变异还会告诉你用例够不够利**：§6.3.1 第一版挑的"坏 base64"输入在**两种**解码器下都会抛，
+  变异跑出来才发现它其实区分不了严格度 —— 于是重挑了输入（只有宽松解码器会接受的那种）。
+  变异不只是"证明代码被测到"，也是"证明用例真的有鉴别力"。
 
 ### 7.4 两段式拆分（本会话验证有效的调度方式）
 
@@ -782,13 +830,16 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **本轮实际修掉了 8 处**：§6.2 的下载执行层 6 处（含那处 high）+ §6.4 的 W1、W2（两处都在自定义源这条首版链上），
-   每修一处都配了断言与**变异验证**（下载 6 个、W1 两个、W2 两个，逐个被对应断言捕获）。
-   两节都留了"仍然没修、并且说明了为什么"的清单。**下一轮的第一优先**是：
+5. **本轮实际修掉了 9 处、并拍板了 1 处**：§6.2 的下载执行层 6 处（含那处 high）+ §6.4 的 W1、W2
+   （两处都在自定义源这条首版链上）+ §6.3 的 L6（替身严格度 + 坏 base64 的取舍）。
+   每一处都配了断言与**变异验证**（下载 6 个、W1 两个、W2 两个、L6 一个，逐个被对应断言捕获）。
+   各节都留了"仍然没修、并且说明了为什么"的清单。**下一轮的第一优先**是：
    - **§6.4 的 W3**（medium：`filterSources` 会留下 `actions` 为空的平台，
-     而"一个可用平台都没有"也被当成功发布 ⇒ 播放死在后面的 TypeError 上，而不是初始化时明确报错）；
-   - 然后是 **§6.3 的 L1 / L2 / L6** —— 尤其 **L6 要先把替身改成与真 API 同严格**，
-     否则本机关于"坏歌词行"的结论继续不成立；
+     而"一个可用平台都没有"也被当成功发布 ⇒ 播放死在后面的 TypeError 上，而不是初始化时明确报错。
+     ⚠️ **先核对桌面是不是也这样**：`preload.js:124-141` 看起来**同样**不检查空 `actions`，
+     所以这可能是一处"与桌面一致但两侧都糟"的地方 —— 那就该**记录 + 单独立项**，而不是单向改 Android）；
+   - **§6.3 的 L1 / L2**（`data_overwire` 的入参宽容度：L1 是数值型 id 被整单拒绝，
+     与桌面 `fixListIdType` 不一致，属于可直接对齐的；L2 需要先拍板再写文档）；
    - 再往后是 §6.2 剩下的第 4、5 处、§6.4 的 W4 与 W10。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

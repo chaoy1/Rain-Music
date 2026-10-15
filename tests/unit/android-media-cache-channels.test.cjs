@@ -24,6 +24,13 @@ const cases = [
   { name: 'bad-args', ops: [op('get_music_url'), op('save_music_url', '{broken'), op('save_music_url', { id: 'a', url: 42 }), op('save_lyric_raw', { id: 'a', lyrics: { lyric: 42 } }), op('get_music_url_count'), op('get_lyric_raw_count')] },
   { name: 'missing-url', sql: ['DROP TABLE music_url'], ops: [op('get_music_url', 'x'), op('save_music_url', { id: 'x', url: 'x' }), op('remove_music_url', 'x'), op('clear_music_url'), op('get_music_url_count')] },
   { name: 'missing-lyric', sql: ['DROP TABLE lyric'], ops: [op('get_lyric_raw', 'x'), op('save_lyric_raw', { id: 'x', lyrics: { lyric: 'x' } }), op('clear_lyric_raw'), op('get_lyric_raw_count'), op('get_lyric_edited', 'x'), op('clear_lyric_edited'), op('get_lyric_edited_count'), op('get_palyer_lyric', 'x')] },
+  // 一行**已经被破坏**的歌词：内容本身是合法 base64，尾巴上挂了垃圾字符。
+  // 这正是两种解码器**分道扬镳**的输入：
+  //   - 桌面 `Buffer.from(text,'base64')` 与 `java.util.Base64.getMimeDecoder()` 会**忽略**垃圾字符 ⇒ 解出文本；
+  //   - 真 `android.util.Base64.decode(text, DEFAULT)` 会抛 `bad base-64`。
+  // 所以这条用例能真正区分"替身是否与真 API 同严格"，而不是靠异常文案。
+  // 本节选的是"大声失败"，并把这条**有意分歧**写在 docs/android/media-cache.md 里。
+  { name: 'corrupt', sql: [`INSERT INTO lyric VALUES('bad','raw','lyric','${b64('坏掉的歌词')}!!!')`, `INSERT INTO lyric VALUES('bad','raw','tlyric','${b64('好的一行')}')`], ops: [op('get_lyric_raw', 'bad'), op('get_lyric_raw_count'), op('get_palyer_lyric', 'bad')] },
 ]
 const run = (cmd, args, log) => {
   const result = spawnSync(cmd, args, { encoding: 'utf8', timeout: 60000 })
@@ -44,7 +51,13 @@ const probe = () => {
   sources['org/json/JSONObject.java'] = sources['org/json/JSONObject.java'].replace('public List<String> jsonKeySet()', 'public java.util.Iterator<String> keys() { return values.keySet().iterator(); } public List<String> jsonKeySet()')
   Object.assign(sources, {
     'android/content/Context.java': 'package android.content; public class Context {}',
-    'android/util/Base64.java': 'package android.util; public class Base64 { public static final int NO_WRAP=2; public static final int DEFAULT=0; public static String encodeToString(byte[] bytes,int flags){return java.util.Base64.getEncoder().encodeToString(bytes);} public static byte[] decode(String text,int flags){return java.util.Base64.getMimeDecoder().decode(text);} }',
+    // ⚠️ 这个替身必须与真 API **一样严格**：`android.util.Base64.decode(text, DEFAULT)` 对字母表外的
+    // 字符直接抛 `IllegalArgumentException("bad base-64")`，而 `java.util.Base64.getMimeDecoder()`
+    // 会**忽略**它们。原来用的正是 MIME 解码器 ⇒ **替身比真 API 宽松**，
+    // 于是"坏歌词行会怎样"在本机永远测不到（这是 handoff §5 那条最深教训的同类，
+    // 只差在**行为**而不是**签名**上，所以 CI 编译抓不到）。
+    // 建模方式：严格部分交给 basic decoder；CR/LF 先剥掉，因为真 DEFAULT 容忍换行。
+    'android/util/Base64.java': 'package android.util; public class Base64 { public static final int NO_WRAP=2; public static final int DEFAULT=0; public static String encodeToString(byte[] bytes,int flags){return java.util.Base64.getEncoder().encodeToString(bytes);} public static byte[] decode(String text,int flags){return java.util.Base64.getDecoder().decode(text.replace("\\n","").replace("\\r",""));} }',
     'com/rainmusic/mobile/ipc/RainMusicIpcPlugin.java': 'package com.rainmusic.mobile.ipc; public class RainMusicIpcPlugin { public android.content.Context getContext(){return new android.content.Context();} }',
   })
   for (const [name, target] of [['Cursor', 'android/database'], ['SQLiteDatabase', 'android/database/sqlite'], ['RainMusicDatabase', 'com/rainmusic/mobile/ipc'], ['ProbeJson', 'org/json']]) sources[`${target}/${name}.java`] = fs.readFileSync(path.join(SHARED, `${name}.java`), 'utf8')
@@ -85,6 +98,14 @@ test('Android media cache rejects malformed payloads without inserting partial s
   const result = probe()['bad-args']; for (const response of result.responses.slice(0, 4)) assert.ok(response.error)
   assert.deepEqual(values('bad-args').slice(4), [0, 0]); assert.equal(result.commits, 0)
 })
+test('Android corrupt base64 lyric rows fail loudly instead of returning garbage', { skip }, () => {
+  const result = probe().corrupt
+  assert.ok(result.responses[0].error, '坏 base64 的歌词行必须大声失败，不能返回乱码或空串')
+  assert.match(result.responses[0].error, /base-?64/i, '失败原因必须指向 base64 解码')
+  assert.equal(result.responses[1].value, 2, '计数不经过 base64 ⇒ 仍然如实反映"有两行"（坏数据不是空数据）')
+  assert.ok(result.responses[2].error, 'get_palyer_lyric 也不能把坏行静默降级成空歌词')
+})
+
 test('Android every media cache operation propagates missing-table errors', { skip }, () => {
   for (const name of ['missing-url', 'missing-lyric']) for (const result of probe()[name].responses) assert.match(result.error, /Missing table:/)
 })
