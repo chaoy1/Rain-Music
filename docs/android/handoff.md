@@ -3,6 +3,29 @@
 > 写给接手的模型：这份文档是**自包含**的。读完它应当能不看历史会话就继续推进。
 > 项目根：`D:\Documents\Projects\Rain Music\rain-music-desktop`
 > 最后更新：2026-10-15，继续完成歌单写入、下载、音源宿主、媒体缓存及播放队列恢复。续开发基线 `b33c2332`；最新验证见 [本轮记录](continuation-2026-10-15.md)，提交与 CI 以 Git / check-runs 为准。下文旧“第几刀”的说明保留为历史证据。
+> **2026-10-15 又做了一轮独立复核并把结论写在 [§0](#0-2026-10-15-二次复核独立于上一轮逐条给证据) 与 [§6.1](#61-原生侧完全没有注册而渲染层会调的通道2026-10-15-实测) 里（新结论、纠正过的旧说法、以及缺口清单）。先读那两节，再读下面的历史。**
+
+---
+
+## 0. 2026-10-15 二次复核（独立于上一轮，逐条给证据）
+
+1. **本机门禁在 `2a3e4a7c` 上复跑**：`eslint src` exit 0；`src/{main,renderer,renderer-lyric,common}/tsconfig.json` 四个 `tsc --noEmit` 全部 exit 0；`node --test tests\unit\*.test.cjs` = **tests 455 / pass 455 / fail 0 / skipped 0**（工作区口径，**包含用户另线未提交的测试**，不是提交快照的口径）。
+2. **用户 30 项未提交改动未被污染**：与接手快照 `%TEMP%\rain-android-takeover-20261014\protected-files.json` **逐文件 SHA-256 比对，0 处不一致**；`git status --porcelain` 仍为 30 项。
+3. **HEAD `2a3e4a7c` 的两条 CI 均为 `completed / success`**（`verify` 116315939345、`debug-apk` 116315940325）；APK 产物 `rain-music-android-debug`（10 101 476 字节）未过期，另有 `rain-music-android-gradle-output` 日志产物。
+4. **Android 运行时没有主进程**（本轮新增的实测结论，很重要）：对 `dist-web` 全部 `.js` 做字符串检索，`dbService` / `better-sqlite3` / `CapacitorSQLite` / `createCapacitorSQLiteDriver` / `rain.data.db` / `themeImages` / `IThemeFileAdapter` **全部 ABSENT**。
+   ⇒ `src/main/**` 整体是**桌面代码**；Android 的业务层**只有** Java 插件（`android/.../ipc/*.java`）。
+   ⇒ §4 阶段 2 里那些 `*.android.ts` 适配器**真机上不会被求值**；`adapter/android.ts` 的「接线清单」不是前进路线；`createCapacitorSQLiteDriver()` 抛 `not implemented yet` **不是**线上缺陷（它那条分支在 Android 产物里根本不存在）。**不要再按那份清单去 hand over。**
+5. **测试替身签名已对着真 `android-4.1.1.4.jar` 核对**（§5 遗留待办第 1 条就此关闭）：**没有“替身比真 API 宽松”的缺陷**，全部差异都在更严格一侧。详见 §5。
+6. **产物互斥在真实 bundle 上复核通过**：`dist-web` 中 `ipcBridge/desktop` **0 次**、`ipcBridge/capacitor` 命中；`ipcRenderer` 出现的 4 次全部在 `src/renderer/platform/ipcRenderer/web.js` **那句故意抛错的文案里**，不是 Electron 被打了进来。
+7. **新增缺口清单**：主题、不喜欢、换源缓存、音效预设、缓存大小/清缓存、另存对话框、系统字体等通道在原生侧**一条都没注册** —— 见 §6.1。这是当前最明确的“未实现功能面”，比“待真机验收”更值得先决策。
+8. **对已推送的下载执行层做了一轮独立审查**：确认 **8 处与桌面契约不一致**，其中 **1 处 high**
+   （`skip` 检查无条件抛、resume 失败与部分文件永不回收）—— 见 **§6.2**。**全部未修**，这是下一轮的第一优先。
+9. **对歌单写入 / 媒体缓存 / 播放队列恢复做了一轮独立审查**：**没有 blocker**，
+   问题集中在 `data_overwire` 的入参宽容度；其中一条（**测试替身比真 API 宽松**，
+   `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。**全部未修。**
+10. **渲染层 JS 那一块（`userApi/host.js`、`worker-runtime.js`、`platform/download/{android,pure}.ts`、
+    `filePicker/web.js`、`fs/web.js`、`fileUrl/web.js`、`musicMetadata/web.js`、`workers/web.ts`）本轮派出的
+    第三个审查**没有回报** ⇒ 这部分**仍然没有独立审查过**。§6.2/§6.3 的结论不能推广到它。
 
 ---
 
@@ -14,7 +37,7 @@
 
 ---
 
-## 2. 工具环境（旧 DSH 会话与当前 Codex 会话分开看）
+## 2. 工具环境（会话之间分开看：旧 DSH / Codex / 本次 DSH）
 
 1. **每个 shell 调用显式传 `workdir: "D:\Documents\Projects\Rain Music\rain-music-desktop"`**。
    当前 Codex 默认 cwd 是外层 `Rain Music`，真正 Git 根在嵌套目录。
@@ -27,17 +50,32 @@
 
 ---
 
+### 2.1 2026-10-15 复核会话实测环境（DSH；与上面的旧 Codex 会话不同）
+
+- **无 Android SDK**：`ANDROID_HOME` / `ANDROID_SDK_ROOT` 均为空，`%LOCALAPPDATA%\Android\Sdk` 不存在
+  ⇒ **`assembleDebug` 只能靠 CI**，本机连一条 gradle 任务都跑不了。
+- **有 JDK 20**（`D:\Software\java\bin\{java,javac,javap}.exe`）⇒ 真 `javac` / `javap` 探针可以做。
+- `%TEMP%\rain-json-probe\vendor\` 里存着**真制品**：`android-4.1.1.4.jar`（12 947 757 B）与
+  `android-json-aosp.jar`（18 279 B）。核替身签名就用这两个，**不要再去找 SDK**。
+- GitHub check-runs 与 artifacts **可免鉴权读取**（本次实测成功）：
+  `/repos/chaoy1/Rain-Music/commits/<sha>/check-runs`、`/check-runs/<id>`、`/actions/runs/<run_id>/artifacts`。
+  配额是**每小时**的，超限会 403。
+- `.ps1` 脚本**被执行策略拦住**（`PSSecurityException`）⇒ 用
+  `Invoke-Expression (Get-Content -LiteralPath <file> -Raw)`，或直接用 bash / `node`。
+- **权威数字一律从实际输出解析**（`tests/pass/fail`、lint 的 `0 errors`、CI 的 `conclusion`）。
+  本文档里的历史数字是**刻意保留的证据**，不要当现值引用。
+
 ## 3. 当前快照
 
 | 项 | 值 |
 |---|---|
 | 项目根 | `D:\Documents\Projects\Rain Music\rain-music-desktop` |
 | 分支 | `master` → `origin https://github.com/chaoy1/Rain-Music.git` |
-| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；最新代码状态请查 `git log -1` 与对应 check-runs |
-| 单测（本机） | 歌曲新增提交后为381；本轮新增实现及完整门禁计数见 `continuation-2026-10-15.md`，不能沿用旧计数 |
-| lint / 四个 tsc | **src lint 0 errors / 6 个既有 `View.vue` 属性顺序 warnings；四个 tsc 全部 exit 0** |
-| **CI `verify`** | 基线 `b33c2332` 为 **success**；本轮变更需查询新提交的 CI |
-| **CI `debug-apk`** | 基线 `b33c2332` 为 **success**；本轮变更需查询新提交的 CI，不能沿用基线绿灯 |
+| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`），工作区另有用户 30 项未提交改动 |
+| 单测（本机，**工作区口径**） | **455 / 455，fail 0、skip 0**（2026-10-15 在 `2a3e4a7c` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
+| lint / 四个 tsc | **`eslint --ext .ts,.js,.vue src` exit 0（`0 errors` / 6 个既有 `View.vue` 属性顺序 warnings）；`src/{main,renderer,renderer-lyric,common}` 四个 tsc 全部 exit 0** |
+| **CI `verify`** | `2a3e4a7c` = **completed / success**（check-run `116315939345`）。**改任何代码后必须查新 SHA，不能沿用** |
+| **CI `debug-apk`** | `2a3e4a7c` = **completed / success**（check-run `116315940325`，run `38703141603`）；产物 `rain-music-android-debug`（10 101 476 B）**未过期**。**改任何原生代码后必须查新 SHA** |
 | 用户的工作区 | **30 项未提交改动**（主题/UI/`tests/ui/*`/`src/lang/*` 等，**不是本线的**） |
 
 ### 用户的 30 项未提交改动（必须保护）
@@ -93,6 +131,10 @@
 - SQL 适配器抽象：`src/main/worker/dbService/adapter/{types,serialize,better-sqlite3,android,index}.ts`
 - 存储适配器：`src/common/storage/types.ts`、`src/main/platform/storage/{core,electron,adapter,adapter.android}.ts`；`src/main/utils/store.ts` 变成 15 行转发
 - **对外契约 0 改动**
+- ⚠️ **但这一节的 `*.android.ts` 全部是“桌面侧的接缝”，不是 Android 上跑的代码**：
+  这些文件都在 `src/main/**` 下，而 `src/main/**` **不在 Android 产物里**（§0 第 4 条）。
+  Android 的数据库是 Java 侧 `RainMusicDatabase.java`（框架 `SQLiteOpenHelper` + `rain.dataSQLite.db`），
+  设置是 Java 侧 `RainMusicAppSettingChannels`（落 `CapacitorStorage`）。**读阶段 2 时不要以为 Android 走的是这些 TS 文件。**
 
 ### 阶段 3：音源适配与启动链已实现；端到端播放待验
 - 网络层抽象：`src/renderer/platform/http/{index,desktop,web}.js`（**构建期替换**，不是运行期三元）
@@ -196,8 +238,26 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 ```
 **新增负向回归守卫**：用同一套替身编一个"故意不处理 `JSONException`"的调用方，断言 javac 非 0 **且失败原因就是 JSONException** ⇒ 替身一旦再变宽松就会变红（368 例）。
 
-**遗留待办**：测试里的 `android.*` 替身签名**没有对着真 `android.jar` 核过**；真 `assembleDebug` 仍未在本机跑过（无 SDK）。
-另两套 org.json 替身负向用例已于 2026-10-14 补齐，并做了仓库外变异验证（见 §3）。
+**遗留待办（2026-10-15 已关闭第 1 条）**：
+
+1. ~~测试里的 `android.*` 替身签名**没有对着真 `android.jar` 核过**~~ —— **已核**。
+   用 `%TEMP%\rain-json-probe\vendor\android-4.1.1.4.jar`（真 Android 4.1.1.4 `android.jar`）
+   对 4 个 `android.*` 替身逐方法 `javap` 比对，结论：**没有“替身比真 API 宽松”的缺陷**，
+   所有差异都在**更严格**一侧（替身方法更少、或多了 `throws`）：
+
+   | 替身（`tests/unit/fixtures/`） | 真 API | 结论 |
+   |---|---|---|
+   | `android-music-add/Cursor.java`：`public final class Cursor` | `public interface android.database.Cursor extends java.io.Closeable` | `getColumnIndexOrThrow` / `isNull` / `getString` / `getLong` / `getInt` / `moveToNext` / `moveToFirst` / `close` **签名逐个吻合**。类 vs 接口的差异只影响“能不能 `new`”，而生产代码**从不** new 它（只有替身自己 new）⇒ 不产生假通过 |
+   | `android-music-add/SQLiteDatabase.java` | `public final class … extends SQLiteClosable` | `rawQuery(String,String[])` / `beginTransaction()` / `setTransactionSuccessful()` / `endTransaction()` 逐字吻合；`execSQL(String,Object[])` 真 API 声明 `throws android.database.SQLException`（**未受检**，继承 `RuntimeException`）而替身不声明 ⇒ 无影响；替身 `close() throws Exception` 比真的**更严** ⇒ 只会误报、不会漏报 |
+   | `android-playback-restore/Context.java` | `public abstract class android.content.Context` | `MODE_PRIVATE` / `getApplicationContext()` / `getSharedPreferences(String,int)` 逐字吻合；真类是 **abstract** 而替身可 `new` ⇒ 只有**探针脚手架**会 new 它，生产代码从不 new |
+   | `android-playback-restore/SharedPreferences.java` | `interface` + 嵌套 `Editor` | 替身是**真 API 的子集**（少了 `getAll` / `getInt` / … ），`putString` 返回 `Editor`、`commit` 返回 `boolean` 与真的一致 ⇒ 更严格，安全 |
+
+   **仍然没有核对的一项**：`com.getcapacitor.*` 那套替身（`Plugin` / `PluginCall` / `JSObject` / `JSArray` / `Logger` …）
+   本机**拿不到真的 Capacitor 制品**（`~/.gradle/caches/modules-2` 不存在，无法 `javap`）。
+   这一项只能靠 **CI 的 `gradlew assembleDebug`** 兜底 —— 它能抓编译错误，抓不到“替身语义更宽松”。
+2. 真 `assembleDebug` 仍未在本机跑过（**无 Android SDK**；`ANDROID_HOME` / `ANDROID_SDK_ROOT` 均为空，
+   `%LOCALAPPDATA%\Android\Sdk` 不存在）。本机只有 JDK 20（`javac` / `javap` 可用）。
+3. 另两套 org.json 替身负向用例已于 2026-10-14 补齐，并做了仓库外变异验证（见 §3）。
 
 ### 复核清单（若要重跑这次修复的验证）
 
@@ -218,6 +278,122 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | **阶段 4 的下载部分** | 持久化、原生HTTP/断点传输、歌词/MP3标签和文件读取已接入；真机待验 |
 | **阶段 5 自定义源** | Worker宿主、lx/rain、8条IPC、本地文件选择、取消/切源已接入；社区脚本兼容矩阵及真机待验 |
 | **阶段 6 打包与验收** | 构建门与本地探针已建立；最新SHA CI和设备安装/运行分别核验 |
+
+### 6.1 原生侧**完全没有注册**、而渲染层**会调**的通道（2026-10-15 实测）
+
+做法：脚本化比对 `src/common/ipcNames.ts` 的全部通道（`${模块名}_${键名}`，**注意是键名不是字面量**，
+见 `ipcNames.ts:178-183` 那个自改写循环）与 11 个 Java 通道类里 `RainMusicIpcHandlers.register(...)` /
+`bind(...)` 的实参。原生登记 **48 条**；下面的差额是**逐条追过调用点**的（`file:line` 为证据）：
+
+| 功能面 | 未注册的通道 | 渲染层调用点（已核） | 现象 |
+|---|---|---|---|
+| **主题**（7 条） | `winMain_get_themes`、`winMain_save_theme`、`winMain_remove_theme`、`winMain_theme_file_import`、`winMain_theme_file_copy`、`winMain_theme_file_move`、`winMain_theme_file_remove` | `src/renderer/store/utils.ts:33`（`getThemes`）← `SettingBasic.vue:86`、`ThemeSelectorModal.vue:65`、`ThemeEditModal/index.vue:357`（都是**真实调用点**，不是 import 行）；`src/renderer/platform/themeFiles.js` ← 主题图片导入/复制/移动/删除 | **主题列表为空、切换主题无效**；且 `store/utils.ts:38` 的 `void getTheme().then(...)` **没有 `.catch`** ⇒ 打开主题设置页会留下**未处理的 rejection**。主题图片文件操作会拿到 `IPC_CHANNEL_UNSUPPORTED` |
+| **不喜欢**（4 条） | `dislike_get/add/overwrite/clear_dislike_music_infos` | `src/renderer/core/dislikeList.ts:8,17,21,25`（真实调用）← `useDataInit.ts:107`（**已有 skippable 兜底**，跳过初始化）、`player/action.ts:651`（"不喜欢这首歌"）、`DislikeListModal.vue:30`（设置页规则编辑） | 初始化被**有意跳过**；但"不喜欢某首歌"与设置页的规则编辑**没有兜底** ⇒ 报错 |
+| **换源缓存**（4 条） | `winMain_get/save/clear_other_source`、`winMain_get_other_source_count` | 仅 `src/renderer/core/music/local.ts:21,25,31,44,50,56`（**本地音乐**匹配用） | 运行期"找其他音源"走的是 `core/music/utils.ts:21` 的 `musicSdk.findMusic`，**不走**这 4 条 ⇒ **不属于首版阻塞**；本地音乐功能本来就未开放 |
+| **音效预设**（4 条） | `winMain_get/save_sound_effect_eq_preset`、`winMain_get/save_sound_effect_convolution_preset` | `src/renderer/store/soundEffect.ts:16,23,33,46,53,63` ← `components/common/SoundEffectBtn/*.vue` | 进入音效设置并打开预设列表时报错 |
+| **启动参数**（1 条） | `common_get_env_params` | `src/renderer/core/useApp/index.ts:103` | **已按设计降级**（`invokeWithFallback` → 渲染层默认值）；这条**不是**缺口，登记在此仅为对齐契约 |
+| **初始化握手**（1 条） | `winMain_inited` | `src/renderer/utils/ipc.ts:26`（`sendInited()`） | `send` 到无 handler 的通道 ⇒ **每次启动一条 `console.error`**（`deliver()` 的失败分支，不静默、也不崩）。原生侧没有 `main_window_inited` 的消费者（桌面歌词窗口在 Android 不存在） |
+
+**另外一批同样未注册、但本轮没有逐个追调用点的 C 类通道**：`winMain_get_cache_size`、`winMain_clear_cache`、
+`winMain_show_save_dialog`、`winMain_open_dir_in_explorer`、`common_get_system_fonts`、`winMain_set_power_save_blocker`、
+`winMain_set_app_name`。它们都是**桌面专有或设置页专属**，需要时按 §4.3 的降级方案补。
+（`common_get_system_fonts` 在渲染层已有 `.catch(() => [])`，见 `utils/ipc.ts:230-232`。）
+
+> **结论**：首版范围（听歌 + 歌单管理 + 下载）的通道**已经齐了**；上面这些是**范围之外**的功能面。
+> 但其中**主题**是用户明确点过名的方向，而且它是**唯一**会出现"未处理 rejection + 功能静默为空"的一块，
+> 所以要么补原生实现，要么在渲染层按既有 `ipcFallback` 体例显式降级 —— 不要让它停在现在这个状态。
+
+### 6.2 下载执行层：独立审查确认的 8 处与桌面不一致（**已确认、未修**；2026-10-15）
+
+审查对象：提交 `2a3e4a7c` 的 `RainMusicDownloadTaskChannels.java`。方法：把原生行为逐条与桌面
+`src/renderer/worker/download/download.ts`、`src/common/utils/musicMeta/mp3Meta.js` 对照。
+**下面每一条都是"实现与桌面契约不一致"，不是"本机跑不过"** —— 现有用例全部通过，缺口是**覆盖真空**。
+
+| # | 严重度 | 原生位置（`…/ipc/RainMusicDownloadTaskChannels.java`） | 桌面依据 | 差异与后果 |
+|---|---|---|---|---|
+| 1 | **high** | `:151` `if (task.skip \|\| …)` 实为 `if (task.skip && task.file.exists()) throw` | `download.ts:73-84` | 桌面的"跳过已存在文件"检查**在 `downloaded == 0` 分支里**，且只把 `size > 100` 当"已存在"（≤100 字节视为没有，直接重下）。原生是**无条件**抛。⇒ `downloaded > 0` 的重试、以及 ≤100 字节的残留，桌面能继续、Android 直接 `error`；若残留来自"文件已改名但 DB 没来得及记完成"（下载 store 的写入是 **100 ms 节流**，`store/download/action.ts:24-28`），这条记录会**永远**下不了 —— 唯一出路是用户自己去关掉"跳过已存在文件" |
+| 2 | medium | `:271-273` | `mp3Meta.js:17,29-36` | 桌面封面下载**失败就 `delete meta.APIC` 然后照写标签**（非 `http` 的 APIC 也走这条）；原生封面一失败就抛，整个 `write_meta` 作废 ⇒ 一次封面 404 / 超时 / **webp**（原生只认 JPEG/PNG）/ 超过 8 MiB，会让**标题、歌手、专辑和 USLT 歌词全部写不进去** |
+| 3 | medium | `:183`、`:188` + catch `:221-223` | `download.ts:145-155` | 桌面在 `err.message.startsWith('Resume failed')` 时**先删掉那个不完整的文件再重启**；原生 resume 校验失败只抛，`.part` / `.resume` 原样留着 ⇒ 下次重试发出**一模一样**的 `Range` + `If-Range`、得到一模一样的失败 ⇒ **永久卡死**（而 `:131-133` 的 `remove` 又刻意保留这两个文件） |
+| 4 | medium | `:131-133`（注释"`A .part` is retained too"）、`:152-153` | `download.ts:317-325` | 桌面 `removeTask` 会删掉未完成的媒体文件；原生**从不回收** `.part` / `.resume` / `.resume.part` / `.meta.part`。下载目录是**应用私有目录**、用户看不见 ⇒ 空间**只能靠清应用数据**回收 |
+| 5 | low | `:221-223` | `download.ts:130-143,167-178` | 桌面失败**最多重试 3 次**（`retryNum > 2`）并延时 1 s，`ENOTFOUND` 还会发 `refreshUrl`；原生一次失败直接 `error` ⇒ 移动网络抖动下 Android 失败而桌面能自愈 |
+| 6 | low | `:266` | `mp3Meta.js:9-12` | 桌面 USLT 的 `language` 是 **`'zho'`**；原生写 `'eng'` ⇒ 同一首歌两个平台带不同的歌词帧 |
+| 7 | low | `:271` | `mp3Meta.js:28` | 桌面给 `music.126.net` 的封面 URL 追加 `param=500y500`；原生没有 ⇒ 网易云封面按 CDN 默认尺寸取（图不一样），也是第 2 条的额外触发源 |
+| 8 | low | `:215-219` | 桌面没有"先改名再删清单"这一步 | `move(part, task.file)` **先提交**、`manifest.delete()` 后执行，两步都在 `synchronized(gate)` 里；删清单失败会抛进 `catch`，把**已经成功的下载**报成 `error` ⇒ 文件在、状态是失败，且没有可恢复路径 |
+
+> **审查者引用错了一个路径**：它给的 `Downloader.ts:301-310` —— **这个文件不存在**。
+> 真正的桌面依据是 `src/renderer/worker/download/download.ts:145-155`。
+> **"依据优先于权威"对审查结果同样适用**：本节每一行都是我按上表两侧路径复核过的。
+> （这也解释了为什么"子代理说的"不能直接当结论。）
+
+**审查同时确认了这些部分是对的**（记下来，避免下一个人重查一遍）：
+
+- `RainMusicDownloadChannels.java` 的 SQL 文本、13 列顺序、`isComplate` 拼写、
+  `ORDER BY "position" ASC`、7 列 UPDATE 的 set 与 where，与 `statements.ts:7-72` **逐字一致**；
+  追加取行数、`top` 取 `0..n-1`（含空 `top` 的压紧）与 `index.ts:70-83` 一致。
+- 事务（`beginTransaction` / `setTransactionSuccessful` / `finally endTransaction`）、
+  与歌单写通道**共用同一把** `RainMusicListWriteLock.LOCK`、**不发任何广播**（桌面 `download.ts` 也不发）
+  —— 都符合"提交后再发、锁外发"的规矩。
+- 失败形状诚实：坏 `musicInfo` JSON 冒泡、缺表 / 打不开库抛 `IllegalStateException`、
+  重复主键与批中 SQL 失败都回滚、`update` 未知 id 是 0 行的空操作
+  （与 better-sqlite3 行为一致，**不是**静默成功）；所有 `JSONObject.put` 的受检异常都处理了。
+- `JSArray.toList()` 确实返回裸 org.json 对象（对着**已安装**的
+  `node_modules/@capacitor/android/.../JSArray.java:28-40`、`PluginCall.java:306-320` 核过），
+  渲染层的参数形状（`[params]` / `[list]` / `[ids]` / `[]`）与 `ipcBridge/capacitor.js` 的 `normalizeArgs` 对得上。
+- 频道名与 `ipcNames.ts:143-154` 一致；URL 身份两侧都走 `toExternalForm()`（**没有**百分号编码不一致的缺口）；
+  `safeFile` 的目录穿越防御用"带尾分隔符的前缀比较"。
+- Range / 206 / `.part` 的运算**没有 off-by-one**；`id` + 原始 URL + 重定向目标三者绑定正确。
+- 原子改名（temp + `Os.rename`，改名先 fsync）、`Properties.store` 之后 `getFD().sync()`、
+  ID3 头（synchsafe 长度）与 v2.2/2.3/2.4 帧头算术都正确。
+- **编码对齐**：GBK 两侧都不写 BOM（实测 `iconv-lite` 的 `addBOM` 对 GBK 是空操作），UTF-8 BOM 与桌面一致。
+- `.mp3` 判定用 `toLowerCase(Locale.ROOT)`，两个文件里没有 `trim()` / 默认 Locale 比较
+  ⇒ **§8 第 2 类（Java/JS 去重键不等价）缺陷在下载执行层不存在**。
+
+### 6.3 歌单写入 / 媒体缓存 / 播放队列恢复：独立审查确认的问题（**已确认、未修**；2026-10-15）
+
+审查对象：`RainMusicListMutationChannels.java`、`RainMusicMediaCacheChannels.java`、`RainMusicPlaybackQueueRestore.java`。
+审查者另外用**真 Java + 真 SQLite** 探针跑了 16 个作者用例之外的场景（`%TEMP%\rain-review-probe\probe.cjs`）。
+**结论：没有 blocker** —— 去重键、事务原子性、提交→广播 FIFO、快照同事务、base64 歌词语义、恢复顺序都**忠实**。
+问题集中在 `data_overwire` 的**入参宽容度**，以及两处**替身/校验的严格度**：
+
+| # | 严重度 | 位置 | 桌面依据 | 差异 | 我复核到什么程度 |
+|---|---|---|---|---|---|
+| L1 | medium | `RainMusicListMutationChannels.java:170`（`ListRow(JSONObject)` 用 `string(o,"id",true)` / `string(o,"name",false)` / `nullableString(…)`） | `src/main/event/ListEvent.ts:18-31` 的 `fixListIdType`（把数值型 `sourceListId`/`id` 转成字符串后再覆盖）；`.../list/statements.ts:30`（数值绑进 TEXT 列靠 affinity 也能写） | 旧备份 / 分享导入里带**数值型** id 时，桌面归一化后照常导入，Android **整单拒绝**（渲染层确实能产出这种载荷：`SettingBackup.vue:108-128` 直接透传 `list.id`） | **两侧代码都读过，成立** |
+| L2 | medium | `:121` `if (groups.containsKey(row.id)) throw … "Duplicate or reserved list id"` | `.../list/index.ts:401-417`（不按 id 过滤，任何 userList id 都插） | `data_overwire` 的 userList 里出现 `default` / `temp` 会让**整单失败**；桌面会插进去。而这条拒绝**没有文档**（`ipc-contract.md:129` 只写了 `player_list_remove` 的保留 id；`continuation-2026-10-15.md:7` 只写了重复 id 回滚） | **已复核**。并同意审查者的判断：**保留 id 的拒绝本身站得住** —— 真插进去以后 `player_list_remove` 又拒绝保留 id ⇒ 那一行**永远删不掉**。所以这里要的是**拍板 + 写进文档**，不是照桌面改 |
+| L3 | low | `:59` 拒绝 `fromId == toId` | `.../list/index.ts:292-324` 允许同歌单移动 | 同歌单移动在桌面合法、Android 直接拒 | **未逐行复核**。审查者说当前 UI 到不了（`useListInfo.js:12`、`FavoriteButton.vue:44` 已排除源歌单）⇒ 先记为"待确认的死输入" |
+| L4 | low | `:16,21,33` 在 `player_list_music_clear` 上广播 | `winRendererEvent.ts:51-53` 桌面把 `list_music_clear` 发在 `player_list_data_overwire` 上，**而桌面自己的订阅者挂在 `list_music_clear`**（`rendererListManage.ts:239`） | 桌面这条广播**自己接不到**；Android 选了唯一能被消费的那个 | **未复核**。`clearListMusics` 当前**没有活调用者** ⇒ 记录为**有意分歧**即可，别为它改代码 |
+| L5 | low | `:164` `meta=object(o.opt("meta")).toString()` ⇒ `meta:null` 抛 "Expected object" | `.../list/index.ts:44` 的 `JSON.stringify(info.meta)` ⇒ 落库成文本 `"null"`；而 Android 自己的**读**路径容忍 NULL meta（`RainMusicListMusicGetChannels.java:574-588`） | 一条 meta 为 NULL 的行，会让它**所在的歌单再也写不进去** | **部分复核**（写侧的 `string/object` 用法读了；读侧的容忍未读） |
+| L6 | low，**但属于本项目最深的那条教训** | `RainMusicMediaCacheChannels.java:107` 用**严格**的 `android.util.Base64.decode(text, DEFAULT)` | `src/main/worker/dbService/modules/lyric/index.ts:49-54,80-81` 用 `Buffer.from(text,'base64')`（**宽容**） | **测试替身比真 API 宽松**：`android-media-cache-channels.test.cjs:47` 把 `decode` 实现成 `java.util.Base64.getMimeDecoder().decode(text)` —— MIME 解码器**忽略字母表外的字符**，而真 `android.util.Base64.decode(String,DEFAULT)` 对坏 base64 **抛 `IllegalArgumentException`** ⇒ 一条坏歌词行在**真机上抛错**、在桌面上返回宽容解码的文本 | **已复核**（替身源码 + 真 `android-4.1.1.4.jar` 的 `javap` ABI）。**这就是 §5 那条"替身必须逐字照抄真实行为"的同类问题**，只是这次差在**行为**而不是**签名** ⇒ **CI 编译抓不到**。两件事要分开做：(a) 先把替身改成与真 API 同严格（否则本机结论继续不成立）；(b) 再决定坏 base64 到底该抛还是该宽容 |
+| L7 | low | `RainMusicPlaybackQueueRestore.java:16-20`：非整数 `index` 抛错 | `.../list/index.ts:210-216` 返回 `-1`（容忍垃圾） | 损坏的 `playInfo` 会让启动期 `get_data` **抛**，而桌面返回 `null` | **前半已复核**（restore 的抛错代码读了）。⚠️ 审查者给的第二个位置 `RainMusicDataChannels.java:129-131` **对不上** —— 那几行是 `saveData` 的"缺 `data` 字段"报错，**不是** playInfo 类型校验 |
+
+> **两位审查者一共给错了两处引用**（`Downloader.ts:301-310` 那个文件根本不存在；`RainMusicDataChannels.java:129-131` 对不上）。
+> **引用本身不是证据** —— 本文档只保留我实际复核过的 `file:line`。**"依据优先于权威"对审查结果同样适用。**
+
+**审查确认"没问题"的部分**（记下来，省下一次重查；两位审查者的结论一致）：
+
+- **命名**：8 条 mutation + 13 条媒体缓存通道名与桌面键名派生的名字**逐个一致**；
+  `ipcNames.ts:178-183` 是拿**键名**拼前缀，所以 `winMain_get_palyer_lyric`（那个拼错的）**确实是**真通道名 ——
+  "拼写属于 ABI"的注释是对的。
+- **广播**：8 条 mutation 的广播载荷 = 调用方原载荷，且**只在提交之后、锁之外**发
+  （探针实测 `locked=false`、`commits>0`）；失败路径**不发**。
+- **原子性**：每一条多表 mutation 失败时**所有表一起回滚**且不发广播（探针：`rollbacks=1`、`events=[]`、DB 复原）。
+- **FIFO**：前一个事件发布失败**不会**吃掉后面的事件，失败只返回给**它自己那张票**
+  （`android-music-add-channels.test.cjs:171` 的 `QueueFailureProbe.java` 已证）。
+- **去重等价**：`dedupe()` 与 `filterPlaybackQueueAdditions` / 普通 id 集合过滤**等价**
+  （复用已复核的 NFKC + JS `trim` + `Locale.ROOT` 键）。
+- **顺序语义**：追加 = 末行 order+1 且**保留空洞**；`top` = 删 order + 重编号；
+  `update_position` = 整表重编号 + `Math.min(position,len)`，**负数 = len+position**；
+  `music_update_position` 在写 SQL 之前就拒掉未知/重复 id。
+- **`data_overwire` 步骤序**（`my_list` 删+插 position=index → 两张音乐表清空 → default/temp/user 顺序写入、
+  order 每个歌单从 0 重新开始）与 `overwriteListData` **一致**；`tempList` 只在键缺失/为 JSON null 时回落到读库（`??` 语义）；
+  `love` 被接受。
+- **媒体缓存**：13 通道、载荷形状对齐 `rendererEvent/music.ts:7-58` 与 `utils/ipc.ts:502-544`；
+  **不发广播**；三个新文件里 **`catch` 数为 0**；UTF-8 base64 用 `NO_WRAP`；保存是追加；
+  每种类型**最后一行胜出**；计数是**行数**；raw/edited 隔离（含历史 edited 行）；
+  `get_palyer_lyric` 在主歌词为空时回落 raw 且**总是**带 `rawlrcInfo`；缺表/计数失败**大声抛**。
+- **恢复**：严格 JSON 校验（尾部垃圾拒绝）；无快照时回落读库；先按 musicId、再按快照下标定位；
+  再按 id + 身份键与**去重后的当前队列**重新比对；未命中返回 `null`（**不是**半成品对象）且**不删快照**；
+  persist→complete 的顺序与 `data.ts:7-25` 一致，`complete()` 先按键删再清 `queueStartupRestorePending`
+  （与 `dbService/index.ts:218-221` 同序），两个调用者都持列表锁 ⇒ **不会删掉更新的队列状态的快照**。
 
 ### 下载部分的已知要点
 - Android下载由主WebView façade转原生执行器，下载Worker/Node文件与socket实现仅留给桌面构建。
@@ -272,11 +448,13 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 ```
 静默 >3 分钟（目标文件 mtime 不再变化）
 且 node --test tests\unit\*.test.cjs 的 fail = 0
-且 tests >= 基线（当前 381）
+且 tests >= 基线（**工作区口径 455**，2026-10-15 复跑值；提交快照口径以 CI 为准）
 ```
 
-- **必须从实际运行输出解析 `ℹ tests/pass/fail` 三个数**，不能只看 exit code。
+- **必须从实际运行输出解析 `tests/pass/fail` 三个数**，不能只看 exit code。
+  （旧文写的是 `ℹ tests/pass/fail`；本机 Node 输出的是 `? tests` 那种行 —— **认数字，不要认前缀字符**。）
 - **若首跑红：复跑一次**。仍红 ⇒ 当真失败；转绿 ⇒ 抖动（本会话确认存在抖动）。**不许"一直重试到绿"**。
+- **注意基线里含用户另线未提交的测试**：数量对不对要连 `git status --porcelain` 一起看，别把"用户又加了测试"当成"我漏了测试"。
 - **本会话我犯过一次错**：门里只检查了"静默"没检查 `fail 0` ⇒ 推出去了一个红状态。**别重犯**。
 
 ### 7.3 变异自证
@@ -312,10 +490,24 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | 3 | **库文件名被插件改写**（`@capacitor-community/sqlite` 的 `getDatabaseName()` 砍掉 `.db` 再拼 `SQLite.db` ⇒ `rain.data.db` 实为 **`rain.dataSQLite.db`**）| 两侧各开一份库 ⇒ **"歌单丢了"** |
 | 4 | **删除保留 id**（`default`/`temp` 有子表行但 `my_list` 里没有父行）| `my_list` 删 0 行（看似成功）+ 子表真删 ⇒ **静默清空试听列表** |
 
-另有 2 条**已登记待真机回答**（在 `src/main/worker/dbService/adapter/android.ts` 的「未验证清单」）：
-- 插件用 **SQLCipher**、原生用框架 `SQLiteOpenHelper`，**同一文件**两套实现打开是否安全
-- 插件**不写 `user_version`** ⇒ 若插件先建库（`user_version=0`）而原生 `onUpgrade(0→4)` **抛错**，用户会看到"打不开"
-- 另需对齐：**`user_version` 应为 4**（阶段 2a 的 `createConnection({version: 1})` 是占位）；库路径两边必须一致
+另有 2 条**曾登记为“待真机回答”**（原写在 `src/main/worker/dbService/adapter/android.ts` 的「未验证清单」里）。
+**2026-10-15 复核后这两条在当前架构下已经不成立**，但仍要看清它们的边界：
+
+- 插件用 **SQLCipher**、原生用框架 `SQLiteOpenHelper`，**同一文件**两套实现打开是否安全 ——
+  **当前不可达**：`@capacitor-community/sqlite` 的驱动只在 `createCapacitorSQLiteDriver()` 里被构造，
+  而 `src/main/**` 不在 Android 产物中（§0 第 4 条的 ABSENT 证据）⇒ 真机上**只有**框架
+  `SQLiteOpenHelper` 一侧在开库。**若**以后把主进程业务层搬进 WebView（或改用插件走 SQL），
+  这条会**立刻**重新生效，届时必须按原清单实测。
+- 插件**不写 `user_version`** ⇒ 若插件先建库（`user_version=0`）而原生 `onUpgrade(0→4)` **抛错**，
+  用户会看到"打不开" —— 同上，**当前不可达**；但 `onUpgrade` **抛错不猜迁移**的既定策略本身是对的
+  （`RainMusicDatabase.java:589-594`），不要为了"看起来能升级"去放宽它。
+- ~~另需对齐：**`user_version` 应为 4**（阶段 2a 的 `createConnection({version: 1})` 是占位）~~
+  —— **已关闭**。现在版本号只有一个出处链：`tables.ts:231 DB_VERSION='4'`
+  → 原生 `RainMusicDatabase.SCHEMA_VERSION_TEXT="4"`（`SCHEMA_VERSION = Integer.parseInt(...)`）
+  → JS 侧 `adapter/android.ts ANDROID_DB_VERSION = Number(DB_VERSION)`。**没有残留的字面量 `1`。**
+  另有守卫用例逐字锁死：`tests/unit/android-list-channels.test.cjs:263-289`（12 条 DDL 与 `tables.ts` 逐字一致、顺序一致）、
+  `:291-323`（`SCHEMA_VERSION_TEXT == DB_VERSION`）、`:325-332`（`DATABASE_NAME == 'rain.dataSQLite.db'`
+  且桌面仍是 `rain.data.db`）。**库路径两边一致这件事现在是被测试钉住的，不是靠人记。**
 
 ---
 
@@ -341,6 +533,21 @@ npx.cmd cap sync android                                               # Capacit
 ## 10. 一句话总结现状
 
 **歌单全部既有通道、下载存储/执行、自定义源宿主、媒体缓存及播放队列恢复已有实现。
-本轮具体门禁与证据见 `continuation-2026-10-15.md`；APK编译必须查询新SHA的CI。**
-剩余验收重点是设备搜索/播放/下载/重启、系统文件选择、HTTP/CORS/请求头和SQLite路径版本一致性。
+本轮具体门禁与证据见 `continuation-2026-10-15.md`；APK 编译必须查询新 SHA 的 CI。**
+
+**2026-10-15 复核补充（这四句是这一轮的结论）**：
+
+1. **首版三件事（听歌 / 歌单管理 / 下载）的通道已经齐了**；本机门禁全绿、`2a3e4a7c` 的
+   `verify` 与 `debug-apk` 都是 success、APK 产物未过期。
+2. **Android 上只有 Java 插件在跑** —— `src/main/**` 不在 Android 产物里（§0 第 4 条）。
+   以后读任何 `*.android.ts` 的说明，先问一句"它到底是不是 Android 上会被求值的代码"。
+3. **范围之外仍然缺一圈通道**：**主题（7 条，且会留下未处理 rejection）**、不喜欢（4 条）、
+   音效预设（4 条）等，见 §6.1。其中主题是用户点过名的方向 —— 要么补原生实现，要么显式降级。
+4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
+   HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
+   ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
+5. **下一轮的第一优先不是设备验收，而是 §6.2 的 8 处下载执行层缺陷**（1 处 high：`skip` 无条件抛 +
+   resume 失败/部分文件永不回收 ⇒ 用户无法自救）。§6.3 的 L1/L2/L6 紧随其后 ——
+   尤其 **L6 要先把替身改成与真 API 同严格**，否则本机结论继续不成立。
+
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**
