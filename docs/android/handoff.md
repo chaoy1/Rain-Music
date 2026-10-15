@@ -26,8 +26,10 @@
 9. **对歌单写入 / 媒体缓存 / 播放队列恢复做了一轮独立审查**：**没有 blocker**，
    问题集中在 `data_overwire` 的入参宽容度；其中一条（**测试替身比真 API 宽松**，
    `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。
-   **其中 L6 本轮已处理**：替身改成与真 API 同严格，并**拍板**"坏 base64 就大声抛、
-   不跟桌面一起宽容"，理由与代价写在 §6.3.1；L1/L2 等其余各条仍未修。
+   **其中 L6 与 L1 本轮已处理**：L6 把替身改成与真 API 同严格、并**拍板**"坏 base64 就大声抛、
+   不跟桌面一起宽容"（§6.3.1）；L1 让 `data_overwire` 接受数值型旧 ID、与同仓的 `list_add` 和桌面
+   `fixListIdType` 对齐（§6.3.2，顺带登记了 §8 第 5 类跨边界陷阱）。
+   L2（保留 id 的拒绝要不要照桌面改）等其余各条仍未修 —— **L2 需要先拍板**。
 10. **渲染层 / Web 侧也做了一轮独立审查**（这一份回来得比前两份晚很多，中途一度以为丢了 —— 所以**不要因为没等到就当作没审**）：
     **没有 blocker**，但有一条 **high**：自定义源的 HTTP 请求体编码与桌面不一致
     （脚本用 `body` + `Content-Type: application/json` 会被**表单序列化**，头却还是 json）——
@@ -422,7 +424,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 - `.mp3` 判定用 `toLowerCase(Locale.ROOT)`，两个文件里没有 `trim()` / 默认 Locale 比较
   ⇒ **§8 第 2 类（Java/JS 去重键不等价）缺陷在下载执行层不存在**。
 
-### 6.3 歌单写入 / 媒体缓存 / 播放队列恢复：独立审查确认的问题（**L6 本轮已处理，其余未修**；2026-10-15）
+### 6.3 歌单写入 / 媒体缓存 / 播放队列恢复：独立审查确认的问题（**L6、L1 本轮已处理，其余未修**；2026-10-15）
 
 审查对象：`RainMusicListMutationChannels.java`、`RainMusicMediaCacheChannels.java`、`RainMusicPlaybackQueueRestore.java`。
 审查者另外用**真 Java + 真 SQLite** 探针跑了 16 个作者用例之外的场景（`%TEMP%\rain-review-probe\probe.cjs`）。
@@ -431,7 +433,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 
 | # | 严重度 | 位置 | 桌面依据 | 差异 | 我复核到什么程度 |
 |---|---|---|---|---|---|
-| L1 | medium | `RainMusicListMutationChannels.java:170`（`ListRow(JSONObject)` 用 `string(o,"id",true)` / `string(o,"name",false)` / `nullableString(…)`） | `src/main/event/ListEvent.ts:18-31` 的 `fixListIdType`（把数值型 `sourceListId`/`id` 转成字符串后再覆盖）；`.../list/statements.ts:30`（数值绑进 TEXT 列靠 affinity 也能写） | 旧备份 / 分享导入里带**数值型** id 时，桌面归一化后照常导入，Android **整单拒绝**（渲染层确实能产出这种载荷：`SettingBackup.vue:108-128` 直接透传 `list.id`） | **两侧代码都读过，成立** |
+| L1 | medium | `RainMusicListMutationChannels.java:170`（`ListRow(JSONObject)` 用 `string(o,"id",true)` / `string(o,"name",false)` / `nullableString(…)`） | `src/main/event/ListEvent.ts:18-31` 的 `fixListIdType`（把数值型 `sourceListId`/`id` 转成字符串后再覆盖）；`.../list/statements.ts:30`（数值绑进 TEXT 列靠 affinity 也能写） | 旧备份 / 分享导入里带**数值型** id 时，桌面归一化后照常导入，Android **整单拒绝**（渲染层确实能产出这种载荷：`SettingBackup.vue:108-128` 直接透传 `list.id`） | **两侧代码都读过，成立 + 本轮已修** —— 见 §6.3.2 |
 | L2 | medium | `:121` `if (groups.containsKey(row.id)) throw … "Duplicate or reserved list id"` | `.../list/index.ts:401-417`（不按 id 过滤，任何 userList id 都插） | `data_overwire` 的 userList 里出现 `default` / `temp` 会让**整单失败**；桌面会插进去。而这条拒绝**没有文档**（`ipc-contract.md:129` 只写了 `player_list_remove` 的保留 id；`continuation-2026-10-15.md:7` 只写了重复 id 回滚） | **已复核**。并同意审查者的判断：**保留 id 的拒绝本身站得住** —— 真插进去以后 `player_list_remove` 又拒绝保留 id ⇒ 那一行**永远删不掉**。所以这里要的是**拍板 + 写进文档**，不是照桌面改 |
 | L3 | low | `:59` 拒绝 `fromId == toId` | `.../list/index.ts:292-324` 允许同歌单移动 | 同歌单移动在桌面合法、Android 直接拒 | **未逐行复核**。审查者说当前 UI 到不了（`useListInfo.js:12`、`FavoriteButton.vue:44` 已排除源歌单）⇒ 先记为"待确认的死输入" |
 | L4 | low | `:16,21,33` 在 `player_list_music_clear` 上广播 | `winRendererEvent.ts:51-53` 桌面把 `list_music_clear` 发在 `player_list_data_overwire` 上，**而桌面自己的订阅者挂在 `list_music_clear`**（`rendererListManage.ts:239`） | 桌面这条广播**自己接不到**；Android 选了唯一能被消费的那个 | **未复核**。`clearListMusics` 当前**没有活调用者** ⇒ 记录为**有意分歧**即可，别为它改代码 |
@@ -500,6 +502,41 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
   复制/改写的副本先后出过两种假信号（全红 8 条 / 缺文件 ENOENT），
   最后把整条变异工装**改用 Node 写**（`fs.cpSync` + `readFileSync('utf8')`）才稳定。
   **教训：变异工装本身不要用会按 ANSI 读文件的工具去搬 UTF-8 源码。**
+
+#### 6.3.2 本轮已修：L1（`data_overwire` 接受数值型旧 ID）
+
+**问题**：`RainMusicListMutationChannels.ListRow(JSONObject)` 原来对 `id` / `name` / `source` / `sourceListId`
+**严格要 String**，而桌面在 `src/main/event/ListEvent.ts:18-31` 的 `fixListIdType` 里**先把数值型归一化**
+（注释写明是"兼容 v2.3.0 之前版本插入数字类型的 ID"）。于是那种旧备份 / 分享导入在 Android 上会让
+**整单 `data_overwire` 失败** —— 一个历史字段格式把整个导入挡在门外。
+
+**判据不是"审查者说的"，而是本仓库里已经存在的先例**：兄弟通道
+`RainMusicListWriteChannels` 的 `list_add`（同文件的 `column` / `optionalColumn`）**早就**明写
+"字符串（或数字 / 布尔 / null）"并 `String.valueOf`。同一个仓库里两条相邻通道对同一种历史数据
+一个宽容一个拒绝，这本身就是缺陷；对齐它同时也对上了桌面。
+
+**改法**：新增 `scalarText()` / `scalar()` / `nullableScalar()`，`ListRow(JSONObject)` 的四列改走它们。
+`Song(JSONObject)` **故意不动** —— 审查者的证据只覆盖 userList 行，而歌曲 id 在本工程里始终是字符串
+（本地音乐是路径、在线歌曲是 `source_id`）；没有证据就不扩大改动面。
+
+**⚠️ 这里有一个**新的**跨边界陷阱（属于 §8 第 2 类），已单独记进 §8**：
+JS 的 `String(1700)` 是 `"1700"`，而 Java 的 `String.valueOf(1700.0d)` 是 **`"1700.0"`**。
+JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能是 `Double`** ——
+直接 `String.valueOf(Number)` 会造出一个**两边不相等**的 ID（桌面那个"意外在末尾追加 `.0`"的老问题，
+会在 Java 这一侧重现）。所以整数先走 `(long)` 转十进制，只有非整数才交给 JVM 格式化。
+
+**证据**：
+
+- `tests/unit/android-list-mutations.test.cjs` 新增 `numeric-ids` 用例
+  （`userList: [{ id: 1700, sourceListId: 42, name: 7, list: [song] }]`）与新断言：
+  不能有 error、`my_list` 里的 id 必须是 `"1700"`、order 正确。
+  **我第一版把期望顺序写错了**（探针按 `listId` 字符串序取行，`'1700'` 在 `'default'` 之前），
+  实跑 diff 显示 id 本身完全正确 —— 是断言写错，不是实现错。
+- 该用例**同时**被既有的"广播载荷 = 原始载荷、锁外发、提交后发"那条测试覆盖到（它不在排除名单里），
+  所以数值载荷的广播路径也被顺带钉住了。
+- 变异（仓库外副本 `%TEMP%\rain-mut\l1\`，把四列改回 `string`/`nullableString`）：**fail 2**，
+  主失败正是新用例；第二条是上面那条广播测试（`error` 不为 undefined）—— 属于**合理的连带**，
+  不是独立发现，记在这里以免下一个人误读。
 
 ### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1、W2 本轮已修**；2026-10-15）
 
@@ -763,9 +800,9 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 
 ---
 
-## 8. 本会话拦截的 4 类"跨边界缺陷"（各自自洽但合起来错）
+## 8. 本会话拦截的 5 类"跨边界缺陷"（各自自洽但合起来错）
 
-这三类都**本机测不到、CI 编译测不到**，只有**跨边界核对**才能发现 —— 请对同类风险保持敏感：
+这五类（第 5 类是 2026-10-15 新登记的）都**本机测不到、CI 编译测不到**，只有**跨边界核对**才能发现 —— 请对同类风险保持敏感：
 
 | # | 缺陷 | 不拦截的后果 |
 |---|---|---|
@@ -773,6 +810,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | 2 | **去重键 Java/JS 不等价**（JS `trim()` 吃所有 Unicode 空白、`toLowerCase()` 与区域无关；Java 的 `trim()` 只吃 ≤U+0020、`toLowerCase()` 依赖默认 Locale）| 合并集合与渲染层不一致 ⇒ **能播的歌变成播不了** |
 | 3 | **库文件名被插件改写**（`@capacitor-community/sqlite` 的 `getDatabaseName()` 砍掉 `.db` 再拼 `SQLite.db` ⇒ `rain.data.db` 实为 **`rain.dataSQLite.db`**）| 两侧各开一份库 ⇒ **"歌单丢了"** |
 | 4 | **删除保留 id**（`default`/`temp` 有子表行但 `my_list` 里没有父行）| `my_list` 删 0 行（看似成功）+ 子表真删 ⇒ **静默清空试听列表** |
+| 5 | **数字转字符串的写法不等价**（JS `String(1700)` = `"1700"`；Java `String.valueOf(1700.0d)` = **`"1700.0"`**）| 同一份旧备份导入两平台得到**不同的 list id** ⇒ 歌单对不上、看起来像"导入丢了一半"（§6.3.2 的 L1 修复必须显式走 `(long)` 才躲开它）|
 
 另有 2 条**曾登记为“待真机回答”**（原写在 `src/main/worker/dbService/adapter/android.ts` 的「未验证清单」里）。
 **2026-10-15 复核后这两条在当前架构下已经不成立**，但仍要看清它们的边界：
@@ -830,16 +868,16 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **本轮实际修掉了 9 处、并拍板了 1 处**：§6.2 的下载执行层 6 处（含那处 high）+ §6.4 的 W1、W2
-   （两处都在自定义源这条首版链上）+ §6.3 的 L6（替身严格度 + 坏 base64 的取舍）。
-   每一处都配了断言与**变异验证**（下载 6 个、W1 两个、W2 两个、L6 一个，逐个被对应断言捕获）。
+5. **本轮实际修掉了 10 处、并拍板了 1 处**：§6.2 的下载执行层 6 处（含那处 high）+ §6.4 的 W1、W2
+   （两处都在自定义源这条首版链上）+ §6.3 的 L6（替身严格度 + 坏 base64 的取舍）、L1（数值型旧 ID）。
+   每一处都配了断言与**变异验证**（下载 6 个、W1 两个、W2 两个、L6 一个、L1 一个，逐个被对应断言捕获）。
+   **本机门禁：lint 0 errors、四个 tsc exit 0、单测 461/461 fail 0；三个代码提交的 CI 全部 success。**
    各节都留了"仍然没修、并且说明了为什么"的清单。**下一轮的第一优先**是：
    - **§6.4 的 W3**（medium：`filterSources` 会留下 `actions` 为空的平台，
      而"一个可用平台都没有"也被当成功发布 ⇒ 播放死在后面的 TypeError 上，而不是初始化时明确报错。
      ⚠️ **先核对桌面是不是也这样**：`preload.js:124-141` 看起来**同样**不检查空 `actions`，
      所以这可能是一处"与桌面一致但两侧都糟"的地方 —— 那就该**记录 + 单独立项**，而不是单向改 Android）；
-   - **§6.3 的 L1 / L2**（`data_overwire` 的入参宽容度：L1 是数值型 id 被整单拒绝，
-     与桌面 `fixListIdType` 不一致，属于可直接对齐的；L2 需要先拍板再写文档）；
+   - **§6.3 的 L2**（保留 id 的拒绝：需要**先拍板**再改文档/代码，理由是拒绝本身站得住）；
    - 再往后是 §6.2 剩下的第 4、5 处、§6.4 的 W4 与 W10。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

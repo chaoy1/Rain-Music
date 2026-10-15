@@ -28,6 +28,9 @@ const cases = [
   operation('move-bottom', 'music_move', { fromId: 'u', toId: 'v', musicInfos: [song('b')], addMusicLocationType: 'bottom' }),
   operation('list-position', 'update_position', { position: 0, ids: ['u', 'w'] }),
   operation('all', 'data_overwire', { defaultList: [song('n')], userList: [{ id: 'z', name: 'Z', locationUpdateTime: null, list: [song('q')] }] }, { seed: [...seed, song('t', 'temp')] }),
+  // v2.3.0 之前的备份会把**数值型** ID 写进 userList：桌面 `ListEvent.ts:18-31` 的 fixListIdType
+  // 就是为它写的。本通道原来严格要求 String ⇒ 那种旧备份会让**整单** data_overwire 失败。
+  operation('numeric-ids', 'data_overwire', { defaultList: [song('n')], userList: [{ id: 1700, sourceListId: 42, name: 7, list: [song('q', '1700')] }] }),
   operation('bad-meta', 'music_overwrite', { listId: 'u', musicInfos: [song('n', 'u', 0, 'New')] }, { badMeta: true }),
   operation('invalid-meta', 'music_update', [{ id: 'u', musicInfo: { ...song('a'), meta: 'bad' } }]),
   operation('duplicate-overwrite', 'music_overwrite', { listId: 'u', musicInfos: [song('n'), song('n')] }),
@@ -87,6 +90,13 @@ test('Android full overwrite replaces all tables, retains omitted temp and neste
   assert.deepEqual(probe().all.lists.map(r => r[0]), ['z'])
   assert.deepEqual(order(probe().all), [['default', 'n', 0], ['temp', 't', 0], ['z', 'q', 0]])
   assert.deepEqual(JSON.parse(probe().all.rows.find(r => r[1] === 'q')[3]), song('q').meta)
+})
+test('Android full overwrite accepts numeric legacy list ids and stringifies them as integers', () => {
+  const result = probe()['numeric-ids']
+  assert.equal(result.error, undefined, '数字型 ID 不能整单拒绝：桌面 fixListIdType 就是为这种旧备份写的')
+  assert.deepEqual(result.lists.map(row => row[0]), ['1700'], '整数 ID 必须写成 "1700"，不是 "1700.0"（两边要相等）')
+  // 探针按 listId 排序取行，所以 '1700' 在 'default' 之前（字符串序，不是插入序）。
+  assert.deepEqual(order(result), [['1700', 'q', 0], ['default', 'n', 0]])
 })
 test('Android list writes roll back every operation and never broadcast failures', () => {
   for (const item of cases.filter(c => c.name.endsWith('-rollback'))) {

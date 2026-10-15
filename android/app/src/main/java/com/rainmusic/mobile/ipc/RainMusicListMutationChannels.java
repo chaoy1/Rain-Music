@@ -157,6 +157,42 @@ public final class RainMusicListMutationChannels {
     private static JSONArray array(Object raw) { if (!(raw instanceof JSONArray)) throw new IllegalArgumentException("Expected array"); return (JSONArray)raw; }
     private static String string(JSONObject object,String field,boolean nonempty) { Object value=object.opt(field); if (!(value instanceof String) || (nonempty && ((String)value).isEmpty())) throw new IllegalArgumentException("Invalid string: "+field); return (String)value; }
     private static String nullableString(JSONObject o,String key) { Object value=o.opt(key); if(value==null||value==JSONObject.NULL) return null; return string(o,key,false); }
+    /**
+     * 标量 → 文本。**数字与布尔也接受**，与兄弟通道 `RainMusicListWriteChannels` 的 `list_add`
+     * （那里的 `column` / `optionalColumn` 明写"字符串（或数字 / 布尔 / null）"）**同一套口径**，
+     * 也与桌面 `src/main/event/ListEvent.ts:18-31` 的 `fixListIdType` 同一目的：
+     * **兼容 v2.3.0 之前把数值型 ID 写进备份的那些数据**。
+     *
+     * 本通道原来是**严格 String**，于是那种旧备份会让整单 `data_overwire` 失败
+     * （桌面会先归一化再照常导入）—— 那等于"一个历史字段格式把整个导入挡在门外"。
+     *
+     * ⚠️ **整数值必须写成十进制整数**：JS 的 `String(1700)` 是 `"1700"`，而 Java 的
+     * `String.valueOf(1700.0d)` 是 `"1700.0"` —— 直接 `String.valueOf` 会造出一个**两边不相等**的 ID
+     * （正是桌面那段注释说的"意外在末尾追加 .0"的老问题，只是这次会发生在 Java 这一侧）。
+     * 所以整数先走 `(long)`，只有非整数才交给 JVM 格式化（非整数 ID 本身没有实际含义）。
+     */
+    private static String scalarText(Object value,String field) {
+        if (value instanceof String) return (String)value;
+        if (value instanceof Boolean) return String.valueOf(value);
+        if (value instanceof Number) {
+            double raw=((Number)value).doubleValue();
+            if(!Double.isFinite(raw)) throw new IllegalArgumentException("Invalid scalar: "+field);
+            return raw==Math.rint(raw)&&Math.abs(raw)<9.007199254740992E15?String.valueOf((long)raw):String.valueOf(raw);
+        }
+        throw new IllegalArgumentException("Invalid scalar: "+field+"（需要字符串 / 数字 / 布尔）");
+    }
+    private static String scalar(JSONObject o,String field,boolean nonempty) {
+        Object value=o.opt(field);
+        if(value==null||value==JSONObject.NULL) throw new IllegalArgumentException("Invalid scalar: "+field);
+        String text=scalarText(value,field);
+        if(nonempty&&text.isEmpty()) throw new IllegalArgumentException("Invalid scalar: "+field);
+        return text;
+    }
+    private static String nullableScalar(JSONObject o,String field) {
+        Object value=o.opt(field);
+        if(value==null||value==JSONObject.NULL) return null;
+        return scalarText(value,field);
+    }
     private static List<String> strings(JSONArray array) throws JSONException { List<String> result=new ArrayList<>(); for(int i=0;i<array.length();i++) { Object v=array.get(i); if(!(v instanceof String)||((String)v).isEmpty()) throw new IllegalArgumentException("Expected nonempty string id"); result.add((String)v); } return result; }
     private static List<Song> songs(JSONArray array) throws JSONException { List<Song> result=new ArrayList<>(); for(int i=0;i<array.length();i++) result.add(new Song(object(array.get(i)))); return result; }
     private static final class Song {
@@ -167,6 +203,6 @@ public final class RainMusicListMutationChannels {
     private static final class ListRow {
         final String id,name,source,sourceId; Object time;
         ListRow(Cursor c) { id=c.getString(0); name=c.getString(1); source=c.getString(2); sourceId=c.getString(3); time=c.isNull(4)?null:c.getLong(4); }
-        ListRow(JSONObject o) { id=string(o,"id",true); name=string(o,"name",false); source=nullableString(o,"source"); sourceId=nullableString(o,"sourceListId"); Object value=o.opt("locationUpdateTime"); if(value!=null&&value!=JSONObject.NULL&&(!(value instanceof Number)||!Double.isFinite(((Number)value).doubleValue()))) throw new IllegalArgumentException("Invalid locationUpdateTime"); time=value==JSONObject.NULL?null:value; }
+        ListRow(JSONObject o) { id=scalar(o,"id",true); name=scalar(o,"name",false); source=nullableScalar(o,"source"); sourceId=nullableScalar(o,"sourceListId"); Object value=o.opt("locationUpdateTime"); if(value!=null&&value!=JSONObject.NULL&&(!(value instanceof Number)||!Double.isFinite(((Number)value).doubleValue()))) throw new IllegalArgumentException("Invalid locationUpdateTime"); time=value==JSONObject.NULL?null:value; }
     }
 }
