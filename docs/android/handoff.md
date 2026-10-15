@@ -23,9 +23,11 @@
 9. **对歌单写入 / 媒体缓存 / 播放队列恢复做了一轮独立审查**：**没有 blocker**，
    问题集中在 `data_overwire` 的入参宽容度；其中一条（**测试替身比真 API 宽松**，
    `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。**全部未修。**
-10. **渲染层 JS 那一块（`userApi/host.js`、`worker-runtime.js`、`platform/download/{android,pure}.ts`、
-    `filePicker/web.js`、`fs/web.js`、`fileUrl/web.js`、`musicMetadata/web.js`、`workers/web.ts`）本轮派出的
-    第三个审查**没有回报** ⇒ 这部分**仍然没有独立审查过**。§6.2/§6.3 的结论不能推广到它。
+10. **渲染层 / Web 侧也做了一轮独立审查**（这一份回来得比前两份晚很多，中途一度以为丢了 —— 所以**不要因为没等到就当作没审**）：
+    **没有 blocker**，但有一条 **high**：自定义源的 HTTP 请求体编码与桌面不一致
+    （脚本用 `body` + `Content-Type: application/json` 会被**表单序列化**，头却还是 json）——
+    而且**根因在 `platform/http/web.js` 的 `buildRequest` 少了 needle 那条"头是 json 就当 json"的规则**，
+    所以**要改两处**。另有一条 medium：**初始化成功之后的一次未捕获错误会把整个源毁掉**。见 **§6.4**。**全部未修。**
 
 ---
 
@@ -395,6 +397,72 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
   persist→complete 的顺序与 `data.ts:7-25` 一致，`complete()` 先按键删再清 `queueStartupRestorePending`
   （与 `dbService/index.ts:218-221` 同序），两个调用者都持列表锁 ⇒ **不会删掉更新的队列状态的快照**。
 
+### 6.4 渲染层 / Web 侧：独立审查确认的问题（**已确认、未修**；2026-10-15）
+
+审查对象：提交 `2a3e4a7c` 的渲染层新代码（`userApi/{host,worker-runtime,web,contract}.js`、
+`platform/download/{android,pure}.ts`、`filePicker/web.js`、`fs/web.js`、`fileUrl/web.js`、
+`musicMetadata/web.js`、`workers/web.ts`、`webpack.config.web.js`）。作者自己的 23 个用例全过。
+**结论：没有 blocker，但有一条 high，而且它正打在首版范围的「自定义源」上。**
+
+| # | 严重度 | 位置 | 桌面依据 | 差异与后果 | 我复核了吗 |
+|---|---|---|---|---|---|
+| **W1** | **high** | `src/renderer/platform/userApi/web.js:38` —— 把 `json: false` **写死**给每一次社区脚本请求 | `src/main/modules/userApi/renderer/preload.js:172-188`（**只有** `form`/`formData` 才置 `json = false`，`body` **不置**）+ `vendor/needle/lib/needle.js:305-306` | 脚本用 `body`（对象）+ `Content-Type: application/json` 发 POST 时，桌面发 `{"a":1}`、Android 发 `a=1`，而**头仍然是 json** ⇒ 服务器按 JSON 解析直接失败。**一整类社区音源脚本在 Android 上不可用** | **已复核，并且发现比审查者说的更宽 —— 见下面 W1 展开** |
+| W2 | medium | `userApi/host.js:123` + `worker-runtime.js:31-32` | `preload.js:163` `if (isInitedApi) return` | 初始化**成功之后**，脚本里任何一次未捕获错误 / 未处理 rejection 都走 `fatal` ⇒ 状态翻假、worker 终止、在途请求 reject、弹"源码初始化失败"。**一个本来能用的源被一次异步小错毁掉** | 未复核 |
+| W3 | medium | `userApi/contract.js:18-22`（经 `host.js:115-119`） | — | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）⇒ 就绪闸门打开、`assertApiSupport()` 为真，但 `userApi.apis[source]` 里没有 `getMusicUrl` ⇒ 播放死在后面的 TypeError 上，而不是在初始化时就明确报错 | 未复核 |
+| W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
+| W5 | low | `userApi/worker-runtime.js:25` 的能力黑名单 | — | 漏了 `navigator.sendBeacon`（Beacon 是 `[Exposed=(Window,Worker)]`）⇒ 脚本仍可绕过父侧那条被校验的 HTTP 通道直接外联 | 未复核（需真机 WebView） |
+| W6 | low | `filePicker/web.js:7` + `views/Setting/components/SettingDownload.vue:31-38` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应** | 未复核 |
+| W7 | low | `filePicker/web.js:34` | — | 取消判定靠 `focus` + 300 ms 定时器读 `input.files`；WebView 若"先 focus、后填 FileList"，会把**真选择当成取消**静默丢掉 | 未复核（需真机） |
+| W8 | low（**旧问题**，不是本次引入） | `build-config/renderer/webpack.config.web.js:46-96` + `src/common/utils/index.ts:1` | — | web 产物里**仍然有 `electron-log` 的 Node 构建**（`src/node/*`、File transport、`fs` 被替成空模块）⇒ 配置里"没有任何 Node-only 模块能进 web 产物"这句话对**日志**这条不成立（只在真写日志时才炸，而且被 electron-log 自己吞掉） | 未复核 |
+| W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | 未复核 |
+
+**W1 展开（我自己复核出来的，比审查者的结论更宽 —— 这条也说明审查结论必须回代到代码）**
+
+1. **根不只在 `userApi/web.js:38`**，还在 `src/renderer/platform/http/web.js:220`：
+   那里是 `const json = options.json === true` —— **完全没实现** needle 那条
+   "`options.json !== false` 且 `content-type == 'application/json'` 就按 JSON 发"的规则（`needle.js:305-306`）。
+   ⇒ 就算把 `userApi/web.js` 的 `json: false` 改成"不传"，请求**照样**会被表单序列化。
+   **修法必须是两处**：(a) `buildRequest` 补上 needle 的规则；(b) `userApi/web.js` 对齐桌面的选项形状
+   （`body` 不置 `json`，只有 `form`/`formData` 才置 `false`）。
+2. **爆炸半径**（决定它算不算首版阻塞）：内置音源**不受影响** ——
+   `src/renderer/utils/request.js:136` 是**显式**传 `json: format === 'json'`（默认就是 `true`），不依赖头推导。
+   **自定义源受影响**（`userApi/web.js` 强制 false）。
+   还剩一类：渲染层里任何 `request({ body: …, headers: { 'Content-Type': 'application/json' } })`
+   且**不显式传 `json`** 的调用点 —— **本轮没有做这个调用点审计**，**下一轮要先做**，它决定严重度的上限。
+3. **needle 的比较是字面相等** `== 'application/json'`，
+   所以 `application/json; charset=utf-8` **不触发**它。修的时候要**照抄这条**（否则引入新的不一致），
+   并用一个**对照 needle 本体的用例**钉住，别凭直觉。
+
+**这一轮审查确认"没问题"的部分**（省下一次重查）：
+
+- **沙箱边界**：`lx` 与 `rain` 是同一个冻结对象；白名单 `['tx','kg','wy','local']` 封闭；
+  `Object.hasOwn` 挡住 `__proto__`/`constructor`；脚本在自己的 worker realm 里改
+  `Array.prototype.includes` 也**越不过**宿主那层的白名单（`filterSources` 拿宿主的数组过滤）。
+- **播放 URL 只来自所选自定义源**：`apis()` 在 `apiSource` 为 `user_api_*` 时返回 `userApi.apis[source]`
+  （`musicSdk/api-source.js:18-19`），内置 tx/kg/wy 的 `getMusicUrl` 也走 `apis(source)`；
+  `winMain_get_music_url` **只是缓存**。
+- **就绪闸门**只在最终 init 结果上打开；失败路径有防重复结算（`useInitUserApi.ts:148`、`apiSource.ts:31`）。
+- **不泄漏 worker/port**：`stop()` 会 settle + abort + terminate；过期结果被 `generation` 拦住，
+  worker 回包还额外按每请求 token 校验。
+- **私有 MessagePort 从不挂到 `globalThis`**，`worker.onmessage` 也没被赋值
+  ⇒ 脚本里的全局 `postMessage` 到不了宿主协议。
+- **没有 HTML/eval 注入面**：`src/renderer` 与 `src/common` 里**没有** `v-html`/`innerHTML`/`dangerously*`；
+  所有源侧 URL 都过 `httpUrl`（协议、主机名、禁 userinfo、2048 上限）；歌词按长度截断、按文本渲染。
+- **产物互斥（工件级证据）**：每个 web chunk 的 source map 里只有 web 实现，没有对应桌面实现；
+  没有 `vendor/needle`、没有 `node_modules/electron`、没有裸 `ipcRenderer`/`contextBridge`；
+  桌面 `dist/` 里也没有任何 web 专属字符串（`"Directory selection requires Android"`、
+  `"_capacitor_file_"` 等）。
+- **文件 URL 往返**：只做**一层** `encodeURIComponent` 是对的 ——
+  Capacitor 原生 `convertFileSrc` 是纯拼接（`@capacitor/android/.../native-bridge.js:168-181`），
+  本地服务器用 `Uri.getPath()` 解码（`WebViewLocalServer.java:667` → `AndroidProtocolHandler.java:66-70`）
+  ⇒ 空格 / `#` / `%` / 非 ASCII 都能活；worker 回落分支构造的形状与原生一致。
+- **`fs/web`** 优先直接读已选 File，404 → `ENOENT`、其它状态 → 明确错误、
+  没有 Content-Length 时用真实大小、写类操作抛明确的"not implemented"；对 Capacitor 文件服务器发 HEAD 是安全的。
+- **下载 façade 的假设与原生信封吻合**：`RainMusicDownloadTaskChannels.java:141` 总是回 `id` + `token`；
+  `start` 从不返回 null；`ready` 之前到达的事件会排队；pause/remove/error 会丢弃回调；按 id 串行化命令。
+- **桥的 15 s 超时不会覆盖更新的结果**：超时/取消/已应答的 id 先从 `pending` 移除，迟到只 warn；
+  user-api 通道**完全绕过**原生超时（宿主自己 15 s init / 20 s request / 60 s HTTP，128 请求 + 64 HTTP 上限）。
+
 ### 下载部分的已知要点
 - Android下载由主WebView façade转原生执行器，下载Worker/Node文件与socket实现仅留给桌面构建。
 - 纯列表与媒体解析仍在Web Worker；本地文件经Capacitor URL读取，元数据使用浏览器parseBuffer。
@@ -546,8 +614,10 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **下一轮的第一优先不是设备验收，而是 §6.2 的 8 处下载执行层缺陷**（1 处 high：`skip` 无条件抛 +
-   resume 失败/部分文件永不回收 ⇒ 用户无法自救）。§6.3 的 L1/L2/L6 紧随其后 ——
-   尤其 **L6 要先把替身改成与真 API 同严格**，否则本机结论继续不成立。
+5. **下一轮的第一优先不是设备验收，而是两处 high**：
+   - **§6.2 的下载执行层**（8 处，1 处 high：`skip` 无条件抛 + resume 失败/部分文件永不回收 ⇒ 用户无法自救）；
+   - **§6.4 的 W1**（自定义源 `body` + `Content-Type: application/json` 被表单序列化 ⇒ **一整类社区音源脚本不可用**；
+     注意要**同时**改 `platform/http/web.js` 与 `userApi/web.js`，并先做"还有哪些调用点依赖头推导"的审计）。
+   §6.3 的 L1/L2/L6 紧随其后 —— 尤其 **L6 要先把替身改成与真 API 同严格**，否则本机结论继续不成立。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**
