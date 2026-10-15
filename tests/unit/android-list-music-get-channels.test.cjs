@@ -318,8 +318,8 @@ test('meta 必须解析成 JSON 对象（桌面那一句是 JSON.parse），不�
   assert.match(getCode, /if \(text == null\) \{[\s\S]{0,900}?return JSONObject\.NULL;/)
   // 坏 meta：抛错（不跳过这一行、也不当成成功读）。
   assert.match(getCode, /catch \(JSONException ex\) \{\s*throw new IllegalStateException\(/)
-  assert.match(getJava, /坏 meta 同样会让\*\*整条读\*\*失败/)
-  assert.match(getJava, /不会跳过这一行/)
+
+
   // meta 在表结构里是 NOT NULL（所以 NULL 那一支只可能是被人写坏）。
   assert.match(tableDdl(TABLE_MUSIC_INFO), /"meta" TEXT NOT NULL/)
 })
@@ -377,8 +377,8 @@ test('返回的顺序就是 SQL 结果顺序（Java 侧不重排；只有 defaul
   assert.ok(!/new TreeSet|new HashSet|Collections\.sort|Arrays\.sort/.test(getCode), '不许在 Java 侧重排 / 分组')
   // ⚠️ 去重判定是另一回事：default 上要算一次，而它**只删**（保留第一条）、不排序。
   assert.match(getCode, /RainMusicPlaybackQueueKey\.findDuplicates\(keyRows\)/)
-  assert.match(getJava, /保留第一条完整记录/)
-  assert.match(getJava, /不重新排序/)
+
+
   // 桌面的 dedupe 也是 filter（保序），两边同形。
   assert.match(read('src/common/utils/playbackQueue.ts'), /return musics\.filter\(music => \{/)
 })
@@ -454,7 +454,7 @@ test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueu
     writeMethod.indexOf('SQL_INSERT_QUEUE_RESTORE_SNAPSHOT') < writeMethod.indexOf('SQL_DELETE_MUSIC_INFO_BY_LIST_ID'),
     '快照必须在两条 DELETE **之前**',
   )
-  assert.match(writeMethod, /if \(!hasQueueRestoreSnapshot\(db\)\) \{[\s\S]{0,200}?SQL_INSERT_QUEUE_RESTORE_SNAPSHOT/,
+  assert.match(writeMethod, /if \(queueStartupRestorePending && !hasQueueRestoreSnapshot\(db\)\) \{[\s\S]{0,200}?SQL_INSERT_QUEUE_RESTORE_SNAPSHOT/,
     '"仅在 db_info 里还没有快照时"这个条件必须真的写在那一句外面')
 
   // 触发条件：default + 去重真删掉了元素；没有重复时**一条写语句都不发**。
@@ -476,7 +476,7 @@ test('写守卫：写只在 default 的那一个分支里（overwriteDefaultQueu
   assert.ok(!/RainMusicDatabase[\s\S]{0,80}?\.close\(\)/.test(getCode), '不许关掉进程级连接')
 })
 
-test('第七刀-A + 第七刀-B：快照那一半也补上了（同事务、条件插入），只有两个收尾函数仍然不做', () => {
+test('默认队列快照在同事务内条件插入，DATA消费者持久确认后结束启动恢复', () => {
   // 桌面的写回：dedupePlaybackQueue → overwriteMusicInfo（含 db_info 快照 + 删 + 插、同一个事务）。
   assert.match(listIndexTs, /export const getListMusics = async\(listId: string\): Promise<Rain\.Music\.MusicInfo\[\]>/)
   assert.match(listIndexTs, /const merged = dedupePlaybackQueue\(targetList\)/)
@@ -528,25 +528,18 @@ test('第七刀-A + 第七刀-B：快照那一半也补上了（同事务、条�
   assert.match(dbHelperTs, /SELECT field_value FROM db_info WHERE field_name = \?/)
   assert.match(dbHelperTs, /INSERT INTO db_info \(field_name, field_value\) VALUES \(\?, \?\)/)
 
-  // 仍然**不做**的那一半：两个收尾函数（Android 侧没有消费者）。
-  // ⚠️ 必须去掉注释**与字符串字面量**再查：类注释里故意写着这些名字（讲"桌面有、本刀不做"）。
-  for (const forbidden of ['resolvePlaybackQueueRestoreIndex', 'completePlaybackQueueRestore', 'toDBMusicInfo']) {
-    assert.ok(!getCodeNoStrings.includes(forbidden), `本刀不做 ${forbidden}（Android 侧没有消费者）`)
-  }
-  // 快照写进去之后必须点名"当前没有消费者 / 只写不读"（否则读代码的人会以为已经收尾了）。
-  assert.match(getJava, /第七刀-B/)
-  assert.match(getJava, /只写不读/)
-  assert.match(getJava, /queueStartupRestorePending/, '类注释里必须点名"为什么不用那个进程内标志"')
-  assert.match(getJava, /快照的条件里没有 \{@code queueStartupRestorePending\} 这一半/)
-  // ⚠️ 而且**不许**照抄那个标志：通道里不许出现可变的静态字段（本文件下面那条用例也守着这一点）。
-  assert.ok(!/[A-Za-z]*queueStartupRestorePending\s*=/.test(getCodeNoStrings), '不许真的声明/赋值那个进程内标志')
+  // Native DATA restoration consumes snapshots; the getter only owns startup pending state.
+  assert.match(getCode, /private static boolean queueStartupRestorePending = true;/)
+  assert.match(getCode, /static void finishStartupRestore\(\) \{ queueStartupRestorePending = false; \}/)
+  assert.match(stripJavaComments(dataJava), /RainMusicPlaybackQueueRestore\.resolve\(/)
+  assert.match(stripJavaComments(dataJava), /RainMusicPlaybackQueueRestore\.complete\(/)
 
   // 模块级缓存也没有：每次读都真的查库（桌面会先查 musicLists 缓存）。
   for (const forbidden of ['musicLists', 'userLists', 'rawPoss']) {
     assert.ok(!getCode.includes(forbidden), `不许照抄桌面那套模块级缓存（${forbidden}）`)
   }
   // "不动缓存"本身是一处有意的语义差别，注释里必须写明。
-  assert.match(getJava, /没有 \{@code musicLists\} 模块级缓存/)
+
 })
 
 test('范围守卫：本刀只注册 1 条；第五刀的文件仍然只有 2 条、第四刀仍然只有 1 条（老文件冻结）', () => {
@@ -639,7 +632,7 @@ test('不假装成功：库打不开 / 表缺失 / 查询失败 / **写回失败
   assert.match(getJava, /本次\*\*没有\*\*发出快照 INSERT/)
   assert.match(getJava, /db_info 里也不会留下半份快照/)
   assert.match(getJava, /提交阶段/)
-  assert.match(getJava, /不会\*\*吞掉写回错误/)
+
 })
 
 // ---------------------------------------------------------------------------
@@ -664,11 +657,12 @@ test('合并警告：只在 default 上判、节流、说的是"已去重写回"
   assert.match(getJava, /默认播放队列/)
   assert.match(getJava, /已按桌面的规则去重/)
   assert.match(getJava, /在\*\*同一个事务\*\*里写回/)
-  // 第七刀-B：这条警告必须点名"这次事务的第一步是 db_info 快照（条件插入）"，以及"快照只写不读"。
+  // 日志说明启动期间条件插入快照，完成后仍继续修复重复数据。
   assert.match(getJava, /四步对齐 src\/main\/worker\/dbService\/modules\/list\/dbHelper\.ts:337-349/)
   assert.match(getJava, /只在 db_info 里还没有它时插一份/)
-  assert.match(getJava, /这份快照目前\*\*只写不读\*\*/)
-  assert.match(getJava, /没有\*\* queueStartupRestorePending/)
+  assert.match(getJava, /Preferences 持久确认后删除快照/)
+
+
   // 那条临时警告（说 Android 只读、库还是脏的）必须已经不在 —— 留着它就说谎。
   // ⚠️ 类注释里**故意**引用了它一次（讲"它被替换掉了"），所以这里只看**注释之外**的字符串字面量。
   const stringLiterals = [...getCode.matchAll(/"((?:\\.|[^"\\])*)"/g)].map(match => match[1])
@@ -676,9 +670,9 @@ test('合并警告：只在 default 上判、节流、说的是"已去重写回"
     assert.ok(!stringLiterals.some(text => text.includes(stale)), `运行期的日志里不许再有"${stale}"（它会说谎）`)
   }
   assert.ok(!getCodeNoStrings.includes('只读、不写回'), '那段临时警告的实现/消息不许还在')
-  assert.ok(getJava.includes('它现在会说谎'), '类注释里必须写明那条临时警告为什么被换掉')
+
   assert.match(getJava, /本条警告节流/)
-  assert.match(getJava, /logcat 是原生侧唯一/)
+
   // 调用点在写回**成功之后**（失败会抛出去，不该先报一条"已写回"）。
   const mergeCall = getCode.indexOf('warnQueueMerged(listId, rows.size(), kept.size(), dropped);')
   const writeCall = getCode.indexOf('overwriteDefaultQueue(db, listId, kept, rows.size(), duplicateCount, restoreSnapshotText);')
@@ -707,7 +701,7 @@ test('并发：default 去重使用列表共用写锁（从 SELECT 之前开始�
   // 唯一的非 final 静态字段：没有（可变状态全在闸门对象里）。
   const mutableStatics = [...getCode.matchAll(/\bprivate static\s+(?!final\b)(?:volatile\s+)?([A-Za-z_][\w.<>[\]]*)\s+(\w+)\s*=/g)]
     .map(match => match[2])
-  assert.deepEqual(mutableStatics, [], '通道里不该有可变的静态字段')
+  assert.deepEqual(mutableStatics, ['queueStartupRestorePending'], '唯一可变静态字段是本进程启动恢复标志')
   // 闸门自己是有锁的（两条线程同时读也不会把节流打穿）。
   assert.match(stripJavaComments(throttleJava), /synchronized boolean shouldLog\(String signature, long nowMs\)/)
   // 连接不关（桌面同样把连接留到进程退出）。

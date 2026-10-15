@@ -29,7 +29,6 @@ import { initSetting } from './store/setting'
 import { getStandardPlaybackPatch } from './utils/standardPlayback'
 // import { bubbleCursor } from './utils/cursor-effects/bubbleCursor'
 
-import './worker'
 import { saveViewPrevState } from './utils/data'
 
 // sync(store, router)

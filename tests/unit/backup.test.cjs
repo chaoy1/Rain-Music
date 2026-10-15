@@ -8,6 +8,7 @@ const load = require('./load-ts.cjs')
 // 它是 ESM，`load-ts.cjs` 的依赖解析走的是原生 `require`，所以这里按本仓库既有的
 // "显式注入依赖" 方式把它一起加载进来。
 const files = load('src/common/utils/nodejs.ts', {
+  '@common/platform/fs': require('node:fs'),
   '@common/utils': { log: { error() {} } },
   './zlib': load('src/common/utils/zlib.js'),
 })

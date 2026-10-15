@@ -1,5 +1,9 @@
 # Android 明文流量 + CORS 真机验证清单
 
+> 2026-10-15配置更新：当前已接入 `network_security_config.xml`，base-config允许HTTP、信任系统CA；
+> `capacitor.config.ts` 已启用 CapacitorHttp 及 Android allowMixedContent，以支持内置端点和社区脚本返回的HTTP媒体。
+> 不使用用户CA或证书校验绕过。下文“manifest未放开”等为阶段1/3历史记录，设备矩阵仍须逐项执行，不能把配置存在当成真机通过。
+
 > **这是给"手上有一台 Android 真机 + 装了 Android SDK 的人"照做的步骤清单。**
 > 目标：回答"kg / wy / tx 三个内置音源在真机上还能不能发请求"这一个问题，并据此定下
 > `AndroidManifest.xml` / `network_security_config.xml` 的最终配置。

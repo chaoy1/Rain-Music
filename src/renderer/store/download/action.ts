@@ -165,7 +165,9 @@ const saveMeta = (downloadInfo: Rain.Download.ListItem) => {
       album: downloadInfo.metadata.musicInfo.meta.albumName,
       APIC: imgUrl,
     }
-    void window.rain.worker.download.writeMeta(info, lyrics ?? { lyric: '' })
+    return window.rain.worker.download.writeMeta(info, lyrics ?? { lyric: '' })
+  }).catch(err => {
+    console.error('Download metadata write failed:', err)
   })
 }
 
@@ -193,8 +195,10 @@ const downloadLyric = (downloadInfo: Rain.Download.ListItem) => {
         downloadTlrc: true,
         downloadRlrc: DOWNLOAD_LYRIC_ROMA,
       }
-      void window.rain.worker.download.saveLrc(lrcs, info)
+      return window.rain.worker.download.saveLrc(lrcs, info)
     }
+  }).catch(err => {
+    console.error('Download lyric save failed:', err)
   })
 }
 
@@ -234,18 +238,19 @@ const handleRefreshUrl = (downloadInfo: Rain.Download.ListItem) => {
   })
     .catch(() => '')
     .then(url => {
-    // commit('setStatusText', { downloadInfo, text: '链接刷新成功' })
+      if (runingTask.get(downloadInfo.id) !== downloadInfo || downloadInfo.status !== DOWNLOAD_STATUS.RUN) return
+      if (!url) throw new Error(window.i18n.t('download_status_error_url_failed'))
+      // commit('setStatusText', { downloadInfo, text: '链接刷新成功' })
       setUrl(downloadInfo, url)
-      void window.rain.worker.download.updateUrl(downloadInfo.id, url)
+      return window.rain.worker.download.updateUrl(downloadInfo.id, url)
     })
     .catch(err => {
-      console.log(err)
-      handleError(downloadInfo, err.message)
+      if (runingTask.get(downloadInfo.id) === downloadInfo && downloadInfo.status === DOWNLOAD_STATUS.RUN) handleError(downloadInfo, err.message)
     })
 }
 const handleError = (downloadInfo: Rain.Download.ListItem, message?: string) => {
   setStatus(downloadInfo, DOWNLOAD_STATUS.ERROR, message)
-  void window.rain.worker.download.removeTask(downloadInfo.id)
+  void window.rain.worker.download.removeTask(downloadInfo.id).catch(err => { console.error('Download task cleanup failed:', err) })
   runingTask.delete(downloadInfo.id)
   void checkStartTask()
 }
@@ -306,7 +311,9 @@ const handleStartTask = async(downloadInfo: Rain.Download.ListItem) => {
 const startTask = async(downloadInfo: Rain.Download.ListItem) => {
   setStatus(downloadInfo, DOWNLOAD_STATUS.RUN)
   runingTask.set(downloadInfo.id, downloadInfo)
-  void handleStartTask(downloadInfo)
+  void handleStartTask(downloadInfo).catch(err => {
+    if (runingTask.get(downloadInfo.id) === downloadInfo && downloadInfo.status === DOWNLOAD_STATUS.RUN) handleError(downloadInfo, err.message)
+  })
 }
 
 const getStartTask = (list: Rain.Download.ListItem[]): Rain.Download.ListItem | null => {
@@ -407,7 +414,7 @@ export const removeDownloadTasks = async(ids: string[]) => {
 
   const idsSet = new Set<string>(ids)
   const newList = downloadList.filter(task => {
-    if (runingTask.has(task.id)) {
+    if (idsSet.has(task.id) && runingTask.has(task.id)) {
       void window.rain.worker.download.removeTask(task.id)
       runingTask.delete(task.id)
     }

@@ -156,6 +156,10 @@ public class RainMusicIpcPlugin extends Plugin {
 
         // Song insertion shares the list write lock with deletion and default queue repair.
         RainMusicListMusicAddChannels.register(this);
+        RainMusicListMutationChannels.register(this);
+        RainMusicDownloadChannels.register(this);
+        RainMusicMediaCacheChannels.register(this);
+        new RainMusicDownloadTaskChannels(getContext()).register();
 
         Logger.info(
             TAG,

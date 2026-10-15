@@ -39,11 +39,16 @@
 | `M:mainIpc` | `src/common/mainIpc.ts` |
 | `M:winMainMain` | `src/main/modules/winMain/main.ts` |
 
-通道名的生成规则见 `src/common/ipcNames.ts:165-170`：对象键在运行期被改写为 `` `${模块名}_${原值}` ``。例：`WIN_MAIN_RENDERER_EVENT_NAME.get_palyer_lyric` 的真实通道名是 **`winMain_get_lyric`**（键名与通道名不同，容易踩坑）。
+通道名生成规则以 `src/common/ipcNames.ts` 末尾循环为准：对象值被改写为 `` `${moduleName}_${eventName}` ``，eventName是对象键。例：键 `get_palyer_lyric` 的实际通道是 **`winMain_get_palyer_lyric`**；保留既有拼写，原生不能只看初始字符串值。
 
 ### 0.2 统计口径
 
-从 `src/common/ipcNames.ts` 解析出的通道定义总计 **128** 条：`common 8 + player 24 + dislike 4 + winMain 77 + winLyric 11 + hotKey 4`。
+原始清单128条：`common 8 + player 24 + dislike 4 + winMain 77 + winLyric 11 + hotKey 4`。
+2026-10-15新增Android下载六条命令和一条事件，当前定义总数 **135**；下方97/11/20统计保留原始盘点口径。
+
+新增Android下载通道为 `winMain_download_task_{start,pause,remove,update_url,save_lyric,write_meta,event}`，具体载荷见 [下载执行器](download-runtime.md)。
+本地 `winMain_show_select_dialog` 走WebView文件input，8条自定义源IPC走本地Worker宿主；它们不再向原生插件发同名请求。
+本轮其余歌单写通道和13条媒体缓存通道均已注册；实现及验证索引见 [续开发记录](continuation-2026-10-15.md)。
 
 **"渲染层真正调用"的判定方法**：在 `src/renderer/**` + `src/renderer-lyric/**` 中检索通道常量的引用（`WIN_MAIN_RENDERER_EVENT_NAME.<key>` 等），并**排除仅出现在注释里的引用**；桌面歌词窗口通过 `window.lyricBridge`（preload 暴露）间接使用 `winLyric_*`，已人工归入。
 

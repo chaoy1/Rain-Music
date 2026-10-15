@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Community source scripts may resolve arbitrary HTTP media URLs, so a fixed
+     domain allowlist cannot represent the supported source contract. HTTPS still
+     uses system trust anchors; no custom CA or certificate bypass is installed. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors><certificates src="system" /></trust-anchors>
+    </base-config>
+</network-security-config>

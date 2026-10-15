@@ -1,6 +1,6 @@
 // 非业务工具方法
 
-import { pathToFileURL } from 'url'
+import { localFileUrl } from '@common/platform/fileUrl'
 /**
  * 获取两个数之间的随机整数，大于等于min，小于max
  * @param {*} min
@@ -189,7 +189,7 @@ export const sortInsert = <T>(arr: Array<{ num: number, data: T }>, data: { num:
 }
 
 export const encodePath = (path: string) => {
-  return pathToFileURL(path).href
+  return localFileUrl(path)
 }
 
 

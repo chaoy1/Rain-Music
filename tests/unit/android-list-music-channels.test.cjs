@@ -562,11 +562,12 @@ test('本刀不做 player_list_music_get：它的写回依赖必须能在源码�
   // 本刀（第五刀）的 `RainMusicListMusicChannels.java` 里**没有**这条"读里带写"的通道 ——
   // 第六/七刀把它另开了 `RainMusicListMusicGetChannels.java` 并已注册，所以下面这句只是
   // "**这个文件**不做"，不是"Android 侧没人做"。
-  // 另外窗口/设置那两条通道（第三个文件）仍没有实现桌面那一支的"播放队列恢复校正"（第三刀已登记未实现）。
+  // DATA 通道现在通过独立恢复类消费快照；本文件仍然只负责两条纯读通道。
   assert.ok(!musicCode.includes('player_list_music_get"'), 'player_list_music_get 本刀不做')
   const dataCode = stripJavaComments(dataJava)
-  assert.match(dataCode, /桌面版的「播放队列恢复校正」\*\*没有执行\*\*/)
-  assert.ok(!dataCode.includes('playback_queue_startup_restore'), '窗口/设置那两条通道不碰 playback_queue_startup_restore（生产者已在第六/七刀的 RainMusicListMusicGetChannels.java 落地，不在本文件）')
+  assert.match(dataCode, /RainMusicPlaybackQueueRestore\.resolve\(context,/)
+  assert.match(dataCode, /persist\(prefs, store, path\);\s*RainMusicPlaybackQueueRestore\.complete\(context\)/)
+  assert.ok(!dataCode.includes('playback_queue_startup_restore'), 'DATA 通道通过恢复类处理快照，不在本文件复制 SQLite 快照键名与读写逻辑')
 })
 
 // ---------------------------------------------------------------------------

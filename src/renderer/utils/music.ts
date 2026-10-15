@@ -61,7 +61,7 @@ export const getMusicFilePath = async(musicInfo: Rain.Music.MusicInfo | Rain.Dow
  */
 export const createLocalMusicInfo = async(path: string): Promise<Rain.Music.MusicInfoLocal | null> => {
   if (!await checkPath(path)) return null
-  const { parseFile } = await import('music-metadata')
+  const { parseFile } = await import('@renderer/platform/musicMetadata')
 
   let metadata
   try {
@@ -106,7 +106,7 @@ const getFileMetadata = async(path: string) => {
   if (prevFileInfo.path == path) return prevFileInfo.promise
   prevFileInfo.path = path
   return prevFileInfo.promise = checkPath(path).then(async(isExist) => {
-    return isExist ? import('music-metadata').then(async({ parseFile }) => parseFile(path)).catch(err => {
+    return isExist ? import('@renderer/platform/musicMetadata').then(async({ parseFile }) => parseFile(path)).catch(err => {
       console.log(err)
       return null
     }) : null

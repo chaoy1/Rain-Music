@@ -32,6 +32,7 @@ material-modal(:show="modelValue" bg-close teleport="#view" @close="handleClose"
 <script>
 import { importUserApi, removeUserApi, showSelectDialog, setAllowShowUserApiUpdateAlert } from '@renderer/utils/ipc'
 import { readFile } from '@common/utils/nodejs'
+import { releaseSelectedFiles } from '@common/platform/filePicker'
 import { openUrl } from '@common/utils/electron'
 import apiSourceInfo from '@renderer/utils/musicSdk/api-source-info'
 import { userApi } from '@renderer/store'
@@ -71,7 +72,7 @@ export default {
         void dialog(this.$t('user_api_import__failed', { message: err.message }))
       })
     },
-    handleImport() {
+    async handleImport() {
       if (this.userApi.list.length > 20) {
         this.$dialog({
           message: this.$t('user_api__max_tip'),
@@ -79,7 +80,7 @@ export default {
         })
         return
       }
-      void showSelectDialog({
+      return showSelectDialog({
         title: this.$t('user_api__import_file'),
         properties: ['openFile'],
         filters: [
@@ -88,9 +89,12 @@ export default {
         ],
       }).then(async result => {
         if (result.canceled) return
-        return readFile(result.filePaths[0]).then(async data => {
-          return this.importUserApi(data.toString())
-        })
+        try {
+          const data = await readFile(result.filePaths[0])
+          await this.importUserApi(data.toString())
+        } finally { releaseSelectedFiles(result.filePaths) }
+      }).catch(err => {
+        void dialog(this.$t('user_api_import__failed', { message: err.message }))
       })
     },
     handleExport() {

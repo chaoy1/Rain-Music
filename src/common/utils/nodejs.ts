@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+import fs from '@common/platform/fs'
 // `crypto-js@4.2.0` 没有随包提供类型声明（`@types/crypto-js` 也未安装）；
 // 这与 `src/common/utils/zlib.js` 里对 pako 的处理同理，只是这里只有一个调用点，
 // 不值得再开一层 .js 封装。装类型后这行注解会报 "unused directive"，届时删掉即可。

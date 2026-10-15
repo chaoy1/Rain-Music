@@ -230,7 +230,7 @@ test('五条写语句逐字对齐 statements.ts / dbHelper.ts（只把具名参�
     body.indexOf('execSQL(SQL_INSERT_QUEUE_RESTORE_SNAPSHOT') < body.indexOf('execSQL(SQL_DELETE_MUSIC_INFO_BY_LIST_ID'),
     '快照必须在两条 DELETE **之前**插入：它记的是合并前的身份（放到后面记的就是合并后的了）',
   )
-  assert.match(body, /if \(!hasQueueRestoreSnapshot\(db\)\) \{\s*db\.execSQL\(\s*SQL_INSERT_QUEUE_RESTORE_SNAPSHOT,/)
+  assert.match(body, /if \(queueStartupRestorePending && !hasQueueRestoreSnapshot\(db\)\) \{\s*db\.execSQL\(\s*SQL_INSERT_QUEUE_RESTORE_SNAPSHOT,/)
   // 存在性检查走的是 rawQuery + moveToFirst（只判行在不在，与桌面 `!await getPlaybackQueueRestoreSnapshot()` 同形）。
   assert.match(code, /db\.rawQuery\(\s*SQL_SELECT_QUEUE_RESTORE_SNAPSHOT,\s*new String\[\] \{ QUEUE_RESTORE_SNAPSHOT_KEY \}\s*\)/)
   assert.match(code, /return cursor\.moveToFirst\(\);/)
@@ -1498,7 +1498,7 @@ test('default 有重复 ⇒ 去重 + 单事务写回：语句顺序、写回的 
   assert.match(warns[0], /db_info/, '必须点名 db_info 那份快照（它现在是这次事务的第一步）')
   assert.match(warns[0], /playback_queue_startup_restore/, '必须点名快照的键名')
   assert.match(warns[0], /只在 db_info 里还没有它时插一份/, '必须说清"仅在不存在时"这个条件')
-  assert.match(warns[0], /queueStartupRestorePending/, '必须点名"没有那个进程内标志"这处差异')
+  assert.match(warns[0], /queueStartupRestorePending/, '必须点名进程内启动恢复标志')
   assert.ok(!/只读/.test(first(section, 'infoLog')), 'register 的日志不该还说"写回未做"')
   assert.match(first(section, 'infoLog'), /第七刀-A/)
   assert.match(first(section, 'infoLog'), /第七刀-B/)

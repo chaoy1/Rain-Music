@@ -1,3 +1,5 @@
+import { showSelectDialog } from '../filePicker/web'
+
 /**
  * Capacitor（Android WebView）IPC 传输适配器 —— **真实原生桥**（Android 移植 · P0-1）。
  *
@@ -76,10 +78,8 @@
  * 2. **原生主动**：原生随时可以推 `{kind:'cancel', id, reason}`（例如用户切换音源导致
  *    `winMain_request_user_api` 作废）⇒ 在途 `invoke` **reject** `code:'IPC_CANCELLED'`
  *    （`error.cancelled = true`）。
- * 3. ⚠️ 已知缺陷**不在本轮修**：`winMain_request_user_api_cancel` 在桌面端用 `rendererSend`
- *    打到 `ipcMain.handle` 注册的通道上，所以桌面端的取消从来不生效。Android 侧正确形状是
- *    **把它当普通 invoke 通道**（原生 `post` 里 `kind:'invoke'`，`args=[params]`）——
- *    本适配器不特殊处理任何通道名，也不替它做兼容。
+ * 3. 自定义音源组在 WebView 本地路由到 Worker 宿主。`winMain_request_user_api_cancel`
+ *    的 send / invoke 都进入同一取消实现，不需要原生注册通道。详见 user-api-host.md。
  *
  * ## 为什么**不** import 任何 `@capacitor/*`
  *
@@ -167,6 +167,8 @@ export const capacitorIpc = {
   eventName: 'ipcMessage',
   timeoutMs: DEFAULT_TIMEOUT_MS,
   plugin: null,
+  /** Optional host factory for embedding/tests; receives (channel, params) event emitter. */
+  userApiFactory: null,
 }
 
 // 模块初始化时读一次运行期覆盖（与 `src/renderer/platform/http/web.js:173` 同款）。
@@ -194,6 +196,22 @@ const settled = new Map()
 const SETTLED_MEMORY = 128
 /** 通道 → (原始 listener → { once })。用原始 listener 当 key，`off` 才是有效的。 */
 const listeners = new Map()
+// These eight requests belong to the WebView Worker host, never the native plugin.
+const USER_API_LOCAL_CHANNELS = new Set([
+  'winMain_import_user_api', 'winMain_get_user_api_list', 'winMain_remove_user_api',
+  'winMain_set_user_api', 'winMain_get_user_api_status', 'winMain_request_user_api',
+  'winMain_request_user_api_cancel', 'winMain_user_api_set_allow_update_alert',
+])
+const USER_API_LOCAL_EVENTS = new Set(['winMain_user_api_status', 'winMain_user_api_show_update_alert'])
+let userApiHostPromise = null
+const invokeLocalUserApi = (channel, args) => {
+  userApiHostPromise ??= Promise.resolve().then(async() => {
+    const emit = (eventChannel, params) => dispatchChannelEvent({ kind: KIND_EVENT, channel: eventChannel, args: [params] })
+    const factory = capacitorIpc.userApiFactory ?? (await import('../../../renderer/platform/userApi/web')).createDefaultUserApiHost
+    return factory(emit)
+  }).catch(error => { userApiHostPromise = null; throw error })
+  return userApiHostPromise.then(host => host.invoke(channel, args[0]))
+}
 /** 已经提示过"没有监听者"的通道（避免刷屏）。 */
 const warnedUnhandledChannels = new Set()
 
@@ -552,7 +570,7 @@ const subscribe = (channel, listener, once) => {
       { channel },
     )
   }
-  attachTransport()
+  if (!USER_API_LOCAL_EVENTS.has(channel)) attachTransport()
 
   let bucket = listeners.get(channel)
   if (bucket == null) {
@@ -565,6 +583,10 @@ const subscribe = (channel, listener, once) => {
 /** @type {IpcBridge} */
 export const bridge = {
   send(channel, ...args) {
+    if (USER_API_LOCAL_CHANNELS.has(channel)) {
+      invokeLocalUserApi(channel, args).catch(error => console.error(`[userApi] send("${channel}") failed: ${describe(error)}`))
+      return
+    }
     const plugin = requirePlugin(channel, 'send')
     attachTransport()
     deliver(plugin, { id: nextRequestId(), kind: KIND_SEND, channel, args: normalizeArgs(args) })
@@ -583,6 +605,11 @@ export const bridge = {
   },
 
   invoke(channel, ...args) {
+    if (channel === 'winMain_show_select_dialog') {
+      if (typeof capacitorIpc.selectFiles === 'function') return capacitorIpc.selectFiles(args[0])
+      return showSelectDialog(args[0])
+    }
+    if (USER_API_LOCAL_CHANNELS.has(channel)) return invokeLocalUserApi(channel, args)
     const plugin = requirePlugin(channel, 'invoke')
     attachTransport()
 

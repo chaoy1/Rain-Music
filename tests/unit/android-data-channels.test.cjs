@@ -230,26 +230,11 @@ test('注册必须发生在 RainMusicIpcPlugin.load() 里；MainActivity 仍先 
   )
 })
 
-test('playInfo 的"播放队列恢复校正"没有做，但必须**大声**说明（不静默跳过）', () => {
-  // 桌面 M:data:11-24 会调 dbService.resolvePlaybackQueueRestoreIndex / getListMusics 并回写；
-  // Android 侧没有主进程、线 A 的 SQLite 驱动仍是 throw（adapter/android.ts:105-110）⇒ 原样返回。
-  assert.match(dataJava, /Logger\.warn\(/, 'playInfo 分支必须留下 warn，而不是静默返回')
-  assert.match(dataJava, /播放队列恢复校正/, 'warn 里必须点名"校正没有执行"')
-
-  // 也不许假装做了：Java 里不能**调用**恢复 API（字符串里提到它们是允许的 —— 那条 warn 的正文
-  // 就必须点名"桌面那一支依赖主进程的 dbService"，否则读日志的人不知道为什么没做校正）。
-  // ⚠️ 第三刀给写通道加的那条 info 正文里同样点名了 `dbService.completePlaybackQueueRestore()`
-  // （不点名的话读日志的人不知道桌面多做了什么），所以这里必须**连字符串字面量一起去掉**，
-  // 否则这条用例会因为"注释/文案里提到了它"而假失败。
-  for (const forbidden of [/\bdbService\s*[.(]/, /resolvePlaybackQueueRestoreIndex\s*\(/, /completePlaybackQueueRestore\s*\(/]) {
-    assert.doesNotMatch(stripJavaStrings(stripJavaComments(dataJava)), forbidden, `不该调用 ${forbidden}（那是主进程的事）`)
-  }
-
-  // 这条 warn 的依据（桌面那一支确实存在）——顺便钉住"引用没写错文件"。
-  const desktopDataHandler = read('src/main/modules/winMain/rendererEvent/data.ts')
-  assert.match(desktopDataHandler, /resolvePlaybackQueueRestoreIndex/)
+test('playInfo 的恢复由原生SQLite身份映射处理并在持久提交后收尾', () => {
+  const code = stripJavaComments(dataJava)
+  assert.match(code, /RainMusicPlaybackQueueRestore\.resolve\(context,/)
+  assert.match(code, /persist\(prefs, store, path\);\s*RainMusicPlaybackQueueRestore\.complete\(context\)/)
   assert.equal(javaConstant(dataJava, 'DATA_KEY_PLAY_INFO'), DATA_KEYS.playInfo)
-  assert.equal(DATA_KEYS.playInfo, 'playInfo')
 })
 
 test('null 是可接受的答案：9 个调用方的兜底还在（谁删了兜底，这条用例就变红）', () => {
@@ -351,7 +336,7 @@ test('写通道的「读-改-写」整段在锁里，而且就是设置通道那
 
   // 2. 读与写都在**同一个**临界区里（先读后写；否则就是 TOCTOU，两个并发写照样丢）。
   const lockAt = dataCode.indexOf('synchronized (RainMusicStoreLock.WRITE_LOCK)')
-  const readAt = dataCode.indexOf('prefs.getString(STORE_KEY, null)')
+  const readAt = dataCode.indexOf('prefs.getString(STORE_KEY, null)', lockAt)
   const writeAt = dataCode.indexOf('putString(STORE_KEY')
   assert.ok(lockAt > -1 && readAt > lockAt, '读必须在锁内（锁外读 = 拿到旧文本再覆盖）')
   assert.ok(writeAt > readAt, '写必须在读之后、同一个锁内')
@@ -377,7 +362,7 @@ test('写通道的「读-改-写」整段在锁里，而且就是设置通道那
   assert.match(lockCode, /static final Object WRITE_LOCK = new Object\(\)/)
 
   // 6. 读通道**不入锁**（它只读；文件里 synchronized 只应出现一次，就在写通道里）。
-  assert.equal((dataCode.match(/synchronized/g) ?? []).length, 1, '读通道不该入锁，写通道只应有一处 synchronized')
+  assert.equal((dataCode.match(/synchronized/g) ?? []).length, 4, '恢复读/保存遵守 list→store 锁序，其他路径只使用 store 锁')
   // 7. 锁的理由必须写在代码里（改这把锁的人得知道为什么不能拆开）。
   assert.match(lockJava, /跨 key/, '锁的类注释必须说明"为什么不能各自一把锁"')
 })
@@ -414,7 +399,7 @@ test('写通道的失败路径：坏 JSON 不覆盖、commit() false 抛错、�
   )
 })
 
-test('写通道不广播任何东西（尤其不广播 winMain_on_config_change），且不假装做了队列恢复收尾', () => {
+test('写通道不广播任何东西（尤其不广播 winMain_on_config_change），且只在成功持久保存后完成恢复', () => {
   const from = dataCode.indexOf('private static Object saveData')
   assert.ok(from > -1, '找不到 saveData')
   // ⚠️ dataCode 是**去掉注释后**的源码，所以不能用 `// ----` 那种段落注释来切边界；
@@ -431,17 +416,9 @@ test('写通道不广播任何东西（尤其不广播 winMain_on_config_change�
     '整个数据通道文件都不该出现设置通道的广播名（那是 config_v2 的事）',
   )
 
-  // playInfo 那一支：桌面会调 dbService.completePlaybackQueueRestore()，Android 侧没有这条链 ⇒
-  // 必须**大声**说明（Logger.info），而且**不许真的去调**。
-  assert.match(saveBody, /Logger\.info\(/, 'playInfo 的写分支必须留下 info，而不是静默跳过')
-  // ⚠️ 必须去掉字符串字面量再查调用：那条 info 的正文里就写着 `dbService.completePlaybackQueueRestore()`
-  // （否则读日志的人不知道桌面多做了什么），把它算进来的话这条用例是假失败。
   const saveCode = stripJavaStrings(saveBody)
-  for (const forbidden of [/\bdbService\s*[.(]/, /completePlaybackQueueRestore\s*\(/]) {
-    assert.doesNotMatch(saveCode, forbidden, `不该调用 ${forbidden}（那是主进程的事）`)
-  }
-  assert.match(saveCode, /DATA_KEY_PLAY_INFO\.equals\(path\)/, '只有 playInfo 才需要那条说明')
-  // 判断条件与桌面 data.ts:32 同源（data.listId != 'default' || data.musicId）。
+  assert.match(saveCode, /saveValue\(context, path, value\);\s*if \(desktopWouldFinishQueueRestore\(value\)\) RainMusicPlaybackQueueRestore\.complete\(context\)/)
+  assert.match(saveCode, /DATA_KEY_PLAY_INFO\.equals\(path\)/)
   assert.equal(javaConstant(dataJava, 'LIST_ID_DEFAULT'), 'default')
   assert.equal(DATA_KEYS.playInfo, 'playInfo')
 })
@@ -669,7 +646,7 @@ test('参数缺失 / 传 null：大声失败（ok:false），而不是静默返�
   }
 })
 
-test('playInfo 走的是同一条读路径（原样返回），没有被 JS 侧特判', async() => {
+test('playInfo 在桥层使用相同信封，原生恢复由真实Java探针验证', async() => {
   const stored = { listId: 'default', index: 7, musicId: 'x', musicName: 'n', musicSinger: 's' }
   const { mod, native } = setup({ storeText: JSON.stringify({ [DATA_KEYS.playInfo]: stored }) })
 
@@ -795,7 +772,7 @@ test('写通道参数不对：不是对象 / 缺 path / 缺 data 字段 ⇒ ok:f
   }
 })
 
-test('写 playInfo：不触发任何广播（桌面也不广播；恢复收尾在 Android 上没有落点）', async() => {
+test('写 playInfo：不触发任何广播（桌面也不广播；真实原生恢复收尾由独立Java探针验证）', async() => {
   const { mod, native } = setup()
   const events = []
   mod.bridge.on(EXPECTED_ON_CONFIG_CHANGE, payload => events.push(payload))

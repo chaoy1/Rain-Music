@@ -12,14 +12,15 @@ import type { CapacitorConfig } from '@capacitor/cli'
  *   `build-config/build-pack.js:16` 的 `com.rainmusic.desktop`），但移动端用
  *   `.mobile`：Android 的 applicationId 是设备上/商店里的应用身份，叫 `.desktop`
  *   在手机上会误导，且与已安装的桌面版同名不利于排查。
- * - 本阶段**故意不**在这里配置 Android 网络策略（明文流量 / Network Security
- *   Config）。这是已知最大风险，登记在 `docs/android-port-plan.md` 的阶段 1
- *   待验证项里，需要真机矩阵验证后再定，见 `docs/android/native-bridge-needs.md` §3 第 2 件。
+ * - HTTP 请求由 CapacitorHttp 接到原生网络栈；明文策略在 Android XML 配置。
+ *   配置接通仍须执行 docs/android/cleartext-verification.md 的真机矩阵。
  */
 const config: CapacitorConfig = {
   appId: 'com.rainmusic.mobile',
   appName: 'Rain Music',
   webDir: 'dist-web',
+  plugins: { CapacitorHttp: { enabled: true } },
+  android: { allowMixedContent: true },
 }
 
 export default config

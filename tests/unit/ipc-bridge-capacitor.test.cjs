@@ -20,7 +20,7 @@
  */
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const load = require('./load-ts.cjs')
+const load = require('./load-capacitor.cjs')
 
 const MODULE = 'src/common/platform/ipcBridge/capacitor.js'
 
@@ -211,7 +211,7 @@ test('invoke 超时：reject IPC_TIMEOUT + **向原生补发 cancel 信封**（�
   const { mod, native, posts } = setup({ timeoutMs: 20 })
   assert.equal(mod.DEFAULT_TIMEOUT_MS, 15000, '默认超时必须与仓库既有惯例（options.js:7）一致')
 
-  const error = await mod.bridge.invoke('winMain_request_user_api', { requestKey: 'x' }).then(
+  const error = await mod.bridge.invoke('player_list_get', { requestKey: 'x' }).then(
     () => { throw new Error('不应该 resolve') },
     err => err,
   )
@@ -219,7 +219,7 @@ test('invoke 超时：reject IPC_TIMEOUT + **向原生补发 cancel 信封**（�
   assert.equal(error.code, mod.IPC_ERROR_CODES.TIMEOUT)
   assert.equal(error.timeoutMs, 20)
   assert.equal(error.timedOut, true)
-  assert.match(error.message, /winMain_request_user_api/)
+  assert.match(error.message, /player_list_get/)
 
   const cancel = lastOfKind(posts, 'cancel')
   assert.ok(cancel, '超时必须补发一条 kind=cancel 信封')
@@ -231,13 +231,13 @@ test('invoke 超时：reject IPC_TIMEOUT + **向原生补发 cancel 信封**（�
 test('超时之后的迟到应答：只 warn、不会二次结算、不抛（不静默）', async() => {
   const { mod, native, posts, warns } = setup({ timeoutMs: 20 })
   let settleCount = 0
-  await mod.bridge.invoke('winMain_request_user_api').then(
+  await mod.bridge.invoke('player_list_get').then(
     () => { settleCount++ },
     () => { settleCount++ },
   )
 
   const invokeEnvelope = lastOfKind(posts, 'invoke')
-  native.notify({ id: invokeEnvelope.id, kind: 'response', channel: 'winMain_request_user_api', ok: true, result: 'late' })
+  native.notify({ id: invokeEnvelope.id, kind: 'response', channel: 'player_list_get', ok: true, result: 'late' })
   await tick()
 
   assert.equal(settleCount, 1, '迟到的应答不能让 Promise 二次结算')
@@ -410,7 +410,7 @@ test('请求应答配对：三个并发请求乱序回包，各归各家', async
 
 test('取消 · 原生主动：在途 invoke 以 IPC_CANCELLED reject（error.cancelled = true）', async() => {
   const { mod, native, posts } = setup()
-  const promise = mod.bridge.invoke('winMain_request_user_api', { requestKey: 'k' })
+  const promise = mod.bridge.invoke('player_list_get', { requestKey: 'k' })
   await tick()
 
   native.notify({ id: posts[0].id, kind: 'cancel', reason: '用户切换了音源' })
@@ -421,14 +421,14 @@ test('取消 · 原生主动：在途 invoke 以 IPC_CANCELLED reject（error.ca
 
   assert.equal(error.code, mod.IPC_ERROR_CODES.CANCELLED)
   assert.equal(error.cancelled, true)
-  assert.equal(error.channel, 'winMain_request_user_api')
+  assert.equal(error.channel, 'player_list_get')
   assert.match(error.message, /用户切换了音源/)
 })
 
 test('取消 · 原生主动但请求已不在途：只 warn，不抛', () => {
   const { mod, native, warns } = setup()
   // 先订阅一次，让原生事件通道被接上（否则 notify 根本没有落点）。
-  mod.bridge.on('winMain_request_user_api', () => {})
+  mod.bridge.on('player_list_get', () => {})
 
   assert.doesNotThrow(() => native.notify({ id: 'ipc-nobody-2', kind: 'cancel', reason: '晚了一步' }))
   assert.equal(warns.filter(w => w.includes('已不在途')).length, 1)

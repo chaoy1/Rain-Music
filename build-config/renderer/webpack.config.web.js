@@ -137,6 +137,30 @@ module.exports = {
 
   plugins: [
     ...baseConfig.plugins,
+    new webpack.NormalModuleReplacementPlugin(
+      /^@common\/platform\/filePicker$/,
+      resource => { resource.request = '@common/platform/filePicker/web' },
+    ),
+    new webpack.NormalModuleReplacementPlugin(
+      /^@common\/platform\/fs$/,
+      resource => { resource.request = '@common/platform/fs/web' },
+    ),
+    new webpack.NormalModuleReplacementPlugin(
+      /^@renderer\/platform\/musicMetadata$/,
+      resource => { resource.request = '@renderer/platform/musicMetadata/web' },
+    ),
+    new webpack.NormalModuleReplacementPlugin(
+      /^@common\/platform\/fileUrl$/,
+      resource => { resource.request = '@common/platform/fileUrl/web' },
+    ),
+    new webpack.NormalModuleReplacementPlugin(
+      /^@renderer\/worker$/,
+      resource => { resource.request = '@renderer/platform/workers/web' },
+    ),
+    new webpack.NormalModuleReplacementPlugin(
+      /^@renderer\/worker\/utils$/,
+      resource => { resource.request = '@renderer/platform/workers/utils' },
+    ),
     // 与 Electron prod 一样带上静态资源（app 图标、字体等）
     new CopyWebpackPlugin({
       patterns: [

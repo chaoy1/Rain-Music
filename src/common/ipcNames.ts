@@ -145,6 +145,13 @@ const modules = {
     download_list_update: 'download_list_update',
     download_list_remove: 'download_list_remove',
     download_list_clear: 'download_list_clear',
+    download_task_start: 'download_task_start',
+    download_task_pause: 'download_task_pause',
+    download_task_remove: 'download_task_remove',
+    download_task_update_url: 'download_task_update_url',
+    download_task_save_lyric: 'download_task_save_lyric',
+    download_task_write_meta: 'download_task_write_meta',
+    download_task_event: 'download_task_event',
   },
   winLyric: {
     close: 'close',

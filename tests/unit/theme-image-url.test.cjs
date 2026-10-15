@@ -28,8 +28,9 @@ const load = require('./load-ts.cjs')
  */
 
 const deps = () => {
-  const common = load('src/common/utils/common.ts')
+  const common = load('src/common/utils/common.ts', { '@common/platform/fileUrl': { localFileUrl: value => pathToFileURL(value).href } })
   const nodejs = load('src/common/utils/nodejs.ts', {
+    '@common/platform/fs': require('node:fs'),
     '@common/utils': { log: { error() {} } },
   })
   const themeImageUrl = load('src/common/utils/themeImageUrl.ts', {

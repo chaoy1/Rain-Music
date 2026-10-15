@@ -2,7 +2,7 @@
 
 > 写给接手的模型：这份文档是**自包含**的。读完它应当能不看历史会话就继续推进。
 > 项目根：`D:\Documents\Projects\Rain Music\rain-music-desktop`
-> 最后更新：2026-10-15，完成歌曲新增通道及按提交顺序发布广播；开发基线 `57089fe4`，最新提交与 CI 以 Git / check-runs 为准。
+> 最后更新：2026-10-15，继续完成歌单写入、下载、音源宿主、媒体缓存及播放队列恢复。续开发基线 `b33c2332`；最新验证见 [本轮记录](continuation-2026-10-15.md)，提交与 CI 以 Git / check-runs 为准。下文旧“第几刀”的说明保留为历史证据。
 
 ---
 
@@ -33,11 +33,11 @@
 |---|---|
 | 项目根 | `D:\Documents\Projects\Rain Music\rain-music-desktop` |
 | 分支 | `master` → `origin https://github.com/chaoy1/Rain-Music.git` |
-| 本轮开发基线 | **`57089fe40b9bfa0a1308d86693bf5576c2fcbe4a`**；最新代码状态请查 `git log -1` 与对应 check-runs |
-| 单测（本机） | **381 / 381 全绿，fail 0、skip 0**（接手 368 → JSON 守卫 370 → 歌曲新增与广播 381） |
+| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；最新代码状态请查 `git log -1` 与对应 check-runs |
+| 单测（本机） | 歌曲新增提交后为381；本轮新增实现及完整门禁计数见 `continuation-2026-10-15.md`，不能沿用旧计数 |
 | lint / 四个 tsc | **src lint 0 errors / 6 个既有 `View.vue` 属性顺序 warnings；四个 tsc 全部 exit 0** |
-| **CI `verify`** | 基线 `57089fe4` 为 **success**；本轮歌曲新增需查询新提交的 CI |
-| **CI `debug-apk`** | 基线 `57089fe4` 为 **success**；本轮歌曲新增需查询新提交的 CI，不能沿用基线绿灯 |
+| **CI `verify`** | 基线 `b33c2332` 为 **success**；本轮变更需查询新提交的 CI |
+| **CI `debug-apk`** | 基线 `b33c2332` 为 **success**；本轮变更需查询新提交的 CI，不能沿用基线绿灯 |
 | 用户的工作区 | **30 项未提交改动**（主题/UI/`tests/ui/*`/`src/lang/*` 等，**不是本线的**） |
 
 ### 用户的 30 项未提交改动（必须保护）
@@ -69,9 +69,8 @@
   没有在共享仓库中注入变异，也没有改生产代码或用户 UI 文件。
 - **“阶段 3 完成”“歌单部分完成”只能描述已有适配代码，不能描述首版功能验收。**
   接手时原生注册的是设置、界面状态、列表读取、两条歌曲查询，以及歌单新建/改名/删除；
-  当前已补 `player_list_music_add`，其余 `player_list_music_remove/move/update/update_position/overwrite/clear`、
-  `player_list_update_position/data_overwire` 尚未注册。
-  自定义源宿主尚未接入，因播放 URL 来自自定义源，搜索与播放端到端验收仍未完成。
+  当前已补其余歌曲写入与歌单排序/覆盖、下载、媒体缓存和自定义源本地宿主。
+  已有真实Chromium Worker联调；Android 设备搜索与播放端到端验收仍未完成。
 - 本机没有找到 Android SDK / `adb`；没有跑本机 `assembleDebug`、安装 APK 或真机验收。
   保留 §8 中 SQLite 双实现、版本与路径的一致性待验事项。
 
@@ -214,23 +213,22 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 
 | 阶段 | 状态 |
 |---|---|
-| **阶段 3 的播放验收** | ❌ 待完成（音源适配 / 启动链已实现；自定义源宿主与真机验证未完成） |
-| **阶段 4 的歌单部分** | 已有歌单改名 / 新建 / 删除及歌曲新增；歌曲移除 / 移动 / 更新 / 排序 / 覆盖 / 清空等仍待实现 |
-| **阶段 4 的下载部分** | ❌ 未实现（任务持久化、原生传输和下载文件播放均待接入） |
-| **阶段 5 自定义源** | ❌ 未开始（P0-1 桥已就位，自定义源的宿主需要接） |
-| **阶段 6 打包与验收** | ❌ 未开始（**APK 已在 CI 稳定产出过**，但真机验收未做） |
+| **阶段 3 的播放验收** | 代码链已接通音源、媒体缓存与恢复；真实Chromium联调通过，Android端到端待验 |
+| **阶段 4 的歌单部分** | 歌单与歌曲全部既有读写/排序通道已接入；真机多窗口/重启待验 |
+| **阶段 4 的下载部分** | 持久化、原生HTTP/断点传输、歌词/MP3标签和文件读取已接入；真机待验 |
+| **阶段 5 自定义源** | Worker宿主、lx/rain、8条IPC、本地文件选择、取消/切源已接入；社区脚本兼容矩阵及真机待验 |
+| **阶段 6 打包与验收** | 构建门与本地探针已建立；最新SHA CI和设备安装/运行分别核验 |
 
 ### 下载部分的已知要点
-- 两个 Web Worker（`window.rain.worker` = Comlink over Web Worker，13 个方法，**承载全部下载写入**），依赖 `nodeIntegrationInWorker`
-- `browserify-zlib` 仍在（← `node-id3`）；`common/utils/download/*`、`musicMeta/*` 仍是 `fs/http/https`
+- Android下载由主WebView façade转原生执行器，下载Worker/Node文件与socket实现仅留给桌面构建。
+- 纯列表与媒体解析仍在Web Worker；本地文件经Capacitor URL读取，元数据使用浏览器parseBuffer。
 - `docs/android/web-runtime-blockers.md` 有"Android 首版必须重写的最小集合"（P0 表）可依
 
-### 接手后的推进顺序与实际代码入口
+### 已接入的实际代码入口（以下四项本轮已实现；后续以联合验收为主）
 
 1. **继续补其余歌单歌曲写通道与排序**：以 `src/main/modules/commonRenderers/list/rendererEvent.ts`、
    `src/main/worker/dbService/modules/list/` 和 `src/renderer/store/list/listManage/rendererListManage.ts` 为契约来源。
-   `player_list_music_add` 已完成，下一步优先 `player_list_music_remove` 与歌曲排序；
-   它们仍须与上述 monitor / 提交顺序广播协调器接入。播放队列和下载歌曲的“稍后播放”依赖新增通道。
+   `RainMusicListMutationChannels` 已完成八条剩余写通道，并接入共用 monitor / 提交顺序广播协调器。
 2. **下载任务持久化**：先重写 `winMain_download_list_get/add/update/remove/clear` 五条既有 IPC。
    来源是 `src/main/modules/winMain/rendererEvent/download.ts` 与
    `src/main/worker/dbService/modules/download/{index,dbHelper,statements}.ts`。
@@ -242,8 +240,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
    下载 worker 暴露 `checkList/createDownloadTasks/updateUrl/startTask/pauseTask/removeTask/writeMeta/saveLrc`
    八个方法（`src/renderer/worker/download/{download,common}.ts`）。
    Android 适配需在主 WebView 使用原生桥，不能假定 Web Worker 能访问 Capacitor。
-   持久化通道完成后仍不能声称文件已落盘；须验证进度、取消/暂停、失败、重启恢复、
-   歌词/标签写入及下载完成文件的播放 URL 映射。
+   原生HTTP/文件探针已覆盖进度、取消/暂停、失败、执行器重建续传和写入；设备仍须验证重启恢复与播放 URL 映射。
 4. **自定义源宿主 + 联合验收**：遵守既有 `lx` / `rain` 双名与平台白名单，
    验证导入、初始化、URL 解析、下载和播放整条链；最后按 §6 的明文/CORS/文件映射矩阵做真机验收。
 
@@ -343,8 +340,7 @@ npx.cmd cap sync android                                               # Capacit
 
 ## 10. 一句话总结现状
 
-**基线 `57089fe4` 的 Java 编译阻塞已解除；本轮歌曲新增及提交顺序广播已有实现，
-本机单测 381/381。最新原生 APK 编译状态必须查询本轮提交的 CI，不能套用旧提交结果。**
-工程、平台适配、原生传输桥、启动链与部分歌单通道已有实现；剩余工作包括其余歌曲写入/排序、
-下载持久化与原生文件传输、自定义源宿主，以及端到端播放和真机验收。
+**歌单全部既有通道、下载存储/执行、自定义源宿主、媒体缓存及播放队列恢复已有实现。
+本轮具体门禁与证据见 `continuation-2026-10-15.md`；APK编译必须查询新SHA的CI。**
+剩余验收重点是设备搜索/播放/下载/重启、系统文件选择、HTTP/CORS/请求头和SQLite路径版本一致性。
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**
