@@ -156,9 +156,26 @@ public final class RainMusicDownloadTaskChannels {
             task.ctx.emitTo(EVENT, json("id", task.id, "token", task.token, "action", value));
         }
     }
+    /**
+     * 桌面的重试口径：`src/renderer/worker/download/download.ts:130-143` 是 `retryNum > 2` 才放弃
+     * ⇒ **总共 3 次尝试**，失败之间延时 **1 s**。原来原生一次失败就报 `error`，
+     * 于是移动网络抖一下，桌面能自愈而 Android 直接失败。
+     */
+    private static final int MAX_ATTEMPTS = 3;
+    private static final long RETRY_DELAY_MS = 1000L;
+    /**
+     * 失败上报**只有这一处**：重试耗尽、或预检失败时调用。
+     * 所以一条任务**最多发一条 `error`**（原来的写法在每次失败的 catch 里发，会变成发 3 条）。
+     */
+    private void emitError(Task task, Exception error) {
+        try {
+            emit(task, "error", json("error", "download_status_error_response", "message", error.getMessage() == null ? error.toString() : error.getMessage()));
+        } catch(Exception reportError) { reportError.printStackTrace(); }
+    }
     private void transfer(Task task) {
         synchronized(lock(task.file)) {
-            HttpURLConnection connection = null;
+            // **预检**：确定性的失败**不重试** —— 桌面那两处（`download.ts:64-84`）也是直接报错 `return`，
+            // 根本不经过 `onError` 的重试分支。放进循环只会把同一个错误重复 3 次、白白多等 2 秒。
             try {
                 if (!live(task)) return;
                 File parent = task.file.getParentFile();
@@ -171,7 +188,36 @@ public final class RainMusicDownloadTaskChannels {
                 // （`store/download/action.ts` 的节流写入），此后这条记录永远下不了。
                 // `skip == false` 分支不需要先删：下面 `move()` 是原子替换，等价于桌面的先删后写。
                 if (task.downloaded == 0 && task.skip && task.file.isFile() && task.file.length() > 100) throw new IOException("Destination already exists");
-                File part = new File(task.file.getPath() + ".part");
+            } catch (Exception validation) {
+                emitError(task, validation);
+                return;
+            }
+            for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+                if (!live(task)) return;
+                if (attempt > 1) {
+                    try { Thread.sleep(RETRY_DELAY_MS); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return; }
+                    if (!live(task)) return;
+                }
+                Exception failure = attemptTransfer(task);
+                if (failure == null) return;
+                if (attempt < MAX_ATTEMPTS) continue;
+                emitError(task, failure);
+                return;
+            }
+        }
+    }
+    /**
+     * 单次传输尝试。返回 `null` = 结束（成功 / 已发 `refreshUrl` / 任务已作废）；
+     * 返回异常 = 这次失败了，由 {@link #transfer} 决定是重试还是报错。
+     *
+     * 重试时会**再发一次 `start`**（和桌面一样：它失败后重新调 `start()`，走的就是同一条发射路径），
+     * 并且因为 `.part` / `.resume` 都还在，第二次会**从断点续传**而不是从头下。
+     */
+    private Exception attemptTransfer(Task task) {
+        HttpURLConnection connection = null;
+        try {
+            File part = new File(task.file.getPath() + ".part");
                 File manifest = new File(task.file.getPath() + ".resume");
                 Properties saved = new Properties();
                 if (part.isFile() && manifest.isFile()) try(InputStream input = new FileInputStream(manifest)) { saved.load(input); }
@@ -188,8 +234,8 @@ public final class RainMusicDownloadTaskChannels {
                 connection.setRequestProperty("Accept-Encoding", "identity");
                 if (offset > 0) { connection.setRequestProperty("Range", "bytes=" + offset + "-"); connection.setRequestProperty("If-Range", validator); }
                 int status = connection.getResponseCode();
-                if (!live(task)) return;
-                if (status == 401 || status == 403 || status == 410) { emit(task, "refreshUrl", null); return; }
+                if (!live(task)) return null;
+                if (status == 401 || status == 403 || status == 410) { emit(task, "refreshUrl", null); return null; }
                 if (status != 200 && status != 206) throw new IOException("HTTP " + status);
                 String encoding = connection.getHeaderField("Content-Encoding");
                 if (encoding != null && !encoding.equalsIgnoreCase("identity")) throw resumeRejected(part, manifest, offset, "Encoded response cannot be resumed safely");
@@ -221,7 +267,7 @@ public final class RainMusicDownloadTaskChannels {
                 try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(part, offset > 0)) {
                     byte[] buffer = new byte[32768]; int count;
                     while ((count = input.read(buffer)) != -1) {
-                        if (!live(task)) return;
+                        if (!live(task)) return null;
                         if (downloaded > total - count) throw new IOException("Response body exceeds declared length");
                         output.write(buffer, 0, count); downloaded += count;
                         long now = System.nanoTime();
@@ -237,19 +283,18 @@ public final class RainMusicDownloadTaskChannels {
                 // 清单要在改名**之前**删掉：删不动就抛，此时媒体文件还没提交 ⇒ 这次失败是
                 // "什么都没发生"（`.part` 还在、可以重试），而不是"文件已经落盘了却被报成 error"。
                 synchronized(gate) {
-                    if (!live(task)) return;
+                    if (!live(task)) return null;
                     if (manifest.exists() && !manifest.delete()) throw new IOException("Cannot remove resume manifest");
                     move(part, task.file);
                     emit(task, "complete", null);
                 }
+                return null;
             } catch(Exception error) {
-                try { emit(task, "error", json("error", "download_status_error_response", "message", error.getMessage() == null ? error.toString() : error.getMessage())); }
-                catch(Exception reportError) { reportError.printStackTrace(); }
+                return error;
             } finally {
                 if (connection != null) connection.disconnect();
                 task.connection = null;
             }
-        }
     }
     private static long parseLong(String text, long fallback) { try {return Long.parseLong(text);} catch(Exception ignored) {return fallback;} }
     /**

@@ -20,9 +20,8 @@
 7. **新增缺口清单**：主题、不喜欢、换源缓存、音效预设、缓存大小/清缓存、另存对话框、系统字体等通道在原生侧**一条都没注册** —— 见 §6.1。这是当前最明确的“未实现功能面”，比“待真机验收”更值得先决策。
 8. **对已推送的下载执行层做了一轮独立审查**：确认 **8 处与桌面契约不一致**，其中 **1 处 high**
    （`skip` 检查无条件抛、resume 失败后部分文件永不回收 ⇒ 用户无法自救）。
-   **本轮已修 6 处**（第 1、2、3、6、7、8，含那处 high）并做了 **6 个变异验证**；
-   剩第 4（部分文件何时回收，**需要先拍板**）与第 5（有界重试，单独立一刀）
-   —— 见 **§6.2**、**§6.2.1**、**§6.2.2**。
+   **本轮已修 7 处**（第 1、2、3、5、6、7、8，含那处 high）并做了 **8 个变异验证**；
+   只剩第 4（部分文件何时回收，**需要先拍板**）—— 见 **§6.2**、**§6.2.1**、**§6.2.2**。
 9. **对歌单写入 / 媒体缓存 / 播放队列恢复做了一轮独立审查**：**没有 blocker**，
    问题集中在 `data_overwire` 的入参宽容度；其中一条（**测试替身比真 API 宽松**，
    `android.util.Base64` 的 MIME 解码器 vs 真 API 的严格解码）**属于 §5 那条最深教训的同类** —— 见 **§6.3**。
@@ -36,9 +35,12 @@
     而且**根因在 `platform/http/web.js` 的 `buildRequest` 少了 needle 那条"头是 json 就当 json"的规则**，
     所以**要改两处**。**W1 与 W2 本轮都已修**（W1 含 2 个变异验证：单独改任一处都过不了；
     W2 含 2 个变异验证：初始化成功后的一次脚本错误不再拆掉整个源）。
-    仍未修的是：**W3/W4**（medium，W3 是"零个可用平台被当成成功发布"、
-    W4 是本地音乐把会话级 `blob:` URL 当身份持久化）、**W5–W9**（low）、
-    以及**本轮新发现的 W10**（`formData` 被完全忽略 ⇒ 发空请求）。
+    仍未修的是：**W3**（medium，**本轮复核后确认它**不是 Android 与桌面的分歧** ——
+    桌面 `preload.js:126-138` 逻辑相同、消费方 `useInitUserApi.ts:134` 又是共享代码，
+    所以是**两侧共有的潜在缺陷**，修它要动共享渲染层、需要拍板）、
+    **W4**（medium，本地音乐把会话级 `blob:` URL 当身份持久化）、**W5–W9**（low）、
+    以及 **W10**（**本轮更正**：`formData` 不是"静默发空请求"，
+    `host.js:117` 会明确抛"Unsupported capability"，属于**已登记的显式不支持**，降为 low）。
     见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3**。
 
 ---
@@ -317,7 +319,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 > 但其中**主题**是用户明确点过名的方向，而且它是**唯一**会出现"未处理 rejection + 功能静默为空"的一块，
 > 所以要么补原生实现，要么在渲染层按既有 `ipcFallback` 体例显式降级 —— 不要让它停在现在这个状态。
 
-### 6.2 下载执行层：独立审查确认的 8 处与桌面不一致（**本轮修了 6 处，剩 2 处**；2026-10-15）
+### 6.2 下载执行层：独立审查确认的 8 处与桌面不一致（**本轮修了 7 处，只剩第 4 处**；2026-10-15）
 
 审查对象：提交 `2a3e4a7c` 的 `RainMusicDownloadTaskChannels.java`。方法：把原生行为逐条与桌面
 `src/renderer/worker/download/download.ts`、`src/common/utils/musicMeta/mp3Meta.js` 对照。
@@ -329,7 +331,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | 2 | medium | `:271-273` | `mp3Meta.js:17,29-36` | 桌面封面下载**失败就 `delete meta.APIC` 然后照写标签**（非 `http` 的 APIC 也走这条）；原生封面一失败就抛，整个 `write_meta` 作废 ⇒ 一次封面 404 / 超时 / **webp**（原生只认 JPEG/PNG）/ 超过 8 MiB，会让**标题、歌手、专辑和 USLT 歌词全部写不进去** |
 | 3 | medium | `:183`、`:188` + catch `:221-223` | `download.ts:145-155` | 桌面在 `err.message.startsWith('Resume failed')` 时**先删掉那个不完整的文件再重启**；原生 resume 校验失败只抛，`.part` / `.resume` 原样留着 ⇒ 下次重试发出**一模一样**的 `Range` + `If-Range`、得到一模一样的失败 ⇒ **永久卡死**（而 `:131-133` 的 `remove` 又刻意保留这两个文件） |
 | 4 | medium | `:131-133`（注释"`A .part` is retained too"）、`:152-153` | `download.ts:317-325` | 桌面 `removeTask` 会删掉未完成的媒体文件；原生**从不回收** `.part` / `.resume` / `.resume.part` / `.meta.part`。下载目录是**应用私有目录**、用户看不见 ⇒ 空间**只能靠清应用数据**回收 |
-| 5 | low | `:221-223` | `download.ts:130-143,167-178` | 桌面失败**最多重试 3 次**（`retryNum > 2`）并延时 1 s，`ENOTFOUND` 还会发 `refreshUrl`；原生一次失败直接 `error` ⇒ 移动网络抖动下 Android 失败而桌面能自愈 |
+| 5 | low | `:221-223` | `download.ts:130-143,167-178` | 桌面失败**最多重试 3 次**（`retryNum > 2`）并延时 1 s，`ENOTFOUND` 还会发 `refreshUrl`；原生一次失败直接 `error` ⇒ 移动网络抖动下 Android 失败而桌面能自愈 | **已修（有界重试 + `error` 只发一次）** —— 见 §6.2.1 第 7 条 |
 | 6 | low | `:266` | `mp3Meta.js:9-12` | 桌面 USLT 的 `language` 是 **`'zho'`**；原生写 `'eng'` ⇒ 同一首歌两个平台带不同的歌词帧 |
 | 7 | low | `:271` | `mp3Meta.js:28` | 桌面给 `music.126.net` 的封面 URL 追加 `param=500y500`；原生没有 ⇒ 网易云封面按 CDN 默认尺寸取（图不一样），也是第 2 条的额外触发源 |
 | 8 | low | `:215-219` | 桌面没有"先改名再删清单"这一步 | `move(part, task.file)` **先提交**、`manifest.delete()` 后执行，两步都在 `synchronized(gate)` 里；删清单失败会抛进 `catch`，把**已经成功的下载**报成 `error` ⇒ 文件在、状态是失败，且没有可恢复路径 |
@@ -339,7 +341,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 > **"依据优先于权威"对审查结果同样适用**：本节每一行都是我按上表两侧路径复核过的。
 > （这也解释了为什么"子代理说的"不能直接当结论。）
 
-#### 6.2.1 本轮已修（第 1、2、3、6、7、8 处）
+#### 6.2.1 本轮已修（第 1、2、3、5、6、7、8 处）
 
 改的全在 `RainMusicDownloadTaskChannels.java` 一个文件里，主题是**"一次失败或一次续传之后，任务必须还能恢复"**：
 
@@ -363,8 +365,24 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
    （分隔符按 URL 里有没有 `?` 选 `&`/`?`，与 `mp3Meta.js:28` 一致）。
 6. **第 8 处**：完成路径改成**先删清单、再改名**。删不动就抛，而那时媒体文件还没提交
    ⇒ 这次失败是"什么都没发生"（`.part` 还在、可重试），而不是"文件已经落盘了却报 error"。
+7. **第 5 处（有界重试）**：`transfer()` 里加了 `MAX_ATTEMPTS = 3` / `RETRY_DELAY_MS = 1000`
+   （桌面 `download.ts:130-143` 是 `retryNum > 2` 才放弃 ⇒ 总共 3 次尝试、失败之间延时 1 s）。
+   做法是把原来那一大坨传输逻辑抽成 `attemptTransfer()`（返回 `null` = 结束，返回异常 = 这次失败），
+   `transfer()` 负责"重试还是报错"，并且**失败上报收口到唯一一处 `emitError()`** ⇒
+   一条任务**最多发一条 `error`**。
+   - **确定性失败不重试**：目录建不出来、以及"跳过已存在文件"这两处预检**留在循环外**，
+     直接报错（桌面那两处也是 `return`，根本不经过 `onError` 的重试分支）。放进循环只会把同一个错误
+     重复 3 次、白白多等 2 秒。
+   - 重试时会**再发一次 `start`**（和桌面一样 —— 它失败后重新调 `start()`，走同一条发射路径），
+     并且因为 `.part` / `.resume` 都还在，第二次是**从断点续传**。
+   - **副作用（是改善，不是回归）**：三种"续传被拒"的情况现在会**自动自愈** ——
+     第 1 次被拒 ⇒ 丢掉接不上的部分（第 3 处的修复）⇒ 第 2 次从头下成功。
+     所以原来那三条断言（"invalid Content-Range cannot complete"、"changed validator must never append"、
+     "redirect target change must not mix bytes"）**必须改写成更强的形式**：
+     不是"不能完成"，而是"**完成了，而且字节是对的**"——`redirect` 那条现在断言整份文件都是
+     `/other` 的 42 字节，**混进任何一个旧字节都会失败**，比原来的"必须报错"更能说明"没有混"。
 
-**证据**：
+**证据（本轮这一刀）**：
 
 - 探针 `tests/unit/fixtures/android-download-runtime/DownloadRuntimeProbe.java` 新增/改写了断言：
   `tiny`（≤100 字节残留必须能下）/ `existing`（>100 字节且 `downloaded==0` 必须被保住）/
@@ -389,17 +407,13 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
   | 去掉 `param=500y500`（换成 999x999） | `a music.126.net cover must get the desktop's param=500y500 rewrite` |
   | 换回"先改名再删清单" | `the manifest must be deleted BEFORE the rename…` |
 
-#### 6.2.2 仍然没修（第 4、5 处）—— **需要先拍板，不是漏掉**
+#### 6.2.2 仍然没修（只剩第 4 处）—— **需要先拍板，不是漏掉**
 
 - **第 4 处（部分文件永不回收）**：`cancel()` 保留 `.part` / `.resume` 是**代码里写明的有意选择**
   （"删掉记录再重建可以安全续传"），而桌面 `removeTask` 会回收。两个方向都有道理：
   保留 = 省流量；回收 = 省空间（且用户看不见那个私有目录）。
   **本轮不动它**，因为改错方向会退化一个明确写下来的特性。要改的话请先定：删除记录时
   是"保留进度"还是"释放空间"，或者给一条显式的清理入口。`.meta.part` 在失败路径上**已经**会删。
-- **第 5 处（没有有界重试）**：桌面失败会**重试 3 次**（`retryNum > 2`，延时 1 s，`ENOTFOUND` 还会
-  发 `refreshUrl`），原生一次失败直接 `error`。补它要同时定"重试期间怎么发事件"
-  （进度事件会重复、`error` 只该在最后一次发），而且会改动 façade 与 store 的现有期望
-  ⇒ 单独立一刀，别混在本次的"可恢复性"修复里。
 
 **审查同时确认了这些部分是对的**（记下来，避免下一个人重查一遍）：
 
@@ -549,14 +563,14 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 |---|---|---|---|---|---|
 | **W1** | **high** | `src/renderer/platform/userApi/web.js:38` —— 把 `json: false` **写死**给每一次社区脚本请求 | `src/main/modules/userApi/renderer/preload.js:172-188`（**只有** `form`/`formData` 才置 `json = false`，`body` **不置**）+ `vendor/needle/lib/needle.js:305-306` | 脚本用 `body`（对象）+ `Content-Type: application/json` 发 POST 时，桌面发 `{"a":1}`、Android 发 `a=1`，而**头仍然是 json** ⇒ 服务器按 JSON 解析直接失败。**一整类社区音源脚本在 Android 上不可用** | **已复核 + 本轮已修** —— 见 §6.4.1 |
 | W2 | medium | `userApi/host.js:123` + `worker-runtime.js:31-32` | `preload.js:163` `if (isInitedApi) return` | 初始化**成功之后**，脚本里任何一次未捕获错误 / 未处理 rejection 都走 `fatal` ⇒ 状态翻假、worker 终止、在途请求 reject、弹"源码初始化失败"。**一个本来能用的源被一次异步小错毁掉** | **已复核 + 本轮已修** —— 见 §6.4.3 |
-| W3 | medium | `userApi/contract.js:18-22`（经 `host.js:115-119`） | — | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）⇒ 就绪闸门打开、`assertApiSupport()` 为真，但 `userApi.apis[source]` 里没有 `getMusicUrl` ⇒ 播放死在后面的 TypeError 上，而不是在初始化时就明确报错 | 未复核 |
+| W3 | medium（**本轮复核后：不是 Android 与桌面的分歧**） | `userApi/contract.js:18-22`（经 `host.js:115-119`） | **桌面是同一套逻辑**：`src/main/modules/userApi/renderer/preload.js:126-138` 同样不检查空 `actions`、同样把剩下的照发；而**消费方是共享代码** `src/renderer/core/useApp/useInitUserApi.ts:134`（`qualitys[source] = sourceQualitys` 对**每一个** entry 都设）⇒ 两边都会出现"`assertApiSupport` 为真、但 `apis[source]` 里没有 `getMusicUrl`" | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）。**⚠️ 这是两侧共有的潜在缺陷，不是 Android 单侧的偏差** —— 我复核了桌面那一份与共享的消费方，结论一致 | **已复核（两侧都读了）**。因为修它要改**共享渲染层**（会同时改变桌面行为），所以**本轮不动**：它需要一个决定 —— 是"丢掉没有可用 action 的平台、并在一个都没剩时报初始化失败"，还是维持现状（`filterSources` 之上的行为是 LX 的既有契约）。**登记为独立事项，不要当成 Android 侧缺陷去单向改。** |
 | W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
 | W5 | low | `userApi/worker-runtime.js:25` 的能力黑名单 | — | 漏了 `navigator.sendBeacon`（Beacon 是 `[Exposed=(Window,Worker)]`）⇒ 脚本仍可绕过父侧那条被校验的 HTTP 通道直接外联 | 未复核（需真机 WebView） |
 | W6 | low | `filePicker/web.js:7` + `views/Setting/components/SettingDownload.vue:31-38` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应** | 未复核 |
 | W7 | low | `filePicker/web.js:34` | — | 取消判定靠 `focus` + 300 ms 定时器读 `input.files`；WebView 若"先 focus、后填 FileList"，会把**真选择当成取消**静默丢掉 | 未复核（需真机） |
 | W8 | low（**旧问题**，不是本次引入） | `build-config/renderer/webpack.config.web.js:46-96` + `src/common/utils/index.ts:1` | — | web 产物里**仍然有 `electron-log` 的 Node 构建**（`src/node/*`、File transport、`fs` 被替成空模块）⇒ 配置里"没有任何 Node-only 模块能进 web 产物"这句话对**日志**这条不成立（只在真写日志时才炸，而且被 electron-log 自己吞掉） | 未复核 |
 | W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | 未复核 |
-| **W10** | medium（**本轮新发现**，不在原审查清单里） | `userApi/web.js` 的 `userApiHttpRequest` | `preload.js:180-185`（桌面把 `formData` 交给 needle 发 multipart） | 适配器**完全忽略 `formData`**：既不把它当 data，也不置 `json`，等于发一个**没有 body** 的请求。桌面那条路是能用的 ⇒ 用 `formData` 的社区脚本在 Android 上会静默发出空请求 | 已复核（我改 W1 时读出来的）。**本轮没修**：修它需要 `platform/http/web.js` 支持原样 body（`FormData`/`Blob`/`URLSearchParams` 直传 + 不自动写 Content-Type，让 fetch 自己产生 multipart boundary），那是另一件事，已登记 |
+| **W10** | low（**本节 2026-10-15 更正**：原来的描述是错的） | `userApi/web.js` 的 `userApiHttpRequest` | `preload.js:180-185`（桌面把 `formData` 交给 needle 发 multipart） | 适配器**忽略 `formData`** —— 但**不是静默**：`host.js:117` 的 `startHttp()` **会先明确抛** `Unsupported capability: multipart formData`，脚本的 `lx.request` 回调拿到的是这条错误（`android-user-api-host.test.cjs` 里就有一条断言它）。所以这是**已登记的"显式不支持"**，不是"静默发空请求" | **已复核**：~~原来写的"等于发一个没有 body 的请求 / 静默发出空请求"**是错的**~~ —— 我上一轮只看了 `userApi/web.js`，没看上游 `host.js` 的守卫。**本轮修正**。功能上仍与桌面有差距（桌面能发 multipart），要补齐需要 `platform/http/web.js` 支持原样 body（`FormData`/`Blob`/`URLSearchParams` 直传 + 不自动写 Content-Type，让 fetch 自己产生 boundary）—— 那是另一件事，**低优先** |
 
 #### 6.4.1 本轮已修：W1（自定义源的请求体编码）
 
@@ -868,16 +882,17 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **本轮实际修掉了 10 处、并拍板了 1 处**：§6.2 的下载执行层 6 处（含那处 high）+ §6.4 的 W1、W2
-   （两处都在自定义源这条首版链上）+ §6.3 的 L6（替身严格度 + 坏 base64 的取舍）、L1（数值型旧 ID）。
-   每一处都配了断言与**变异验证**（下载 6 个、W1 两个、W2 两个、L6 一个、L1 一个，逐个被对应断言捕获）。
-   **本机门禁：lint 0 errors、四个 tsc exit 0、单测 461/461 fail 0；三个代码提交的 CI 全部 success。**
-   各节都留了"仍然没修、并且说明了为什么"的清单。**下一轮的第一优先**是：
-   - **§6.4 的 W3**（medium：`filterSources` 会留下 `actions` 为空的平台，
-     而"一个可用平台都没有"也被当成功发布 ⇒ 播放死在后面的 TypeError 上，而不是初始化时明确报错。
-     ⚠️ **先核对桌面是不是也这样**：`preload.js:124-141` 看起来**同样**不检查空 `actions`，
-     所以这可能是一处"与桌面一致但两侧都糟"的地方 —— 那就该**记录 + 单独立项**，而不是单向改 Android）；
-   - **§6.3 的 L2**（保留 id 的拒绝：需要**先拍板**再改文档/代码，理由是拒绝本身站得住）；
-   - 再往后是 §6.2 剩下的第 4、5 处、§6.4 的 W4 与 W10。
+5. **累计修掉 11 处、拍板 1 处、更正 1 处**：§6.2 的下载执行层 7 处（含那处 high，
+   本轮补上有界重试）+ §6.4 的 W1、W2 + §6.3 的 L6、L1。
+   每一处都配了断言与**变异验证**（下载 8 个、W1 两个、W2 两个、L6 一个、L1 一个，逐个被**为它写的**断言捕获）。
+   **本机门禁：lint 0 errors、四个 tsc exit 0、单测全过；每个代码提交的 CI 都是 success。**
+   **下一轮的第一优先**是：
+   - **§6.2 第 4 处**（部分文件何时回收）与 **§6.3 L2**（保留 id 的拒绝）—— **都需要先拍板**，
+     不适合在没有决定的情况下动代码；
+   - **§6.4 的 W4**（本地音乐把会话级 `blob:` URL 当身份持久化 ⇒ 重载后不可播）——
+     这是首版范围内唯一还没动过的 medium；
+   - 之后是 §6.1 的**主题 7 条通道**（唯一"未处理 rejection + 功能静默为空"的一块，
+     也是用户点过名的方向；属于首版范围之外，但要做就得成体系地做）；
+   - **W3 不是 Android 侧缺陷**（两侧共有），不要按"Android 偏差"去改。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**
