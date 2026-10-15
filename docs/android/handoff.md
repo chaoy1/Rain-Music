@@ -42,6 +42,10 @@
     以及 **W10**（**本轮更正**：`formData` 不是"静默发空请求"，
     `host.js:117` 会明确抛"Unsupported capability"，属于**已登记的显式不支持**，降为 low）。
     见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3**。
+11. **阶段 6 的执行单已单独成文：[`acceptance.md`](acceptance.md)**（2026-10-15 新增）。
+    它把"首版是否可用"拆成逐项**可观察证据** + adb 取证命令 + **已知不支持清单**（免得把设计如此当 bug），
+    并规定失败时要回报哪五样东西。**它没有被真机执行过** —— 本机没有 SDK/adb/设备，
+    所以它是"待执行的清单"，不是"验收结论"。**这也是当前唯一挡住目标完成的环节。**
 
 ---
 
@@ -308,7 +312,7 @@ android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicListWriteChannels.ja
 | **换源缓存**（4 条） | `winMain_get/save/clear_other_source`、`winMain_get_other_source_count` | 仅 `src/renderer/core/music/local.ts:21,25,31,44,50,56`（**本地音乐**匹配用） | 运行期"找其他音源"走的是 `core/music/utils.ts:21` 的 `musicSdk.findMusic`，**不走**这 4 条 ⇒ **不属于首版阻塞**；本地音乐功能本来就未开放 |
 | **音效预设**（4 条） | `winMain_get/save_sound_effect_eq_preset`、`winMain_get/save_sound_effect_convolution_preset` | `src/renderer/store/soundEffect.ts:16,23,33,46,53,63` ← `components/common/SoundEffectBtn/*.vue` | 进入音效设置并打开预设列表时报错 |
 | **启动参数**（1 条） | `common_get_env_params` | `src/renderer/core/useApp/index.ts:103` | **已按设计降级**（`invokeWithFallback` → 渲染层默认值）；这条**不是**缺口，登记在此仅为对齐契约 |
-| **初始化握手**（1 条） | `winMain_inited` | `src/renderer/utils/ipc.ts:26`（`sendInited()`） | `send` 到无 handler 的通道 ⇒ **每次启动一条 `console.error`**（`deliver()` 的失败分支，不静默、也不崩）。原生侧没有 `main_window_inited` 的消费者（桌面歌词窗口在 Android 不存在） |
+| **初始化握手**（1 条） | `winMain_inited` | `src/renderer/utils/ipc.ts:26`（`sendInited()`），调用点已包在 `sendSkippable(..., 'A', …)` 里（`useApp/index.ts:202-203`） | ⚠️ **本节 2026-10-15 更正**：原来写的"每次启动一条 `console.error`"**是错的**。走 `send` 的信封（`kind=send`）时原生**先 `resolve(ack)` 再 dispatch**，而未注册通道在 `expectsResponse == false` 分支里**只打一条原生 `Logger.warn`**（`RainMusicIpcPlugin.java:250-259`：`send 到未注册的通道：…`），**不 emit 错误事件、也不 reject** ⇒ JS 侧那条 `deliver()` 的 `console.error` 根本不会触发。所以真实代价只是**每次启动一条 logcat 警告**；桌面的 `main_window_inited` 消费者（桌面歌词窗口 / 托盘）在 Android 都不存在，因此"不注册"与"注册成空实现"**语义等价**。**结论：这不是缺陷，不改代码** —— 只有"想让 logcat 干净"时才值得补一个空实现（那会动到 `RainMusicAppSettingChannels` 的范围守卫，或新增一个小通道类）。 |
 
 **另外一批同样未注册、但本轮没有逐个追调用点的 C 类通道**：`winMain_get_cache_size`、`winMain_clear_cache`、
 `winMain_show_save_dialog`、`winMain_open_dir_in_explorer`、`common_get_system_fonts`、`winMain_set_power_save_blocker`、
@@ -747,6 +751,9 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 - 播放 URL **只来自所选自定义源**（`api-source-info.ts` 的内置列表是空数组；内置 tx/kg/wy 只提供元数据）
 
 ### 阶段 6 的已知要点
+- **真机验收的执行单在 [`acceptance.md`](acceptance.md)**（2026-10-15 新增）：把"首版是否可用"拆成
+  逐项可观察证据，含 adb 取证命令、**已知不支持清单**（别当 bug 报）、以及回报失败时要带的五样东西。
+  A4/A5/B5/C4/C5 几项是**专门为这几轮修掉的缺陷**加的。
 - **真机验收必须做** `docs/android/cleartext-verification.md`（638 行）里的矩阵：**明文流量（约 28 处 `http://`）**、CORS、`convertFileSrc()` 映射、WebView 内核差异、worker 里 `window.Capacitor` 的可见性
 - 该文档的 §"本机模拟与真机的差异"列了 **10 条不能从本机推广到真机**的结论
 
