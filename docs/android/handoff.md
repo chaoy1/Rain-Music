@@ -96,10 +96,10 @@
 | 项目根 | `D:\Documents\Projects\Rain Music\rain-music-desktop` |
 | 分支 | `master` → `origin https://github.com/chaoy1/Rain-Music.git` |
 | 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`），工作区另有用户 30 项未提交改动 |
-| 单测（本机，**工作区口径**） | **455 / 455，fail 0、skip 0**（2026-10-15 在 `2a3e4a7c` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
+| 单测（本机，**工作区口径**） | **470 / 470，fail 0、skip 0**（2026-10-16 在 `1a2eca24` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
 | lint / 四个 tsc | **`eslint --ext .ts,.js,.vue src` exit 0（`0 errors` / 6 个既有 `View.vue` 属性顺序 warnings）；`src/{main,renderer,renderer-lyric,common}` 四个 tsc 全部 exit 0** |
-| **CI `verify`** | `2a3e4a7c` = **completed / success**（check-run `116315939345`）。**改任何代码后必须查新 SHA，不能沿用** |
-| **CI `debug-apk`** | `2a3e4a7c` = **completed / success**（check-run `116315940325`，run `38703141603`）；产物 `rain-music-android-debug`（10 101 476 B）**未过期**。**改任何原生代码后必须查新 SHA** |
+| **CI `verify`** | `2a3e4a7c` = **completed / success**（check-run `116315939345`）。**改任何代码后必须查新 SHA，不能沿用**。**2026-10-16 复核**：`f50d769` = **completed / success**（run [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)，7m 25s，UI 矩阵 **8 个套件**全绿 —— 含本轮新增的 `window-controls` / `window-controls-shell`） |
+| **CI `debug-apk`** | `2a3e4a7c` = **completed / success**（check-run `116315940325`，run `38703141603`）；产物 `rain-music-android-debug`（10 101 476 B）**未过期**。**改任何原生代码后必须查新 SHA**。⚠️ 读这个 job 的结论时注意 `build-android.yml:20-22` 有 `concurrency: cancel-in-progress` —— 连续两次 push 时**前一次会被 `cancelled`，那不是失败**（例如 `f50d769` 的 Android run `38862879622` 就是被后一次取消的） |
 | 用户的工作区 | **30 项未提交改动**（主题/UI/`tests/ui/*`/`src/lang/*` 等，**不是本线的**） |
 
 ### 用户的 30 项未提交改动（必须保护）
@@ -996,8 +996,9 @@ node node_modules\typescript\bin\tsc -p src\common\tsconfig.json --noEmit
 node --test tests\unit\*.test.cjs                                      # 单测（当前基线 470）
 node build-config\pack.js                                              # 桌面构建
 npm.cmd run build:web                                                  # web 构建
-# UI 套件（CI 矩阵现在跑这 8 个里的后 8 项；前 6 项 + 后 2 项即完整矩阵）
-npm.cmd run test:window-controls ; npm.cmd run test:window-controls-shell
+# UI 套件：CI 矩阵跑 8 个（settings-controls / settings-layout / player / compact-lyrics /
+# lyric-security / responsive-layout / window-controls / window-controls-shell）
+npm.cmd run test:ui                                                    # 本地一次跑完上面 8 个
 npm.cmd run test:surfaces                                              # 不在 CI 矩阵里，属可选
 npx.cmd cap sync android                                               # Capacitor 同步
 ```
@@ -1035,5 +1036,13 @@ npx.cmd cap sync android                                               # Capacit
    - 之后是 §6.1 的**主题 7 条通道**（唯一"未处理 rejection + 功能静默为空"的一块，
      也是用户点过名的方向；属首版范围之外，但要做就得成体系地做）；
    - **W3 不是 Android 侧缺陷**（两侧共有），不要按"Android 偏差"去改。
+6. **2026-10-16 这一轮没有修缺陷，只补了一条验收项的守卫**：判定「Android 上不出现 macOS
+   交通灯」的开关（`src/renderer/platform/index.ts` → `WindowControls.vue`）此前**没有任何
+   自动化覆盖**，而且 `test:window-controls` **根本不在 CI 矩阵里**。现在 CI 的 UI 矩阵
+   **6 → 8** 个套件：新增判定表 6 条（含"原生桥与 Electron 痕迹同时存在"这条防 polyfill 的）
+   与两条分支的渲染守卫（移动端**零按钮且组件从不挂载**、桌面端照旧 3 颗，两个方向成对，
+   否则写死 `false` 也能假绿）；四个变异各自精确命中。单测 464 → **470**。
+   详见 §4「交通灯验收项的 CI 守卫」，证据 run
+   [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)（`f50d769`，8 套件全绿）。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

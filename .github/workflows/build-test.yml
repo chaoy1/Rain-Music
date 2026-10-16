@@ -292,13 +292,16 @@ jobs:
             'window-controls'       = '${{ steps.ui_window_controls.outcome }}'
             'window-controls-shell' = '${{ steps.ui_window_controls_shell.outcome }}'
           }
-          $bad = $rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key }
+          $bad = @($rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key })
           $all = ($rows.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
           Write-Host "result: $all"
-          # Emit workflow commands so the matrix also lands in check annotations,
-          # which are readable without a token.
-          Write-Host "::error title=UI matrix::$all"
-          if ($bad) {
+          # Emit workflow commands so the matrix also lands in check annotations, which are
+          # readable without a token. 全绿时必须发 ::notice 而不是 ::error —— 否则一次**成功**
+          # 的运行也会在 check 页上顶着 "2 errors" 的注解（与 responsive-layout.electron.cjs:64
+          # 既有的 level 选择保持一致：只有失败才用 ::error）。
+          $level = if ($bad.Count -gt 0) { 'error' } else { 'notice' }
+          Write-Host "::$level title=UI matrix::$all"
+          if ($bad.Count -gt 0) {
             Write-Host "::error title=Failing UI suites::$($bad -join ', ')"
             exit 1
           }
@@ -317,11 +320,13 @@ jobs:
             'verify/build'     = '${{ steps.verify_build.outcome }}'
           }
           $all = ($rows.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
+          $bad = @($rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key })
           Write-Host "verify result: $all"
           $all | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
           # annotation 免 token 可读；每步只发 2 条，远低于 GitHub 每步 10 条的 error 上限。
-          Write-Host "::error title=Verify matrix::$all"
-          $bad = @($rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key })
+          # 同 UI matrix：全绿发 ::notice，只有真有失败才发 ::error（否则成功的运行显示 "2 errors"）。
+          $level = if ($bad.Count -gt 0) { 'error' } else { 'notice' }
+          Write-Host "::$level title=Verify matrix::$all"
           if ($bad.Count -gt 0) {
             Write-Host "::error title=Failing verify steps::$($bad -join ', ')"
             exit 1
