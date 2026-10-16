@@ -206,6 +206,51 @@
   ```
   （未鉴权有**小时配额**，超限会 403；配额恢复后可用）
 
+### 交通灯验收项的 CI 守卫 ✅（2026-10-16；HEAD `f50d769d`）
+
+**先记缺口**：验收项「Android 上不出现 macOS 交通灯」在代码里只有一个开关 ——
+`src/renderer/platform/index.ts` 的 shell 判定 → `WindowControls.vue` 的 `v-if="isDesktopShell"`。
+但当时：
+- `tests/ui/traffic-lights.electron.cjs` 只测**桌面组件本身**的行为（红/黄/绿三颗按钮的
+  语义），完全不覆盖那个判定分支；
+- 整个 `test:window-controls` **根本不在 CI 矩阵里**（CI 只跑 6 个 UI 套件）。
+
+也就是说这条验收项在本机之外**没有任何守护**。
+
+**补的两半证据**（各自都做了变异验证）：
+
+| 文件 | 覆盖 |
+|---|---|
+| `tests/unit/android-shell-detection.test.cjs` | 判定表 6 条：原生壳（且 `process` 完全缺失时**不能抛 ReferenceError**）、原生桥与 Electron 痕迹**同时存在**（判定的先后顺序就是为这一条写的）、Electron 渲染进程、两者都不是、浏览器端 Capacitor 运行时（`isNativePlatform()` 为 false）、没有 `isNativePlatform` 的旧桥退回 `getPlatform()` |
+| `tests/ui/window-controls-shell.electron.cjs` | 在真实 Chromium 里渲染 `WindowControls.vue` 的**两条分支**：移动端**零按钮、且交通灯组件一次都不被挂载**（用带挂载计数的替身证明，而不是数按钮）；桌面端照旧挂载 3 颗 |
+
+**为什么两个方向都必须钉**：把 `v-if` 写死成 `false` 同样能让 Android「通过」，
+却让桌面用户关不掉窗口（主窗口 `frame: false`，交通灯是关闭/最小化/全屏的**唯一**入口）。
+只测移动端 = 假绿。
+
+**变异验证**（`%TEMP%` 出仓副本 + `node_modules` junction；用 **Node** 写，因为 PowerShell
+默认编码读中文源码在本会话已经 5 次损坏副本）：
+
+| 变异 | 结果 |
+|---|---|
+| 判定顺序对调（Electron 优先） | **仅**「原生桥与 Electron 痕迹同时存在」1 条失败 —— 精确命中 |
+| 判定整体塌成 `false` | 判定表 6 条全失败（这是"整体"变异，不是 harness 说谎） |
+| `v-if` 写死 `true` | 移动端挂载计数 2（应为 1） |
+| `v-if` 写死 `false` | 桌面端按钮 0（应为 3） |
+| 两个未变异的对照 | exit 0 |
+
+**CI 接线**：`build-test.yml` 的 UI 矩阵 **6 → 8** 个套件（新增 `ui_window_controls`、
+`ui_window_controls_shell`；步骤、矩阵打印、失败聚合**三处都加**；矩阵对齐宽度 `-20` → `-22`），
+本地 `npm run test:ui` 同步补上。单测 **464 → 470**。
+另外把 `traffic-lights.electron.cjs` 的证据文件从 `.design/traffic-test-results.json`
+挪到 `.design/window-controls/results.json` —— 前者**不匹配** CI 的 artifact glob
+（`.design/**/results.json`），所以在 CI 里红掉时只有 stdout 可看、没有可下载的证据。
+
+**顺带一条环境教训（不是代码问题）**：本机 `git push` 必须走宿主 `pwsh`
+（Git for Windows，`credential.helper=manager`）。DSH 自带 bash 的 git 用
+`credential.helper=helper-selector`：**非交互下既不报错也不推送，静默挂住**，直到超时。
+而 `git ls-remote` 在两种 shell 里都能成功 —— 所以 **ls-remote 成功不能证明推送鉴权可用**。
+
 ### 2026-10-15：歌曲新增与列表广播顺序
 
 - 原生 `RainMusicListMusicAddChannels.java` 注册 `player_list_music_add`，沿用
@@ -948,10 +993,12 @@ node node_modules\typescript\bin\tsc -p src\renderer\tsconfig.json --noEmit
 node node_modules\typescript\bin\tsc -p src\renderer-lyric\tsconfig.json --noEmit
 node node_modules\typescript\bin\tsc -p src\common\tsconfig.json --noEmit
 # ⚠️ 不要用根 tsconfig.json（它没有 paths 映射，有 889 个既有错误，不是门）
-node --test tests\unit\*.test.cjs                                      # 单测（当前基线 381）
+node --test tests\unit\*.test.cjs                                      # 单测（当前基线 470）
 node build-config\pack.js                                              # 桌面构建
 npm.cmd run build:web                                                  # web 构建
-npm.cmd run test:surfaces ; npm.cmd run test:window-controls           # UI 套件
+# UI 套件（CI 矩阵现在跑这 8 个里的后 8 项；前 6 项 + 后 2 项即完整矩阵）
+npm.cmd run test:window-controls ; npm.cmd run test:window-controls-shell
+npm.cmd run test:surfaces                                              # 不在 CI 矩阵里，属可选
 npx.cmd cap sync android                                               # Capacitor 同步
 ```
 

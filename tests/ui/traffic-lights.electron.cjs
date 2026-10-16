@@ -53,6 +53,10 @@ app.whenReady().then(async() => {
     return results;
   })()`)
   console.log(JSON.stringify(result, null, 2))
-  fs.writeFileSync(path.join(root, '.design/traffic-test-results.json'), JSON.stringify(result, null, 2))
+  // 路径要落在 CI 的 artifact glob（`.design/**/results.json`）里：原来的
+  // `.design/traffic-test-results.json` 不匹配那个 glob，套件一旦在 CI 里红掉，
+  // 只有 stdout 可看，没有可下载的证据文件。
+  fs.mkdirSync(path.join(root, '.design/window-controls'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.design/window-controls/results.json'), JSON.stringify(result, null, 2))
   app.exit(result.every(r => r.pass) ? 0 : 1)
 }).catch(error => { console.error(error); app.exit(1) })
