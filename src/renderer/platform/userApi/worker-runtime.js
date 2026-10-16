@@ -25,7 +25,7 @@ export const installUserApiWorker = (scope, utils, evaluate = script => Function
     // `Worker` / `EventSource` 都是**构造式**用法，箭头函数没有 [[Construct]]，于是 `new WebSocket(...)`
     // 会先抛 "unsupported is not a constructor"，把真正的原因（该走 `lx.request`）盖成一句让人看不懂的
     // TypeError（网络仍然拦住了，所以这是个"可诊断性"缺陷，不是洞 —— 由上面的构造式断言抓出来）。
-    const unsupported = capability => function unsupportedCapability () {
+    const unsupported = capability => function unsupportedCapability() {
       throw new Error(`Unsupported capability: ${capability}; use lx.request`)
     }
     for (const key of ['fetch', 'XMLHttpRequest', 'WebSocket', 'WebSocketStream', 'WebTransport', 'EventSource', 'importScripts', 'Worker', 'SharedWorker']) {
