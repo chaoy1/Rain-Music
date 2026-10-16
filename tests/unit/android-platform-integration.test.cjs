@@ -76,6 +76,14 @@ test('Android app identity and manifest keep the declarations every first-versio
   assert.match(activity, /android:name="\.MainActivity"/)
   assert.match(activity, /android:exported="true"/)
   assert.match(activity, /android\.intent\.category\.LAUNCHER/)
+
+  // 能装在什么设备上由 `minSdkVersion` 决定：它一涨，能装这个包的机型就少一批，而
+  // **任何本机门禁与 CI 都不会红**（编译照样成功）。所以这里钉死；有意变更时，
+  // 同时改这里和 `docs/android/acceptance.md` §0.1 的那张表。
+  const variables = read('android/variables.gradle')
+  assert.match(variables, /minSdkVersion\s*=\s*24\b/)
+  assert.match(variables, /targetSdkVersion\s*=\s*36\b/)
+  assert.match(variables, /compileSdkVersion\s*=\s*36\b/)
 })
 
 test('Android file access distinguishes missing files from failures and reads exact binary bytes', async() => {

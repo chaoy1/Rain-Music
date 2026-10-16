@@ -18,6 +18,26 @@
 - **验收记录必须写明你装的是哪个 SHA** —— 每推一次代码 CI 都会重出包，不带 SHA 的结论无法回代。
 - 基线（2026-10-15）：`9cccfba9` 的 `verify` 与 `debug-apk` 均为 `success`。
 
+### 0.1 这个包能装在哪些设备上（2026-10-16 核对）
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| `minSdkVersion` | **24**（Android 7.0） | **低于它的设备装不上**；定义在 `android/variables.gradle`（有单测钉住，见下） |
+| `targetSdkVersion` / `compileSdkVersion` | 36 | 目标 / 编译 SDK |
+| `applicationId` | `com.rainmusic.mobile` | 与 `capacitor.config.ts` 的 `appId` 一致；也决定数据目录（第 D3 项要用的那条路径） |
+| 签名 | **debug** keystore | 可直接 `adb install -r`；但**与将来的 release 签名不能互相覆盖安装**（换签名要先卸载，数据会一起没） |
+
+**另外核对过一次"APK 真正读的那份运行时配置"**：`android/app/src/main/assets/capacitor.config.json`
+（由 `cap sync` 生成、**未纳入版本控制**）与源配置逐项一致 —— `appId`、`webDir: 'dist-web'`、
+`CapacitorHttp.enabled: true`、`android.allowMixedContent: true`。
+
+> ⚠️ 这一项值得单独看：**那份 JSON 才是 WebView 里真正生效的配置**。它若与 `capacitor.config.ts`
+> 分叉（最要命的是 `CapacitorHttp.enabled` 变成 `false`），**CI 照样编译成功、本机门禁全绿**，
+> 而真机上所有 HTTP 会换一条完全不同的路径（这正是 [`cleartext-verification.md`](cleartext-verification.md)
+> 那一套矩阵要区分的情况）。CI 每次都跑 `cap sync`，所以**CI 出的包不会有这个问题**；
+> 但**本机手工出包**（没跑过 `cap sync`）用的是工作区里那份旧文件 —— 真机网络出问题时，先看它。
+
+
 ---
 
 ## 1. 准备与取证命令
