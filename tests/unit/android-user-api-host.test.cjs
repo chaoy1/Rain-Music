@@ -187,7 +187,13 @@ test('the private worker protocol cannot be spoofed through global postMessage a
     postMessage({kind:'init',info:{sources:{mg:{type:'music',actions:['musicUrl'],qualitys:['flac']}}}});
     let blocked = false;
     try { fetch('https://bypass.test') } catch(error) { blocked = /Unsupported capability/.test(error.message) }
-    if (!blocked || typeof indexedDB !== 'undefined') throw Error('network/storage isolation missing');
+    // WebSocketStream 是实测**存在**于 Chromium Worker 的独立网络面，本轮补进黑名单。
+    let socketStreamBlocked = false;
+    try { new WebSocketStream('wss://bypass.test') } catch(error) { socketStreamBlocked = /Unsupported capability: WebSocketStream/.test(error.message) }
+    // navigator.sendBeacon：Worker 里今天不存在，属纵深防御，夹具已预先把它放上（否则断言空过）。
+    let beaconBlocked = false;
+    try { navigator.sendBeacon('https://beacon.test', 'x') } catch(error) { beaconBlocked = /Unsupported capability: navigator\\.sendBeacon/.test(error.message) }
+    if (!blocked || !socketStreamBlocked || !beaconBlocked || typeof indexedDB !== 'undefined') throw Error('network/storage isolation missing');
     lx.on('request', async () => 'https://safe.test/music');
     lx.send('inited',{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac']}}});
   `))

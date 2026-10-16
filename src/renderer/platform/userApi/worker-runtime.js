@@ -21,12 +21,28 @@ export const installUserApiWorker = (scope, utils, evaluate = script => Function
     const fatal = error => post({ kind: 'fatal', message: String(error?.message ?? error).substring(0, 1024) })
     // A Worker has no WebView's Capacitor object. Disable its independent network/storage
     // surfaces too, so normal script networking must use the validated parent HTTP route.
-    const unsupported = capability => () => { throw new Error(`Unsupported capability: ${capability}; use lx.request`) }
-    for (const key of ['fetch', 'XMLHttpRequest', 'WebSocket', 'WebTransport', 'EventSource', 'importScripts', 'Worker', 'SharedWorker']) {
+    // 必须是**普通函数**而不是箭头函数：清单里 `XMLHttpRequest` / `WebSocket` / `WebSocketStream` /
+    // `Worker` / `EventSource` 都是**构造式**用法，箭头函数没有 [[Construct]]，于是 `new WebSocket(...)`
+    // 会先抛 "unsupported is not a constructor"，把真正的原因（该走 `lx.request`）盖成一句让人看不懂的
+    // TypeError（网络仍然拦住了，所以这是个"可诊断性"缺陷，不是洞 —— 由上面的构造式断言抓出来）。
+    const unsupported = capability => function unsupportedCapability () {
+      throw new Error(`Unsupported capability: ${capability}; use lx.request`)
+    }
+    for (const key of ['fetch', 'XMLHttpRequest', 'WebSocket', 'WebSocketStream', 'WebTransport', 'EventSource', 'importScripts', 'Worker', 'SharedWorker']) {
       Object.defineProperty(scope, key, { value: unsupported(key), writable: false, configurable: false })
     }
     for (const key of ['Capacitor', 'RainMusicIpc', 'indexedDB', 'caches']) {
       Object.defineProperty(scope, key, { value: undefined, writable: false, configurable: false })
+    }
+    // `navigator` 不是普通全局，得单独处理。**实测**（Electron 42 / Chromium 148 的真 Worker）：
+    // `typeof navigator.sendBeacon === 'undefined'` —— WorkerNavigator 今天并不暴露它，所以这一条是
+    // **纵深防御**、不是当前活口；但 Android 上跑的是**系统 WebView**，其 Chromium 版本不归我们钉，
+    // 所以和上面 `WebTransport` / `SharedWorker` 一样，能力不存在也照钉。
+    // 同一次实测里真正**存在却没被拦住**的是 `WebSocketStream`（`typeof === 'function'`）—— 那才是
+    // W5 想找的那类洞，已加进上面的清单。
+    const workerNavigator = scope.navigator
+    if (workerNavigator != null) {
+      Object.defineProperty(workerNavigator, 'sendBeacon', { value: unsupported('navigator.sendBeacon'), writable: false, configurable: false })
     }
     addEvent('error', event => fatal(event.message || 'Worker script error'))
     addEvent('unhandledrejection', event => { event.preventDefault?.(); fatal(event.reason) })

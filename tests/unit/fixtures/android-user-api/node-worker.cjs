@@ -7,6 +7,11 @@ const vm = require('node:vm')
 const context = vm.createContext({ setTimeout, clearTimeout, console, URL, Uint8Array, TextEncoder, TextDecoder, crypto: require('node:crypto').webcrypto })
 context.globalThis = context
 context.fetch = () => { throw new Error('direct network used') }
+// 这两个是"真 Worker 有、夹具也必须先有"的能力：`WebSocketStream` 在 Chromium 148 的真 Worker 里
+// `typeof === 'function'`（实测），而 `navigator.sendBeacon` 是 `worker-runtime.js` 的纵深防御项。
+// 夹具不预先放上它们，断言就会**空过**（守卫把不存在的属性 defineProperty 出来也能"成功"拦截）。
+context.WebSocketStream = function WebSocketStream () { throw new Error('direct socket stream used') }
+context.navigator = { userAgent: 'rain-user-api-fixture', sendBeacon: () => { throw new Error('direct beacon used') } }
 const listeners = new Map()
 context.addEventListener = (name, handler) => listeners.set(name, handler)
 context.removeEventListener = name => listeners.delete(name)
