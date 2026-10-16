@@ -95,7 +95,7 @@
 |---|---|
 | 项目根 | `D:\Documents\Projects\Rain Music\rain-music-desktop` |
 | 分支 | `master` → `origin https://github.com/chaoy1/Rain-Music.git` |
-| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`），工作区另有用户 30 项未提交改动 |
+| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`）；**2026-10-16 本轮收尾 HEAD = `bbdeeb29`**（三个提交：交通灯判定表 + 两条分支渲染守卫、证据文件进 artifact glob、CI 注解 level 修正），工作区另有用户 30 项未提交改动 |
 | 单测（本机，**工作区口径**） | **470 / 470，fail 0、skip 0**（2026-10-16 在 `1a2eca24` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
 | lint / 四个 tsc | **`eslint --ext .ts,.js,.vue src` exit 0（`0 errors` / 6 个既有 `View.vue` 属性顺序 warnings）；`src/{main,renderer,renderer-lyric,common}` 四个 tsc 全部 exit 0** |
 | **CI `verify`** | `2a3e4a7c` = **completed / success**（check-run `116315939345`）。**改任何代码后必须查新 SHA，不能沿用**。**2026-10-16 复核**：`f50d769` = **completed / success**（run [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)，7m 25s，UI 矩阵 **8 个套件**全绿 —— 含本轮新增的 `window-controls` / `window-controls-shell`） |
@@ -206,7 +206,7 @@
   ```
   （未鉴权有**小时配额**，超限会 403；配额恢复后可用）
 
-### 交通灯验收项的 CI 守卫 ✅（2026-10-16；HEAD `f50d769d`）
+### 交通灯验收项的 CI 守卫 ✅（2026-10-16；`f50d769d` → `1a2eca24` → `bbdeeb29`，两个 workflow 全绿）
 
 **先记缺口**：验收项「Android 上不出现 macOS 交通灯」在代码里只有一个开关 ——
 `src/renderer/platform/index.ts` 的 shell 判定 → `WindowControls.vue` 的 `v-if="isDesktopShell"`。
@@ -250,6 +250,26 @@
 （Git for Windows，`credential.helper=manager`）。DSH 自带 bash 的 git 用
 `credential.helper=helper-selector`：**非交互下既不报错也不推送，静默挂住**，直到超时。
 而 `git ls-remote` 在两种 shell 里都能成功 —— 所以 **ls-remote 成功不能证明推送鉴权可用**。
+
+**本轮 CI 证据（三个提交、两个 workflow 全绿）**：
+
+| 提交 | `verify`（build-test） | `debug-apk`（build-android） |
+|---|---|---|
+| `f50d769` | ✅ run [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)，7m 25s | ⏹️ run `38862879622` = `cancelled`（被下一次 push 顶掉，**不是失败**） |
+| `1a2eca24` | ✅ run [`38863084776`](https://github.com/chaoy1/Rain-Music/actions/runs/38863084776)，7m 24s | ✅ run `38863084789`，7m 57s |
+| `bbdeeb29` | ✅ run [`38864267043`](https://github.com/chaoy1/Rain-Music/actions/runs/38864267043)，7m 31s | ✅ run `38864267039`，6m 11s |
+
+`verify` 的注解把 8 个 UI 套件逐条打了出来（免 token 可读）：
+`settings-controls / settings-layout / player / compact-lyrics / lyric-security /
+responsive-layout / window-controls / window-controls-shell` **全部 `=success`**。
+
+**顺手修掉的一个 CI 观感缺陷**：两个矩阵步骤原来**无条件**发
+`::error title=UI matrix::…` / `::error title=Verify matrix::…`（那是把矩阵送进 annotation、
+"免 token 可读"的手段），结果一次**成功**的运行在 check 页上写着
+`2 errors, 1 warning, and 2 notices` —— 看起来像红的。现在按
+`tests/ui/responsive-layout.electron.cjs:64` 早就定下的约定，用 `$bad.Count` 选 level：
+全绿发 `::notice`、真有失败才发 `::error`。**已在 CI 上核对**：`bbdeeb29` 的注解变成
+`1 warning and 4 notices`（4 条 = 两个矩阵 + responsive-layout 的两条），矩阵内容一字不少。
 
 ### 2026-10-15：歌曲新增与列表广播顺序
 
