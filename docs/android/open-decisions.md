@@ -121,18 +121,26 @@ deleting/recreating the record can safely resume."（**刻意**保留；只有**
 
 ## 5. **§6.3 L2**：`data_overwire` 对保留 id（`default` / `temp`）的拒绝
 
-**现状与证据**：`RainMusicListMutationChannels.java:88` 对 `default` 走 dedupe 分支；
-`data_overwire` 不接受保留 id。**拒绝是站得住的**：否则会产生一条**删不掉的**记录
-（保留 id 的删除路径被刻意关掉）。
+**现状与证据**：`data_overwire` 的实现在 `RainMusicListMutationChannels.java:114-130`
+（`overwriteAll`）：`userList` 里出现保留 id（`default` / `temp`）或重复 id ⇒
+**在构建阶段就 reject**（`:121`，`IllegalArgumentException("Duplicate or reserved list id: …")`），
+所以**一行都不会写**。**拒绝是站得住的**：保留 id 在 `my_list` 里没有父行，允许覆盖会留下
+**删不掉的**记录（`player_list_remove` 的保留 id 拒绝是同一条设计）。
 
 **方案**
 
 | 方案 | 代价 |
 |---|---|
-| **(a) 保持拒绝**，并把这条契约写进 `docs/android/ipc-contract.md` | 只写文档；目前它只散落在 handoff 里 |
+| **(a) 保持拒绝**，并把这条契约写进 `docs/android/ipc-contract.md` | 只写文档 |
 | (b) 允许写保留 id | 需要同时定义"怎么删"，风险面更大 |
 
-**我的建议**：(a)。这条**唯一缺的就是文档**——所以它其实是 5 条里最容易收尾的一条。
+**我的建议**：(a)。
+
+✅ **文档这一半已经补上（2026-10-16）**：`docs/android/ipc-contract.md` 在 1.3 节的注里新增了
+`player_list_data_overwire` 的完整契约（**wire 形状** `args = [{ defaultList, tempList?, userList }]`、
+保留/重复 id 的拒绝点与"不写一行"的保证、`default` 会按 `id` + `key()` **去重**后才落库、
+`tempList` 缺省时保留库里现有 `temp` 歌曲、整个覆盖是一个事务）。
+**代码行为一个字没改** —— 剩下的只是你确认"维持拒绝"。
 
 ---
 

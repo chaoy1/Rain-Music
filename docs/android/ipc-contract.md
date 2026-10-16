@@ -128,6 +128,23 @@
 >
 > **`player_list_remove` 的裸数组载荷形状（原生已实现，第十刀-a）**：`RainMusicListWriteChannels.java` 的 `listRemove` 发的是 `ctx.emitTo(CHANNEL_LIST_REMOVE, ids)`，`ids` 就是**调用方传来的那个数组本身**（元素是非空字符串的歌单 `id`），wire 上是 `args = [["l-1","l-2"]]`——**不要**包成 `args = [{ ids: […] }]`：那会让渲染层 `rendererListManage.ts:185-188` 转手给 `action.ts:163-175` 的 `for (const id of ids)` 抛 `TypeError`，被桥吞成一条 `console.error`（`capacitor.js:464-467`），界面完全不动且调用方拿不到 reject。invoke 那一半另有四条注：① 每个 id **连着跑三句** DELETE（`my_list` → `my_list_music_info` → `my_list_music_info_order`，逐字对齐 `statements.ts:49 / :119 / :192`；三张表在 `open(…, requiredTables)` 里点名，缺任何一张 = reject，不进事务）；② 删一个不存在的 id = 0 行命中 = **成功**（幂等）且照样广播；③ `ids` 是空数组 ⇒ 0 条 SQL（连 prepare 都不做）+ 事务照样提交 + 广播空数组；④ **保留 id（`default` / `temp`，`src/common/constants.ts` 的 `LIST_IDS`）在原生侧被拒绝**（`IllegalArgumentException`，且校验在 `open` 之前 —— 这是**有意的、可见的语义偏离**：它们在 `my_list` 里没有父行、只有子表行，照抄桌面三句 DELETE 的结果是"删 0 行看起来成功 + 真的清空它的歌曲"，而 DB 层没有外键 / 触发器兜底。`love` **不在**拒绝之列：它若因备份导入出现在 `my_list` 里，删它就是正常删除）。
 
+> **`player_list_data_overwire` 的载荷与"保留 id"语义（原生已实现；2026-10-16 补记）**：实现在
+> `RainMusicListMutationChannels.java:114-130` 的 `overwriteAll`。wire 上是
+> `args = [{ defaultList, tempList?, userList }]`（依次读 `opt("defaultList")` / `has("tempList")` / `opt("userList")`）。
+> 四条注：
+> ① **`userList` 里出现保留 id（`default` / `temp`，即 `src/common/constants.ts` 的 `LIST_IDS`）或重复 id ⇒ 直接 reject**
+> （`IllegalArgumentException("Duplicate or reserved list id: …")`，`:121`）。这个校验在**构建阶段**完成，
+> 返回的那个 `Runnable` 才是写事务 ⇒ **一行都不会写**，不存在"覆盖了一半"。
+> ② `default` 的歌曲来自 `defaultList`，并且会**去重**后才落库：按 `id`，且对 `default` 还按
+> `key()`（`:201` → `RainMusicPlaybackQueueKey.musicKey(id, name, singer)`，即规范化曲名/歌手）——
+> **不是原样写入**。
+> ③ `tempList` **缺省**时保留库里现有的 `temp` 歌曲（`params.has("tempList") ? … : read("temp", ctx)`，`:117`）。
+> ④ 写是一个事务：先 `DELETE FROM my_list`，再按新顺序重插用户歌单，然后清空并重建两张歌曲表（`:124-129`）。
+>
+> ⚠️ `default` / `temp` **不接受**被当成普通歌单覆盖，这与 `player_list_remove` 那条注的 ④ 是同一个设计
+> （保留 id 在 `my_list` 里没有父行，允许覆盖会留下删不掉的记录）。**是否维持由 `open-decisions.md`
+> 第 5 条拍板** —— 本注只记录现状，不改行为。
+
 ### 1.4 收藏 / 不感兴趣
 
 | 通道名 | 渲染层封装（文件:行） | 主进程 handler（文件:行） | 参数 → 返回值 | 用途 |
