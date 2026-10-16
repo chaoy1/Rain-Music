@@ -54,6 +54,30 @@ test('Android native HTTP and cleartext policy are wired to shipped config, with
   assert.match(policy, /certificates src="system"/)
   assert.doesNotMatch(policy, /src="user"/)
 })
+test('Android app identity and manifest keep the declarations every first-version feature needs', () => {
+  // 应用身份不是"随便一个字符串"：它决定**已安装的应用身份**与数据目录 ——
+  // acceptance.md 里那个 `/storage/emulated/0/Android/data/com.rainmusic.mobile/files/downloads`
+  // 就是它拼出来的，改一次 = 老用户的数据全部"消失"。webDir 则是 `cap sync` 的源，
+  // 也是产物级守卫盯的那一份（见 build-android.yml 的两道守卫）。
+  const config = load('capacitor.config.ts').default
+  assert.equal(config.appId, 'com.rainmusic.mobile')
+  assert.equal(config.webDir, 'dist-web')
+
+  const manifest = read('android/app/src/main/AndroidManifest.xml')
+  // `INTERNET`：首版三个功能面（听歌 / 歌单 / 下载）**全都**要走网络。少了它，CI 照样编译成功、
+  // 本机所有门禁全绿，真机上却**每个请求都失败** —— 正是"只能在设备上看见"的那一类，所以钉死。
+  // 顺便钉"只要这一个"：应用只写自己的私有目录，不该出现任何存储/媒体类危险权限。
+  const permissions = [...manifest.matchAll(/<uses-permission\s+android:name="([^"]+)"/g)].map(match => match[1])
+  assert.deepEqual(permissions, ['android.permission.INTERNET'])
+
+  // 启动入口：API 31+ 要求带 intent-filter 的 activity **显式**声明 `android:exported`，
+  // 缺了是"装不上 / 起不来"级别的问题；LAUNCHER 分类则是桌面图标本身。
+  const activity = /<activity[\s\S]*?<\/activity>/.exec(manifest)?.[0] ?? ''
+  assert.match(activity, /android:name="\.MainActivity"/)
+  assert.match(activity, /android:exported="true"/)
+  assert.match(activity, /android\.intent\.category\.LAUNCHER/)
+})
+
 test('Android file access distinguishes missing files from failures and reads exact binary bytes', async() => {
   const requests = []
   const file = load('src/common/platform/fs/web.js', { '../fileUrl/web': { localFileUrl: value => `mapped:${value}` }, '../selectedFiles': { findSelectedFile: () => undefined } }, {
