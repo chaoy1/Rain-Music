@@ -75,11 +75,62 @@ jobs:
           }
           Write-Host "dist-web has none of: $($markers -join ', ')"
 
+      # 正面守卫（2026-10-16）：自定义源（**首版范围**）跑在一个**独立的 worker chunk** 里 ——
+      # `platform/userApi/web.js:19` 那句 `new Worker(new URL('./worker.js', import.meta.url))`
+      # 就是让 webpack 把 `worker-runtime.js` 拆成单独 chunk（本机实测产物：`112.*.js`），
+      # 运行期再按 chunk id 拼出 URL。所以"这个 chunk 到底有没有被产出来"**只有产物层面看得见**：
+      # 拆包一旦失效（那行 URL 被改、或 webpack 配置被动），本机 lint / tsc / 单测**全都不会红**，
+      # 真机上的表现却是"导入自定义源之后没有任何反应"。
+      # 标志串取 `worker-runtime.js` 里那句 `use lx.request`（实测全部产物**只有 worker chunk** 有它）。
+      - name: Guard the web bundle against a missing custom-source worker
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (-not (Test-Path -Path dist-web)) {
+            Write-Host "::error title=custom-source worker::dist-web is missing - build:web did not run"
+            exit 1
+          }
+          $hits = @(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
+            Select-String -Pattern 'use lx.request' -List)
+          if ($hits.Count -eq 0) {
+            Write-Host "::error title=custom-source worker::no chunk carries the worker-runtime marker 'use lx.request' - the custom-source worker was not emitted, so importing a source would silently do nothing on device"
+            exit 1
+          }
+          foreach ($hit in $hits) { Write-Host "custom-source worker chunk: $(Split-Path -Leaf $hit.Path)" }
+
       # 生成 android/app/capacitor.build.gradle、android/capacitor.settings.gradle
       # 并把 dist-web 复制到 android/app/src/main/assets/public。
       # 缺少这一步时 gradlew 会在配置阶段直接失败（settings.gradle 会 apply 一个不存在的文件）。
       - name: Sync Capacitor android project
         run: npx cap sync android
+
+      # 承接上一步：**本次构建产出的那个 chunk 文件名**必须出现在同步后的 Android assets 里。
+      # 不能写成"目录里有没有带标志串的文件" —— `cap sync` **不清理** assets/public
+      # （本机实测：一次同步后 23 个 js，而 dist-web 只有 21，且逐个都不是本轮的），
+      # 旧残留会让"存在性检查"**假绿**，那比没有守卫更糟。
+      - name: Guard the synced Android assets against a stale web bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $assets = 'android/app/src/main/assets/public'
+          if (-not (Test-Path -Path $assets)) {
+            Write-Host "::error title=synced assets::$assets is missing - cap sync did not copy the web bundle"
+            exit 1
+          }
+          # 注意外层还要再套一层 @()：`@(...) | ForEach-Object { ... }` 在**只命中一个**时会退化成
+          # 一个裸字符串（PowerShell 的经典坑），后面的 .Count / 索引就会按字符算 —— 本机实测过。
+          $worker = @(@(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
+            Select-String -Pattern 'use lx.request' -List) | ForEach-Object { Split-Path -Leaf $_.Path })
+          if ($worker.Count -eq 0) {
+            Write-Host "::error title=custom-source worker::dist-web lost the worker chunk between the two guards"
+            exit 1
+          }
+          $missing = @($worker | Where-Object { -not (Test-Path -LiteralPath (Join-Path $assets $_)) })
+          if ($missing.Count -gt 0) {
+            Write-Host "::error title=synced assets are stale::$($missing -join ', ') missing from $assets - cap sync did not copy the current web bundle"
+            exit 1
+          }
+          Write-Host "synced assets carry the current custom-source worker chunk: $($worker -join ', ')"
 
       # Capacitor 8 的 Android 工具链：android/build.gradle 锁 AGP 8.13.0，
       # gradle-wrapper.properties 锁 Gradle 8.14.3，variables.gradle 是 compileSdk/targetSdk 36。

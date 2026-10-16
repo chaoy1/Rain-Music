@@ -276,6 +276,48 @@ responsive-layout / window-controls / window-controls-shell` **全部 `=success`
 全绿发 `::notice`、真有失败才发 `::error`。**已在 CI 上核对**：`bbdeeb29` 的注解变成
 `1 warning and 4 notices`（4 条 = 两个矩阵 + responsive-layout 的两条），矩阵内容一字不少。
 
+### 自定义源（首版范围）的**产物级**守卫 ✅（2026-10-16）
+
+**先说清楚：这一轮没有修 bug —— 是"先证实它现在是好的，再给它加守卫"。** 查的对象是
+"自定义源在 Android 上到底能不能跑起来"这条链里**唯一没有被任何测试覆盖**的一环：worker 的拆包产物。
+
+**为什么只有产物层面看得见**：自定义源跑在一个**独立 worker chunk** 里 ——
+`src/renderer/platform/userApi/web.js:19` 那句 `new Worker(new URL('./worker.js', import.meta.url))`
+就是让 webpack 把 `worker-runtime.js` 拆成单独 chunk，运行期再按 chunk id 拼 URL。所以
+"这个 chunk 有没有被产出来"**本机 lint / tsc / 单测全都不会红**：那行 URL 被改、或 webpack
+配置被动，真机上的表现是"导入自定义源之后**没有任何反应**"。这正是首版范围里的功能。
+
+**先量了一遍现状（`npm run build:web` 后逐文件查 `dist-web`）**：
+
+| 观察 | 结果 |
+|---|---|
+| 哪些 chunk 带 worker 侧标志串 `use lx.request` | **只有 1 个**：`112.*.js` |
+| 父侧怎么引用它 | `50.*.js` 里 `new Worker(new URL(r.p+r.u(112), ...))` —— chunk id 112 拼出来的 URL ✅ |
+| `50.*.js` 里也出现的 `Unsupported capability` 是不是 worker 代码被复制过去了 | **不是**：那是 `host.js` 的 `openDevTools` / `multipart formData` 两条显式不支持 |
+| 安卓侧同步目录 `android/app/src/main/assets/public` 有没有它 | 有（旧构建的 `112.abd23b14.js`）|
+
+**加的两道守卫**（`build-android.yml`，都发 `::error` 并 `exit 1`）：
+
+1. **同步前**：`dist-web` 里必须存在带 `use lx.request` 的 chunk。没有 ⇒ worker 没被拆出来，别发这个包。
+2. **同步后**：**本次构建产出的那个 chunk 文件名**必须出现在 `android/app/src/main/assets/public`。
+
+**第 2 道为什么必须认"确切文件名"，而不是"目录里有没有带标志串的文件"** —— 这是本轮实测出来的坑：
+`cap sync` **不清理**目标目录。本机状态就是证据：同步目录里 **23** 个 js，而 `dist-web` 只有 **21** 个，
+而且**逐个文件名都不是本轮构建的**（`112.abd23b14.js` vs 本轮 `112.05b482be.js`）。
+旧残留里有带标志串的 chunk ⇒ "存在性检查"会**假绿**，那比没有守卫更糟。
+
+**本地把两道守卫的两种分支都真跑过**（用工作流里逐字相同的 PowerShell）：
+
+| 分支 | 结果 |
+|---|---|
+| 同步前守卫（dist-web） | 打印 `custom-source worker chunk: 112.05b482be.js`，exit 0 |
+| 同步后守卫：assets 里还没有本轮 chunk（本机真实状态） | `::error title=synced assets are stale::112.05b482be.js missing from ...`，exit 1 ✅ |
+| 同步后守卫：先手工把本轮 chunk 拷进去模拟 `cap sync` | 打印成功行，exit 0 ✅（随后把拷贝删掉、目录复原） |
+
+⚠️ 顺手记一个 PowerShell 坑（我本地模拟时先踩了、也因此发现工作流里同一个写法很脆）：
+`@(...) | ForEach-Object { ... }` 在**只命中一个**时会退化成**一个裸字符串**，
+后面 `$x[0]` 就变成取**字符**（我拿到的是 `'1'`）。工作流里已改成外层再套一层 `@()`。
+
 ### 2026-10-15：歌曲新增与列表广播顺序
 
 - 原生 `RainMusicListMusicAddChannels.java` 注册 `player_list_music_add`，沿用
