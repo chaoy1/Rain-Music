@@ -100,7 +100,7 @@
 |---|---|
 | 项目根 | `D:\Documents\Projects\Rain Music\rain-music-desktop` |
 | 分支 | `master` → `origin https://github.com/chaoy1/Rain-Music.git` |
-| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`）；**2026-10-16 本轮收尾 HEAD = `bbdeeb29`**（三个提交：交通灯判定表 + 两条分支渲染守卫、证据文件进 artifact glob、CI 注解 level 修正）；**2026-10-17 本轮收尾 HEAD = `9ca44eb2`**（品牌素材：`cap add` 铺的 Capacitor 默认图标与启动图 → Rain Music 品牌素材，配 3 条守卫），工作区另有用户 30 项未提交改动 |
+| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`）；**2026-10-16 本轮收尾 HEAD = `bbdeeb29`**（三个提交：交通灯判定表 + 两条分支渲染守卫、证据文件进 artifact glob、CI 注解 level 修正）；**2026-10-17 本轮代码收尾 HEAD = `d7fece0c`**（三个提交：品牌素材 + 3 条守卫、文档、修掉"单测读了 `cap sync` 生成产物"引起的 CI 红；CI run `38895334287` 与 Android run `38895334164` 均 success；其后为文档跟进），工作区另有用户 30 项未提交改动 |
 | 单测（本机，**工作区口径**） | **475 / 475，fail 0、skip 0**（2026-10-17 在 `9ca44eb2` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
 | lint / 四个 tsc | **`eslint --ext .ts,.js,.vue src` exit 0（`0 errors` / 6 个既有 `View.vue` 属性顺序 warnings）；`src/{main,renderer,renderer-lyric,common}` 四个 tsc 全部 exit 0** |
 | **CI `verify`** | `2a3e4a7c` = **completed / success**（check-run `116315939345`）。**改任何代码后必须查新 SHA，不能沿用**。**2026-10-16 复核**：`f50d769` = **completed / success**（run [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)，7m 25s，UI 矩阵 **8 个套件**全绿 —— 含本轮新增的 `window-controls` / `window-controls-shell`） |
@@ -419,7 +419,7 @@ npm 脚本 `test:web-bundle-smoke`，放进 **Android workflow** 的
 
 ---
 
-### 品牌素材：桌面图标 / 启动图不再用 Capacitor 默认图 ✅（2026-10-17；`9ca44eb2`，待查该 SHA 的 CI）
+### 品牌素材：桌面图标 / 启动图不再用 Capacitor 默认图 ✅（2026-10-17；`9ca44eb2` 引入、`d7fece0c` 转绿）
 
 **问题（属于"只能在设备上看见"的那一类）**：`npx cap add android` 铺出来的 `res/` 里，
 15 张图标 + 11 张启动图**全是 Capacitor 的默认素材** —— 白底圆角方块 + 品牌无关的 X 形
@@ -476,6 +476,20 @@ logo，自适应图标的背景色还是 `#FFFFFF`。这一层**所有门禁都�
 （脚手架那张网格矢量）与 `drawable-v24/ic_launcher_foreground.xml` 是 `cap add` 留下的
 **死文件**（没有任何地方引用它们：自适应图标用的是 `@color/ic_launcher_background` +
 `@mipmap/ic_launcher_foreground`），删除属于清理而非修复。
+
+**CI 证据，以及一次真实的"本机绿、CI 红"**：`9ca44eb2` 的 CI（run `38893335284`）给出
+`verify/typecheck=success verify/test:unit=failure verify/build=success`，**9 个 UI 套件全绿**，
+annotation 是 `# fail 1` —— 而本机是 475/475。原因：旧品牌名扫描把整个 `res/` 走了一遍，
+又拼进了两个 **`cap sync` 生成产物**（`assets/capacitor.config.json`、`res/xml/config.xml`），
+它们被 `android/.gitignore:96-101` 忽略，**CI 检出后并不存在**。本机复现方式：把这两份产物
+移走再跑该套件 → 与 CI 完全一致的 `pass 2 / fail 1` + `ENOENT`。修法与纪律见 §7.5
+「单测不许读生成产物」：扫描面改用 `git ls-files` 界定，并补"过滤后手写面仍完整"的防假绿断言。
+`d7fece0c` 之后：
+- CI run [`38895334287`](https://github.com/chaoy1/Rain-Music/actions/runs/38895334287) =
+  **success**（`verify/typecheck=success verify/test:unit=success verify/build=success`）
+- Android run [`38895334164`](https://github.com/chaoy1/Rain-Music/actions/runs/38895334164) =
+  **success**，产物 `rain-music-android-debug` —— **这就是"新图标确实编进了 APK"的证据**
+  （CI 里本机没有 Android SDK 也能验的那一层，就到这里为止）。
 
 ---
 
@@ -1338,6 +1352,12 @@ Options API + pug 模板，所以走 `descriptor.script.content` + `compileTempl
 
 - **绝不假装成功**：坏 JSON 不返回 `{}`、坏 DB 不返回空数组、写失败不返回假 id。**"空 / 坏 / 表缺失"三态必须可分辨**。
 - **emit 在事务提交之后、锁之外**；失败路径不 emit；写通道**零 `catch`**（失败大声抛出）。
+- **单测不许读"生成产物"**（2026-10-17 用一次红色 CI 换来的）：`android/.gitignore:96-101` 忽略的
+  `assets/**`、`res/xml/config.xml` 都是 `cap sync` 生成的，**只在开发机上存在**。把它们写进
+  测试的扫描面/读取面，就会**本机全绿、CI `# fail 1` + ENOENT**（`9ca44eb2` 的
+  `verify/test:unit` 就是这么红的）。扫描面要由 `git ls-files` 界定，而不是由人去记哪些是生成的；
+  过滤之后还要断言"手写面仍然完整"（文件数下限 + 几个必含路径），否则"什么都没扫到"也会假绿。
+  同类风险：任何"本机跑过 `cap sync` / 构建过"才存在的文件。
 - **注释不能说谎**：过期的行号/断言/文案要同步改（本会话靠这条修过多处）。
 - **依据优先于权威**：子代理多次纠正过我的**错误前提**（如"`getWinMain_get_data` 需要 SQL"——其实不需要）、**错误行号**、**过度的校验规则**（如"拒绝负数 position"——其实负数属追加分支）。请继续鼓励这个行为。
 
@@ -1437,7 +1457,7 @@ npx.cmd cap sync android                                               # Capacit
    否则写死 `false` 也能假绿）；四个变异各自精确命中。单测 464 → **470**。
    详见 §4「交通灯验收项的 CI 守卫」，证据 run
    [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)（`f50d769`，8 套件全绿）。
-7. **2026-10-17 这一轮换掉了 Android 的品牌素材**（`9ca44eb2`）：`cap add` 铺的 26 张图
+7. **2026-10-17 这一轮换掉了 Android 的品牌素材**（`9ca44eb2` → `d7fece0c`，两个 workflow 全绿）：`cap add` 铺的 26 张图
    （15 张图标 + 11 张启动图）**全是 Capacitor 的默认素材**，自适应图标背景色还是 `#FFFFFF`
    —— 又是"所有门禁都绿、只有真机看得见"的那一类。现在由 `scripts/gen-android-icons.py`
    从桌面端在用的 `resources/icons/icon.png` 确定性派生（尺寸与脚手架原产逐一同尺寸），
@@ -1445,6 +1465,8 @@ npx.cmd cap sync android                                               # Capacit
    **6 张脚手架默认图的 sha256 不许回来**；单测 470 → **475**，三条变异各自精确命中。
    **顺带确认（不是缺陷）**：`lx.*` 是自定义源脚本的**公开契约**，两条运行时都同时以
    `lx` + `rain` 暴露同一个对象，**有意为之，不要再改名**。详见 §4「品牌素材」。
+   这一轮还真的红过一次 CI（`# fail 1`）：守卫误把 `cap sync` 的生成产物写进了扫描面，
+   **本机 475/475、CI 却是 ENOENT** —— 教训已写进 §7.5，请沿用。
 
 **需要你拍板的 6 件事已单独成文：[`open-decisions.md`](open-decisions.md)** ——
 自定义源的 `import()` 口子（唯一还开着的安全洞）、下载目录是否按歌单分、W4 本地音乐、
