@@ -100,8 +100,8 @@
 |---|---|
 | 项目根 | `D:\Documents\Projects\Rain Music\rain-music-desktop` |
 | 分支 | `master` → `origin https://github.com/chaoy1/Rain-Music.git` |
-| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`）；**2026-10-16 本轮收尾 HEAD = `bbdeeb29`**（三个提交：交通灯判定表 + 两条分支渲染守卫、证据文件进 artifact glob、CI 注解 level 修正），工作区另有用户 30 项未提交改动 |
-| 单测（本机，**工作区口径**） | **470 / 470，fail 0、skip 0**（2026-10-16 在 `1a2eca24` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
+| 本轮开发基线 | **`b33c23329adbc39f3d9732e690505e5dd17c9c47`**；**2026-10-15 复核时的 HEAD = `2a3e4a7c0dd44e7916eaa2f5ce100854028356a9`**（`feat(android): complete playlists downloads and custom source runtime`）；**2026-10-16 本轮收尾 HEAD = `bbdeeb29`**（三个提交：交通灯判定表 + 两条分支渲染守卫、证据文件进 artifact glob、CI 注解 level 修正）；**2026-10-17 本轮收尾 HEAD = `9ca44eb2`**（品牌素材：`cap add` 铺的 Capacitor 默认图标与启动图 → Rain Music 品牌素材，配 3 条守卫），工作区另有用户 30 项未提交改动 |
+| 单测（本机，**工作区口径**） | **475 / 475，fail 0、skip 0**（2026-10-17 在 `9ca44eb2` 上复跑；**包含用户另线未提交的测试**，提交快照的计数以 CI 为准，不要直接引用这个数） |
 | lint / 四个 tsc | **`eslint --ext .ts,.js,.vue src` exit 0（`0 errors` / 6 个既有 `View.vue` 属性顺序 warnings）；`src/{main,renderer,renderer-lyric,common}` 四个 tsc 全部 exit 0** |
 | **CI `verify`** | `2a3e4a7c` = **completed / success**（check-run `116315939345`）。**改任何代码后必须查新 SHA，不能沿用**。**2026-10-16 复核**：`f50d769` = **completed / success**（run [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)，7m 25s，UI 矩阵 **8 个套件**全绿 —— 含本轮新增的 `window-controls` / `window-controls-shell`） |
 | **CI `debug-apk`** | `2a3e4a7c` = **completed / success**（check-run `116315940325`，run `38703141603`）；产物 `rain-music-android-debug`（10 101 476 B）**未过期**。**改任何原生代码后必须查新 SHA**。⚠️ 读这个 job 的结论时注意 `build-android.yml:20-22` 有 `concurrency: cancel-in-progress` —— 连续两次 push 时**前一次会被 `cancelled`，那不是失败**（例如 `f50d769` 的 Android run `38862879622` 就是被后一次取消的） |
@@ -416,6 +416,66 @@ npm 脚本 `test:web-bundle-smoke`，放进 **Android workflow** 的
 - 全部 IPC Java 文件用真实 Android 4.1.1.4 / AOSP org.json API 加 Capacitor 替身编译为 exit 0；
   这是 API 编译证据，不是 targetSdk 36 的完整 APK 构建。当前 SDK 的实际编译仍须以新提交的 CI 为准。
 - 本轮验证日志在 `%TEMP%/rain-android-music-add-20261014/`；原 30 项用户改动的 hash 仍与接手快照一致。
+
+---
+
+### 品牌素材：桌面图标 / 启动图不再用 Capacitor 默认图 ✅（2026-10-17；`9ca44eb2`，待查该 SHA 的 CI）
+
+**问题（属于"只能在设备上看见"的那一类）**：`npx cap add android` 铺出来的 `res/` 里，
+15 张图标 + 11 张启动图**全是 Capacitor 的默认素材** —— 白底圆角方块 + 品牌无关的 X 形
+logo，自适应图标的背景色还是 `#FFFFFF`。这一层**所有门禁都看不见**：`npm run verify` 全绿
+（lint 0 errors / 四个 tsc exit 0 / 单测全过）、9 个 UI 套件全绿、CI 的四道 Android 守卫
+全绿，可装到真机上，**桌面图标与启动屏写着 Capacitor** —— 与"彻底改名为 Rain Music"的
+验收直接冲突。同类问题本会话处理过多次（交通灯、日志、桥接线），这次的表面是**美术资源**。
+
+**处置：不引入新美术，复用桌面端已经在发布的那张图。**
+`resources/icons/icon.png`（512²，黑底 + 白色音符/播放三角，RGBA，四角透明）就是桌面端
+在用的品牌图，因此把它确定性派生成 Android 两套图标与启动图：
+
+| 产物 | 说明 |
+|---|---|
+| `scripts/gen-android-icons.py` | Pillow 生成器；可重复执行且**逐字节确定**（重跑 26 张图 sha256 全同） |
+| `mipmap-*/ic_launcher.png` / `ic_launcher_round.png` | 传统图标（API 24–25 与不做自适应图标的启动器）；圆形那张用 4 倍超采样遮罩 |
+| `mipmap-*/ic_launcher_foreground.png` | 自适应图标前景：**亮度即 alpha** 把白色字形从黑底里提出来，缩进 108dp 画布的 66dp 安全区（比例 0.58）。**必须保留 alpha**（颜色类型 6），否则启动器不管裁成什么形状都会露出方块底 |
+| `values/ic_launcher_background.xml` | 自适应图标背景色 `#FFFFFF` → `#000000` |
+| `drawable*/splash.png` | 启动图（`AppTheme.NoActionBarLaunch` 的 `windowBackground`）：品牌黑底 + 居中字形（短边 30%） |
+
+全部产物尺寸与脚手架原产**逐一同尺寸**，所以不涉及任何布局/拉伸行为的变化。
+
+**踩到的坑（靠合成长图才看出来，单看文件是看不出的）**：源图的黑底并非严格的 0 —— 有损
+压缩留下 RGB 1–3 的噪声，于是"亮度当 alpha"会给**整个方块**蒙上一层约 1‰ 的白。在纯黑背景
+上这层雾会显出一圈**肉眼可辨的方框接缝**，自适应图标裁成圆形时尤其明显。修法是在
+`glyph_layer()` 里把 0–7 抬成 0（黑场抬一刀），既抹掉雾又保留抗锯齿过渡。
+**复核判据（可复用）**：字形 bbox **之外**的低值 alpha（1–7）像素数必须为 0 ——
+三张启动图与五档前景图实测均为 0；修之前整个方块都是这种像素。
+
+**守卫**：`tests/unit/android-brand-assets.test.cjs`（3 条；单测 **472 → 475**）
+1. 桌面名称 `app_name` / `title_activity_main` = `Rain Music`、`package_name` /
+   `custom_url_scheme` = `com.rainmusic.mobile`，且 manifest 的 `android:label` **确实引用
+   这两个串**（否则改了字符串也不会显示出来）。
+2. 26 张图逐张校验：PNG IHDR 宽高符合密度表、图标颜色类型必须是 6（带 alpha）、启动图必须
+   是 2（不透明）、背景色 `#000000`、**6 张脚手架默认图的 sha256 一个都不许回来**。
+   尺寸与颜色类型都是直接读 IHDR 字节（偏移 16/20/25），没为两句断言引图像解码器。
+3. 手写 Android 源码与资源里不得残留旧品牌名。扫描面**刻意排除**
+   `android/app/src/main/assets/public/**`：那是从 `dist-web` 拷进来的 Web 产物，里面出现的
+   `lx.request` 是**自定义源脚本的对外 API 名**（见下），属于兼容契约而不是品牌残留，
+   那份产物另有自己的守卫。
+
+**变异自证**（未提交产物用临时副本备份，**不能用 `git checkout`** —— 那会退回脚手架默认图）：
+背景色退回 `#FFFFFF` → 红 1；换回一张脚手架 PNG → 红 1；`app_name` 改回 `LX Music` → 红 2
+（名称断言 + 旧品牌名残留断言）；恢复后 3 绿，且三个文件的 sha256 与变异前**逐字节一致**。
+
+**顺带确认（不是缺陷，是契约，不要再"顺手改名"）**：自定义源脚本的全局 API 名 `lx` 是
+**社区第三方脚本的公开契约**，改名会打断所有既有脚本。桌面与移动两条运行时**都已经**同时
+以 `lx` + `rain` 暴露同一个对象，注释写明了原因
+（`src/main/modules/userApi/renderer/preload.js:342-343`、`src/renderer/platform/userApi/worker-runtime.js:91-92`）
+—— 品牌新名叫 `rain`，`lx` 作为兼容别名长期保留。因此本轮的"品牌扫描"在
+`assets/public/**` 里命中 `lx` 是**预期**，不是残留。
+
+**尚未处理的同族资产**（都不影响设备可见外观，故未动）：`drawable/ic_launcher_background.xml`
+（脚手架那张网格矢量）与 `drawable-v24/ic_launcher_foreground.xml` 是 `cap add` 留下的
+**死文件**（没有任何地方引用它们：自适应图标用的是 `@color/ic_launcher_background` +
+`@mipmap/ic_launcher_foreground`），删除属于清理而非修复。
 
 ---
 
@@ -1377,6 +1437,14 @@ npx.cmd cap sync android                                               # Capacit
    否则写死 `false` 也能假绿）；四个变异各自精确命中。单测 464 → **470**。
    详见 §4「交通灯验收项的 CI 守卫」，证据 run
    [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)（`f50d769`，8 套件全绿）。
+7. **2026-10-17 这一轮换掉了 Android 的品牌素材**（`9ca44eb2`）：`cap add` 铺的 26 张图
+   （15 张图标 + 11 张启动图）**全是 Capacitor 的默认素材**，自适应图标背景色还是 `#FFFFFF`
+   —— 又是"所有门禁都绿、只有真机看得见"的那一类。现在由 `scripts/gen-android-icons.py`
+   从桌面端在用的 `resources/icons/icon.png` 确定性派生（尺寸与脚手架原产逐一同尺寸），
+   配 3 条守卫：桌面名称/包标识与 manifest 引用、26 张图的 IHDR 尺寸与颜色类型、
+   **6 张脚手架默认图的 sha256 不许回来**；单测 470 → **475**，三条变异各自精确命中。
+   **顺带确认（不是缺陷）**：`lx.*` 是自定义源脚本的**公开契约**，两条运行时都同时以
+   `lx` + `rain` 暴露同一个对象，**有意为之，不要再改名**。详见 §4「品牌素材」。
 
 **需要你拍板的 6 件事已单独成文：[`open-decisions.md`](open-decisions.md)** ——
 自定义源的 `import()` 口子（唯一还开着的安全洞）、下载目录是否按歌单分、W4 本地音乐、
