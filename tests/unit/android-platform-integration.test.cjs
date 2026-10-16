@@ -86,6 +86,46 @@ test('Android app identity and manifest keep the declarations every first-versio
   assert.match(variables, /compileSdkVersion\s*=\s*36\b/)
 })
 
+test('the native IPC bridge is wired into the Capacitor plugin set, and nothing needs an uninstalled plugin', () => {
+  // 这三条都属于"**编译得过、本机与 CI 全绿，但真机上每一条通道都失败**"的那一类，
+  // 而且只有真机才看得见 —— 所以在这里钉死。
+  //
+  // ① 插件名必须与渲染层调用的名字**逐字**一致。不一致时 Capacitor 回
+  //    "plugin is not implemented"，渲染层收到的是**每一条** invoke 都失败。
+  const pluginSource = read('android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicIpcPlugin.java')
+  const pluginName = /PLUGIN_NAME\s*=\s*"([^"]+)"/.exec(pluginSource)?.[1]
+  assert.equal(pluginName, 'RainMusicIpc')
+  assert.match(read('src/common/platform/ipcBridge/capacitor.js'), new RegExp(`pluginName: '${pluginName}'`))
+
+  // ② `registerPlugin(...)` 必须在 `super.onCreate()` **之前**：Capacitor 的 BridgeActivity
+  //    在 `super.onCreate()` 里就把插件集合定下来了（`MainActivity` 的类注释 :14-21 记了这条，
+  //    还引了 `BridgeActivity.java:54-56`）—— 放在之后 = 插件不在集合里 ⇒ 真机上**所有通道**
+  //    都是"未实现"。CI 编译两种写法都会成功。
+  //    ⚠️ 必须先**剥掉注释**再比位置：类注释里就写着 `super.onCreate()` 这句话，
+  //    直接 indexOf 会先命中注释，断言变成"被自己的文档骗红"（第一版就是这么失败的）。
+  const activity = read('android/app/src/main/java/com/rainmusic/mobile/MainActivity.java')
+    .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+  const registerAt = activity.indexOf('registerPlugin(RainMusicIpcPlugin.class)')
+  const onCreateAt = activity.indexOf('super.onCreate(')
+  assert.ok(registerAt > 0, 'MainActivity 必须注册 RainMusicIpcPlugin')
+  assert.ok(onCreateAt > 0, 'MainActivity 必须调用 super.onCreate')
+  assert.ok(registerAt < onCreateAt, 'registerPlugin 必须在 super.onCreate() 之前')
+
+  // ③ 打**进 web 产物**的那部分代码只允许依赖 `@capacitor/core`：app 没有安装任何社区插件
+  //    （`capacitor.plugins.json` 是空数组），真机上一切都走那一个自建桥。
+  //    `src/main/**` 不在此列 —— 它根本不在 Android 产物里（见 §0 第 4 条）。
+  const walk = dir => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(entry =>
+    entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)])
+  const specifiers = new Set()
+  for (const file of [...walk('src/renderer'), ...walk('src/common')]) {
+    if (!/\.(js|ts|vue)$/.test(file)) continue
+    // 先剥注释：`web.js` 之类的文件里会**提到**别的 Capacitor 包（只作说明，不是依赖）。
+    const source = read(file).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+    for (const match of source.matchAll(/from\s+['"](@capacitor\/[^'"]+)['"]/g)) specifiers.add(match[1])
+  }
+  assert.deepEqual([...specifiers].sort(), ['@capacitor/core'])
+})
+
 test('Android file access distinguishes missing files from failures and reads exact binary bytes', async() => {
   const requests = []
   const file = load('src/common/platform/fs/web.js', { '../fileUrl/web': { localFileUrl: value => `mapped:${value}` }, '../selectedFiles': { findSelectedFile: () => undefined } }, {
