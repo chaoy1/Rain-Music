@@ -37,6 +37,7 @@
     "test:window-controls": "node tests/ui/run-window-controls.cjs",
     "test:window-controls-shell": "node tests/ui/run-window-controls-shell.cjs",
     "test:setting-download-shell": "node tests/ui/run-setting-download-shell.cjs",
+    "test:web-bundle-smoke": "node tests/ui/run-web-bundle-smoke.cjs",
     "test:surfaces": "node tests/ui/run-refined-surfaces.cjs",
     "test:pagination": "node tests/ui/run-pagination.cjs",
     "test:playlist-transition": "node tests/ui/run-playlist-transition.cjs",

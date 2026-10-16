@@ -125,6 +125,15 @@ jobs:
           }
           Write-Host 'every referenced worker chunk exists'
 
+      # 真产物冒烟（2026-10-16）：在真实 Chromium 里**直接跑这个 web 产物**（`dist-web/index.html`）。
+      # 那个页面里既没有 Electron 的 `process.versions.electron`、也没有原生桥，所以
+      # `renderer/platform/index.ts` 判定 `shell='unknown'` ⇒ 走的正是 Android WebView 那条**移动分支**。
+      # 它钉的是**验收项本身**（真产物里没有 macOS 交通灯、移动分支渲染出来），而不是组件替身：
+      # 变异验证过 —— 把产物伪装成桌面壳（注入 `window.process.versions.electron`）会让它精确变红。
+      # 放在这里（`build:web` 之后、gradle 之前）：产物已就绪，失败也不用等 6 分钟的编译。
+      - name: Smoke-test the built web bundle in the mobile branch
+        run: npm run test:web-bundle-smoke
+
       # 生成 android/app/capacitor.build.gradle、android/capacitor.settings.gradle
       # 并把 dist-web 复制到 android/app/src/main/assets/public。
       # 缺少这一步时 gradlew 会在配置阶段直接失败（settings.gradle 会 apply 一个不存在的文件）。

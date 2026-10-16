@@ -330,6 +330,46 @@ responsive-layout / window-controls / window-controls-shell` **全部 `=success`
 `@(...) | ForEach-Object { ... }` 在**只命中一个**时会退化成**一个裸字符串**，
 后面 `$x[0]` 就变成取**字符**（我拿到的是 `'1'`）。工作流里已改成外层再套一层 `@()`。
 
+### 真产物冒烟：在**移动分支**里跑构建出来的 web 产物 ✅（2026-10-16）
+
+**为什么值得单独做**：此前"Android 上不出现交通灯"的证据都是**组件级替身**（编译单个 SFC 再挂载）。
+本轮第一次**直接运行构建产物** `dist-web/index.html`：那个页面里既没有 Electron 的
+`process.versions.electron`、也没有原生桥 ⇒ `renderer/platform/index.ts` 判定 `shell='unknown'`
+⇒ 走的正是 Android WebView 那条**移动分支**。本机实测（完全不做交互）：
+
+| 观察 | 值 |
+|---|---|
+| 应用是否真的起来了 | `#root` 有 3 个子节点、整页 282 个元素 |
+| `[data-native-window-control]`（交通灯） | **0** |
+| `[data-mobile-title-bar]`（移动分支的占位元素） | **1** |
+| `process.versions.electron` / `Capacitor.isNativePlatform()` | `false` / `false` |
+
+**测试**：`tests/ui/web-bundle-smoke.electron.cjs`（6 条断言；启动用**轮询**而不是固定等 6 秒，
+因为 CI runner 更慢）。npm 脚本 `test:web-bundle-smoke`，放进 **Android workflow** 的
+`build:web` 之后、gradle 之前（产物已就绪，失败也不用等 6 分钟编译）。
+⚠️ 它**不进** `test:ui` / build-test 矩阵：那些流程不构建 `dist-web`。
+
+**变异**（改的是**产物副本**的 `index.html`，不需要重新构建 —— 这正是它要守的那一层）：
+
+| 变异 | 结果 |
+|---|---|
+| 给产物注入 `window.process={versions:{electron:'42.11.6'}}`（"它以为自己是桌面壳"） | **fail 3**：正好是 交通灯为 0 / 移动分支 / 没有桌面壳 这三条 |
+| 注入一个真实的 `throw new TypeError(...)` | **fail 1**：正好是崩溃那条（证明过滤没有把真 TypeError 一起放过） |
+| 未变异对照 | exit 0 |
+
+**一条判据说明**：这个页面**故意**没有原生桥，所以"每个写都 reject"是本环境固有的 ——
+`src/renderer/main.ts` 里那两次 `updateSetting(...)`（写回语言 / 窗口尺寸）**有意不降级**
+（"写不进去就应该看得见"）。所以崩溃检查要求**同时**满足"像崩了"和"桥没实现"两个条件才过滤，
+并把过滤掉的数量打在 `detail` 里（本机实测 22 条）。
+
+**顺带更正一条过期注释**：`src/renderer/main.ts` 原来写着"`common_set_app_setting` 在 Android 上
+同样没有桥……也是下一段要处理的通道（P0-2）"——**这两句今天都不成立**：
+该通道早已注册（`RainMusicAppSettingChannels.java:107` 的 `CHANNEL_SET`，注册在 `:169`，
+落点 `CapacitorStorage` → `rain:store:config_v2`），而且原生写入失败时是**抛异常**、
+不假装成功（`:226-231`：`SharedPreferences.commit()` 返回 false 就 `throw`）。
+"不降级"这条决定**保留**，但理由改成"写失败必须看得见"。
+**代码行为一个字没改**，只改注释（本机 `npm run verify` exit 0）。
+
 ### 2026-10-15：歌曲新增与列表广播顺序
 
 - 原生 `RainMusicListMusicAddChannels.java` 注册 `player_list_music_add`，沿用

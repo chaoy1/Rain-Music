@@ -46,8 +46,9 @@ router.afterEach((to) => {
  * 挂载前取一次设置（Android 移植 · 阶段 3 / 线 F，阻塞点 #7）。
  *
  * 这一段以前是裸的 `void getSetting().then(...)`：`app.mount('#root')` 在 `.then` 里，
- * 而 `getSetting()` 走的 `common_get_app_setting` 在 Android 上**没有原生桥**
- * （`src/common/platform/ipcBridge/web.js` 是"调用即抛错"的占位实现）⇒ Promise 一直 reject、
+ * 而 `getSetting()` 走的 `common_get_app_setting` **当时**在 Android 上还没有原生实现
+ * （`src/common/platform/ipcBridge/web.js` 是"调用即抛错"的占位实现；该通道已在 P0-2 注册，
+ * 见文末 2026-10-16 的更正）⇒ Promise 一直 reject、
  * `.then` 永不执行 ⇒ **页面全白，且没有任何同步异常**（只有一条未处理 rejection）。
  *
  * 修法：取值点显式降级 —— 用 `@renderer/platform/ipcFallback` 的 `invokeWithFallback`
@@ -74,9 +75,20 @@ router.afterEach((to) => {
  * 若将来决定"桌面也退化挂载"，那是 `platform/ipcFallback/desktop.js` 的一次**显式**语义变更，
  * 而不该在本文件里绕过适配器另写一条 `.catch`。
  *
- * 另外：`.then` 里那两次 `updateSetting(...)`（写回语言 / 窗口尺寸）**本轮没有降级** ——
- * `common_set_app_setting` 在 Android 上同样没有桥，所以它会照旧 reject。
- * 这是**故意保留**的诚实失败（写不进去就应该看得见），也是下一段要处理的通道（P0-2）。
+ * 另外：`.then` 里那两次 `updateSetting(...)`（写回语言 / 窗口尺寸）**不降级** ——
+ * 这是**故意保留**的诚实失败（写不进去就应该看得见）。
+ *
+ * ⚠️ **2026-10-16 更正**：这里原来写的是"`common_set_app_setting` 在 Android 上同样没有桥，
+ * 所以它会照旧 reject……也是下一段要处理的通道（P0-2）"。**这两句今天都不成立**：
+ * `common_set_app_setting` 早在 P0-2 就注册了 ——
+ * `android/app/src/main/java/com/rainmusic/mobile/ipc/RainMusicAppSettingChannels.java:107`
+ * 的 `CHANNEL_SET`，注册在 `:169`，落点是 `CapacitorStorage` → `rain:store:config_v2`；
+ * 而且原生写入失败时是**抛异常**、不假装成功（`:226-231`：`SharedPreferences.commit()` 返回 false
+ * 就 `throw`）。所以真机上这两次写入**正常落盘、不会 reject**（本机跑 web 产物时会 reject，
+ * 但那是因为那个页面**根本没有原生桥**，属于环境固有现象，见
+ * `tests/ui/web-bundle-smoke.electron.cjs` 的说明）。
+ * "不降级"这条决定**保留**，但理由变了：不是为了兜住"没有桥"，而是**写失败必须看得见** ——
+ * 与原生侧 `commit()==false` 就抛异常是同一条原则。
  */
 void invokeWithFallback(async() => getSetting(), CMMON_EVENT_NAME.get_app_setting, () => ({ ...defaultSetting })).then((setting: Rain.AppSetting) => {
   // window.rain.appSetting = setting
