@@ -1343,4 +1343,10 @@ npx.cmd cap sync android                                               # Capacit
    详见 §4「交通灯验收项的 CI 守卫」，证据 run
    [`38862879610`](https://github.com/chaoy1/Rain-Music/actions/runs/38862879610)（`f50d769`，8 套件全绿）。
 
+**需要你拍板的 5 件事已单独成文：[`open-decisions.md`](open-decisions.md)** ——
+自定义源的 `import()` 口子（唯一还开着的安全洞）、下载目录是否按歌单分、W4 本地音乐、
+未完成 `.part` 的回收、`data_overwire` 对保留 id 的拒绝。每条都带**实测证据 / 方案与代价 /
+我的建议 / 怎么算做完**；**拍板之前不要动其中任何一条**（它们要么改变用户可见行为，
+要么只能在真机验证）。
+
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**
