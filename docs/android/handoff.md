@@ -1106,6 +1106,41 @@ Options API + pug 模板，所以走 `descriptor.script.content` + `compileTempl
 这种变异只给出 `exit 1`、**给不出是哪条断言红的**（变异 M2 第一次跑就是 `failing: []`）。
 现在按钮缺失时跳过点击、由断言具名失败。CI 矩阵因此从 8 个套件变成 **9** 个。
 
+#### 6.4.8 2026-10-16 已修：升降调的音频 worklet 加载失败会**永久静默失效**
+
+**先量产物（结论：产物没问题）**：`src/renderer/plugins/player/index.ts:355-358` 用 webpack 原生写法
+加载它 —— `audioWorklet.addModule(new URL('./pitch-shifter/phase-vocoder.js', import.meta.url))`；
+产物里对应的是 `o.u=e=>(87===e?"pitch_shifter.audioWorklet":e)+"."+{…87:"82d985e2"…}` 与
+`i.audioWorklet.addModule(new URL(n.p+n.u(87), n.b))`，文件 `pitch_shifter.audioWorklet.82d985e2.js`
+**确实被产出来**了 ⇒ URL 拼装这一环是对的。（它和两个 worker 同类，但它是**带名字**的 chunk，
+"chunk id → `<id>.*.js`"那条规则盖不到，所以本轮把它**单独**加进产物守卫：
+`*audioWorklet*.js` 必须存在，且 bundle 里必须有 `audioWorklet.addModule` 引用。）
+
+**缺陷在调用点**：那一句是 `void …addModule(...).then(...)`，**没有 `.catch`**。失败时
+（旧 WebView 不支持 AudioWorklet / 资源 404 / 被策略拦掉）的后果**不是**"升降调不管用"，
+而是**永久坏掉 + 静默**：
+
+1. `pitchShifterNodeLoadStatus` 永远停在 `'loading'` ⇒ `setPitchShifter` 之后每次都命中
+   `case 'loading': break` ⇒ **之后再怎么点都毫无反应**；
+2. 只在控制台留一条**未处理 rejection**，没有一句说明。
+
+**改法**：补 `.catch`，报一次明确错误（与文件里既有的
+`console.error('Resume audio context failed:', err)` 同体例），并把状态退回 `'none'`，
+让**下一次用户操作可以重试**而不是死在中间态；再加一个 `pitchShifterLoadReported` 标志保证
+"只说一次"，避免重试时刷屏。**成功路径一个字没改。**
+
+⚠️ 这是**共享渲染层**代码（桌面是同一份）。失败路径只在失败时生效，桌面若真失败也只是从
+"未处理 rejection"变成一句明确错误 —— 属于 §6.4 W3 教训里"改共享代码要交代清楚"的那一类，
+所以在这里写明。
+
+**验证**：`npm run verify` exit 0（typecheck + 470 单测 + lint/webpack/electron-builder）；
+`npm run build:web` 后用**重建过的**产物重跑产物守卫与真产物走查（11 条断言）都通过；
+产物守卫的**正反两分支**在本机都真跑过（worklet 文件在 ⇒ 通过；在 `%TEMP%` 副本里删掉它 ⇒
+`::error title=audio worklet::…` + exit 1）。
+
+⚠️ **失败路径本身没有自动化用例**（要触发它得让 worklet 资源 404 并驱动音效面板）。所以这条的
+证据强度是"**失败路径只新增错误处理 + 成功路径不变 + 全量门禁通过**"，**不是**"失败路径被测到"。
+
 **对 6.4 这一轮审查确认"没问题"的部分**（省下一次重查）：
 
 - **沙箱边界**：`lx` 与 `rain` 是同一个冻结对象；白名单 `['tx','kg','wy','local']` 封闭；

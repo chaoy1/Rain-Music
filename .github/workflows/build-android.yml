@@ -86,7 +86,8 @@ jobs:
       #
       # 两道检查：① 自定义源 worker 的运行时必须在（用 `use lx.request` 这个唯一标志串）；
       # ② bundle 里每一处 `new Worker(...)` 引用的 chunk id 都必须真的落成文件。
-      - name: Guard the web bundle against a missing or unloadable worker
+      # ③ 升降调的音频 worklet（**带名字**的 chunk，上面那条规则盖不到）必须被产出来。
+      - name: Guard the web bundle against a missing or unloadable worker / worklet
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
@@ -124,6 +125,26 @@ jobs:
             exit 1
           }
           Write-Host 'every referenced worker chunk exists'
+
+          # ③ 音频 worklet（升降调）：`plugins/player/index.ts` 用
+          #    `audioWorklet.addModule(new URL('./pitch-shifter/phase-vocoder.js', import.meta.url))`
+          #    加载它，webpack 依据 `webpackChunkName: 'pitch_shifter.audioWorklet'` 产出一个**带名字**的
+          #    chunk（实测 `pitch_shifter.audioWorklet.82d985e2.js`）—— 名字不是数字，所以上面那条
+          #    "chunk id → <id>.*.js" 的规则**盖不到它**，必须单独查。
+          #    参考：渲染层 2026-10-16 给那次 `addModule` 补了 `.catch`（失败会报出来并允许重试），
+          #    但**产物层面**仍然要有人盯着"它到底有没有被产出来"。
+          $worklet = @(Get-ChildItem -Path dist-web -Recurse -Filter '*audioWorklet*.js')
+          if ($worklet.Count -eq 0) {
+            Write-Host "::error title=audio worklet::no *audioWorklet*.js asset in dist-web - the pitch shifter worklet was not emitted, so that control would silently do nothing on device"
+            exit 1
+          }
+          $workletReference = @(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
+            Select-String -Pattern 'audioWorklet\.addModule' -List)
+          if ($workletReference.Count -eq 0) {
+            Write-Host "::error title=audio worklet::the bundle has no audioWorklet.addModule(...) reference, but worklet assets were emitted - the loader was dropped or rewritten"
+            exit 1
+          }
+          Write-Host "audio worklet assets: $($worklet.Name -join ', ') (referenced from: $((@($workletReference) | ForEach-Object { Split-Path -Leaf $_.Path }) -join ', '))"
 
       # 真产物冒烟（2026-10-16）：在真实 Chromium 里**直接跑这个 web 产物**（`dist-web/index.html`）。
       # 那个页面里既没有 Electron 的 `process.versions.electron`、也没有原生桥，所以

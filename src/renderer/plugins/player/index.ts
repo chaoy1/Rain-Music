@@ -53,6 +53,9 @@ let panner: PannerNode
 let pitchShifterNode: AudioWorkletNode
 let pitchShifterNodePitchFactor: AudioParam
 let pitchShifterNodeLoadStatus: 'none' | 'loading' | 'unconnect' | 'connected' = 'none'
+// 加载失败只报一次：失败的取值退回 'none' 是为了让**下一次用户操作可以重试**，
+// 但每次重试都打一条日志会刷屏，所以单独用一个标志控制"说过就够"。
+let pitchShifterLoadReported = false
 let pitchShifterNodeTempValue = 1
 let defaultChannelCount = 2
 export const soundR = 0.5
@@ -367,6 +370,19 @@ const loadPitchShifterNode = () => {
     if (pitchShifterNodeTempValue == 1) return
 
     connectPitchShifterNode()
+  }).catch(error => {
+    // ⚠️ 2026-10-16 补：这里原来**没有 catch**。`addModule` 失败（旧 WebView 不支持 AudioWorklet、
+    // 资源 404、被策略拦掉……）时的后果不是"升降调不管用"，而是**永久坏掉 + 静默**：
+    //   1) 状态永远停在 'loading' ⇒ `setPitchShifter` 每次都命中 `case 'loading': break`
+    //      （见下面那个 switch）⇒ 之后再怎么点都毫无反应；
+    //   2) 只在控制台留一条**未处理 rejection**，没有任何一句说明。
+    // 现在：报一次明确的错误（与文件里 `Resume audio context failed` 同一体例），
+    // 并把状态退回 'none' —— 这样下一次用户操作会**重试**，而不是死在一个中间态上。
+    pitchShifterNodeLoadStatus = 'none'
+    if (!pitchShifterLoadReported) {
+      pitchShifterLoadReported = true
+      console.error('Pitch shifter audio worklet failed to load; 升降调功能不可用（下一次操作会重试）:', error)
+    }
   })
 }
 
