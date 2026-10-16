@@ -344,23 +344,48 @@ responsive-layout / window-controls / window-controls-shell` **全部 `=success`
 | `[data-mobile-title-bar]`（移动分支的占位元素） | **1** |
 | `process.versions.electron` / `Capacitor.isNativePlatform()` | `false` / `false` |
 
-**测试**：`tests/ui/web-bundle-smoke.electron.cjs`（6 条断言；启动用**轮询**而不是固定等 6 秒，
-因为 CI runner 更慢）。npm 脚本 `test:web-bundle-smoke`，放进 **Android workflow** 的
+**测试**：`tests/ui/web-bundle-smoke.electron.cjs`（**11 条断言**；每条路由都是一次**独立加载**
+`loadFile(index, {hash})`，启动用**轮询**而不是固定等待，因为 CI runner 更慢）。
+npm 脚本 `test:web-bundle-smoke`，放进 **Android workflow** 的
 `build:web` 之后、gradle 之前（产物已就绪，失败也不用等 6 分钟编译）。
 ⚠️ 它**不进** `test:ui` / build-test 矩阵：那些流程不构建 `dist-web`。
+
+**为什么要逐条路由独立加载，而不是在应用里点来点去**：那条路要穿过 `<transition>` 的 leave
+（旧容器会留在 DOM 里，本机实测切换后 `.view-container` 会有 **2 个**）和各视图的
+`beforeRouteEnter` 守卫，会得到"hash 变了、视图没换"这种难以解释的中间态。
+独立加载后每条路由的签名都是确定的（本机实测）：
+
+| 路由 | 判定用的结构信号 | 交通灯 | 移动分支占位 |
+|---|---|---|---|
+| （不带 hash，启动即 `#/`） | 整页 282 个元素 | 0 | 1 |
+| `#/list`（歌单） | `table`=0、`dt`=0、282 个元素 | 0 | 1 |
+| `#/download`（下载） | **`table`=1**、`dt`=0、318 个元素 | 0 | 1 |
+| `#/setting`（设置） | **`dt`=7、`dd`=12**、12 个 `input`、492 个元素 | 0 | 1 |
+
+**W6 的真产物级证据**：`#/setting` 那条里 `#download_path` 与
+`[aria-label="setting__download_path_title"]` **都是 0** —— 桌面专用的"保存路径"行在移动端
+真产物里**确实不存在**（组件替身那轮见 §6.4.7）。
+
+⚠️ **为什么走查不含 `#/search` 与 `#/leaderboard`**：这两个视图的 `beforeRouteEnter` 守卫会
+`await getSearchSetting()` / `getLeaderboardSetting()`（→ `winMain_get_data` 的 **invoke**，
+`views/Search/index.vue:35-62`、`views/Leaderboard/index.vue`；`views/List/index.vue:20-29`
+同型）。这个页面里没有任何桥 ⇒ 那个 Promise 必然 reject ⇒ 导航被中止、视图不换
+（本机实测：hash 是 `#/search`，DOM 停在上一页）。**这是环境固有的，不是产物缺陷**：
+`winMain_get_data` 在原生侧**已注册**（`RainMusicDataChannels.java:22` 的 `CHANNEL_GET_DATA`，
+注册在 `:84`，落点 `rain:store:data`），真机上这几页正常打开。
 
 **变异**（改的是**产物副本**的 `index.html`，不需要重新构建 —— 这正是它要守的那一层）：
 
 | 变异 | 结果 |
 |---|---|
-| 给产物注入 `window.process={versions:{electron:'42.11.6'}}`（"它以为自己是桌面壳"） | **fail 3**：正好是 交通灯为 0 / 移动分支 / 没有桌面壳 这三条 |
+| 给产物注入 `window.process={versions:{electron:'42.11.6'}}`（"它以为自己是桌面壳"） | **fail 5**：交通灯为 0 / 移动分支 / 没有桌面壳 / **设置页没有桌面专用保存路径行** / 每条路由不带交通灯 —— 最后两条正是 W6 那条证据在"桌面分支"下确实会变红 |
 | 注入一个真实的 `throw new TypeError(...)` | **fail 1**：正好是崩溃那条（证明过滤没有把真 TypeError 一起放过） |
 | 未变异对照 | exit 0 |
 
 **一条判据说明**：这个页面**故意**没有原生桥，所以"每个写都 reject"是本环境固有的 ——
 `src/renderer/main.ts` 里那两次 `updateSetting(...)`（写回语言 / 窗口尺寸）**有意不降级**
 （"写不进去就应该看得见"）。所以崩溃检查要求**同时**满足"像崩了"和"桥没实现"两个条件才过滤，
-并把过滤掉的数量打在 `detail` 里（本机实测 22 条）。
+并把过滤掉的数量打在 `detail` 里（本机实测：4 次加载合计 **97** 条）。
 
 **顺带更正一条过期注释**：`src/renderer/main.ts` 原来写着"`common_set_app_setting` 在 Android 上
 同样没有桥……也是下一段要处理的通道（P0-2）"——**这两句今天都不成立**：
