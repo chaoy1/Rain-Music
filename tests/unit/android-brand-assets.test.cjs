@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
+const { execFileSync } = require('node:child_process')
 const { test } = require('node:test')
 const root = path.resolve(__dirname, '../..')
 
@@ -109,10 +110,6 @@ test('安装后的图标与启动图是 Rain Music 品牌素材，不是脚手�
 })
 
 test('手写的 Android 源码与资源里不残留旧品牌名', () => {
-  // 扫描范围**刻意排除** `android/app/src/main/assets/public/**`：那是 `cap sync` 从
-  // `dist-web` 拷进来的 Web 产物，里面出现的 `lx.request` 是**自定义源脚本的对外 API 名**
-  // （worker-runtime.js 同时以 `lx` / `rain` 暴露同一个对象，改名会打断社区脚本），
-  // 属于兼容契约而不是品牌残留；那份产物另有自己的守卫。
   const files = []
   const walk = dir => {
     for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
@@ -127,12 +124,34 @@ test('手写的 Android 源码与资源里不残留旧品牌名', () => {
     'android/app/src/main/AndroidManifest.xml',
     'android/app/build.gradle',
     'android/variables.gradle',
-    'android/app/src/main/assets/capacitor.config.json',
     'capacitor.config.ts',
   )
-  assert.ok(files.length > 20, '扫描面太窄了，说明目录结构变了')
+
+  // 扫描面**由 git 界定，而不是由人去记**：`cap sync` 会在 `res/` 与 `assets/` 里生成
+  // 产物（`android/.gitignore:96-101` 忽略 `assets/**`、`res/xml/config.xml`），它们只在
+  // 开发机上存在。这一条是花了一次 CI 才换来的 —— 最初把 `assets/capacitor.config.json`
+  // 与 `res/xml/config.xml` 都扫了进来：**本机全绿，CI 却 `# fail 1` + `ENOENT`**。
+  // 顺带说明为什么 `assets/public/**` 里的 `lx.request` 不算品牌残留：那是自定义源脚本的
+  // **对外 API 名**（worker-runtime.js 同时以 `lx` / `rain` 暴露同一个对象，改名会打断
+  // 社区脚本），属兼容契约，且那份产物另有 `build-android.yml` 的同步产物守卫。
+  const tracked = new Set(
+    execFileSync('git', ['ls-files', 'android', 'capacitor.config.ts'], { cwd: root, encoding: 'utf8' })
+      .split('\n').map(line => line.trim()).filter(Boolean),
+  )
+  const scanned = files.filter(file => tracked.has(file))
+
+  // 过滤掉生成产物之后，**手写面必须仍然完整** —— 否则这条测试会在"没扫到东西"的情况下假绿
+  assert.ok(scanned.length > 20, '受版本控制的手写面太窄了，说明目录结构变了')
+  for (const must of [
+    'android/app/src/main/AndroidManifest.xml',
+    'android/app/src/main/res/values/strings.xml',
+    'android/app/src/main/res/values/styles.xml',
+    'capacitor.config.ts',
+  ]) {
+    assert.ok(scanned.includes(must), `${must} 不在扫描面里了`)
+  }
 
   const LEGACY = /\bLX\b|lx-?music|lx music|落雪|龙溪|com\.lx/i
-  const offenders = files.filter(file => LEGACY.test(readText(file)))
+  const offenders = scanned.filter(file => LEGACY.test(readText(file)))
   assert.deepEqual(offenders, [])
 })
