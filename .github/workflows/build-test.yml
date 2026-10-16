@@ -245,23 +245,30 @@ jobs:
         name: UI / window controls shell
         continue-on-error: true
         run: npm run test:window-controls-shell
+      # 「下载设置里的保存路径在 Android 上是坏的」：移动端那一行不该渲染（显示的是并不落盘的
+      # 桌面默认路径、按钮点不动），桌面端必须照旧渲染，且选目录失败时要**说出来**。
+      - id: ui_setting_download_shell
+        name: UI / setting download shell
+        continue-on-error: true
+        run: npm run test:setting-download-shell
 
       - name: UI matrix
         if: always()
         shell: pwsh
         run: |
           $rows = [ordered]@{
-            'settings-controls'     = '${{ steps.ui_settings_controls.outcome }}'
-            'settings-layout'       = '${{ steps.ui_settings_layout.outcome }}'
-            'player'                = '${{ steps.ui_player.outcome }}'
-            'compact-lyrics'        = '${{ steps.ui_compact_lyrics.outcome }}'
-            'lyric-security'        = '${{ steps.ui_lyric_security.outcome }}'
-            'responsive-layout'     = '${{ steps.ui_responsive_layout.outcome }}'
-            'window-controls'       = '${{ steps.ui_window_controls.outcome }}'
-            'window-controls-shell' = '${{ steps.ui_window_controls_shell.outcome }}'
+            'settings-controls'      = '${{ steps.ui_settings_controls.outcome }}'
+            'settings-layout'        = '${{ steps.ui_settings_layout.outcome }}'
+            'player'                 = '${{ steps.ui_player.outcome }}'
+            'compact-lyrics'         = '${{ steps.ui_compact_lyrics.outcome }}'
+            'lyric-security'         = '${{ steps.ui_lyric_security.outcome }}'
+            'responsive-layout'      = '${{ steps.ui_responsive_layout.outcome }}'
+            'window-controls'        = '${{ steps.ui_window_controls.outcome }}'
+            'window-controls-shell'  = '${{ steps.ui_window_controls_shell.outcome }}'
+            'setting-download-shell' = '${{ steps.ui_setting_download_shell.outcome }}'
           }
           New-Item -ItemType Directory -Force -Path .design | Out-Null
-          $lines = $rows.GetEnumerator() | ForEach-Object { "{0,-22} {1}" -f $_.Key, $_.Value }
+          $lines = $rows.GetEnumerator() | ForEach-Object { "{0,-25} {1}" -f $_.Key, $_.Value }
           $lines | ForEach-Object { Write-Host $_ }
           $lines | Set-Content -Path .design/ui-matrix.txt -Encoding UTF8
           $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding UTF8
@@ -283,14 +290,15 @@ jobs:
           # steps.<id>.outcome is the result BEFORE continue-on-error is applied,
           # so it is the real signal (conclusion is masked to 'success').
           $rows = [ordered]@{
-            'settings-controls'     = '${{ steps.ui_settings_controls.outcome }}'
-            'settings-layout'       = '${{ steps.ui_settings_layout.outcome }}'
-            'player'                = '${{ steps.ui_player.outcome }}'
-            'compact-lyrics'        = '${{ steps.ui_compact_lyrics.outcome }}'
-            'lyric-security'        = '${{ steps.ui_lyric_security.outcome }}'
-            'responsive-layout'     = '${{ steps.ui_responsive_layout.outcome }}'
-            'window-controls'       = '${{ steps.ui_window_controls.outcome }}'
-            'window-controls-shell' = '${{ steps.ui_window_controls_shell.outcome }}'
+            'settings-controls'      = '${{ steps.ui_settings_controls.outcome }}'
+            'settings-layout'        = '${{ steps.ui_settings_layout.outcome }}'
+            'player'                 = '${{ steps.ui_player.outcome }}'
+            'compact-lyrics'         = '${{ steps.ui_compact_lyrics.outcome }}'
+            'lyric-security'         = '${{ steps.ui_lyric_security.outcome }}'
+            'responsive-layout'      = '${{ steps.ui_responsive_layout.outcome }}'
+            'window-controls'        = '${{ steps.ui_window_controls.outcome }}'
+            'window-controls-shell'  = '${{ steps.ui_window_controls_shell.outcome }}'
+            'setting-download-shell' = '${{ steps.ui_setting_download_shell.outcome }}'
           }
           $bad = @($rows.GetEnumerator() | Where-Object { $_.Value -ne 'success' } | ForEach-Object { $_.Key })
           $all = ($rows.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '

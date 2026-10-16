@@ -36,6 +36,7 @@
     "dev": "cross-env NODE_OPTIONS=--max-http-header-size=200000 node build-config/runner-dev.js",
     "test:window-controls": "node tests/ui/run-window-controls.cjs",
     "test:window-controls-shell": "node tests/ui/run-window-controls-shell.cjs",
+    "test:setting-download-shell": "node tests/ui/run-setting-download-shell.cjs",
     "test:surfaces": "node tests/ui/run-refined-surfaces.cjs",
     "test:pagination": "node tests/ui/run-pagination.cjs",
     "test:playlist-transition": "node tests/ui/run-playlist-transition.cjs",
@@ -61,7 +62,7 @@
     "test:play-controls-refresh": "node tests/ui/run-play-controls-refresh.cjs",
     "test:tray-and-tips": "node tests/ui/run-tray-and-tips.cjs",
     "test:playback-queue": "node tests/ui/run-playback-queue.cjs",
-    "test:ui": "npm run test:settings-controls && npm run test:settings-layout && npm run test:player && npm run test:compact-lyrics && npm run test:lyric-security && npm run test:responsive-layout && npm run test:window-controls && npm run test:window-controls-shell",
+    "test:ui": "npm run test:settings-controls && npm run test:settings-layout && npm run test:player && npm run test:compact-lyrics && npm run test:lyric-security && npm run test:responsive-layout && npm run test:window-controls && npm run test:window-controls-shell && npm run test:setting-download-shell",
     "test:package": "node tests/ui/package-smoke.cjs"
   },
   "browserslist": [
