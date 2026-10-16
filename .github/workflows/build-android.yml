@@ -75,28 +75,55 @@ jobs:
           }
           Write-Host "dist-web has none of: $($markers -join ', ')"
 
-      # 正面守卫（2026-10-16）：自定义源（**首版范围**）跑在一个**独立的 worker chunk** 里 ——
-      # `platform/userApi/web.js:19` 那句 `new Worker(new URL('./worker.js', import.meta.url))`
-      # 就是让 webpack 把 `worker-runtime.js` 拆成单独 chunk（本机实测产物：`112.*.js`），
-      # 运行期再按 chunk id 拼出 URL。所以"这个 chunk 到底有没有被产出来"**只有产物层面看得见**：
+      # 正面守卫（2026-10-16）：首版里**两个**关键功能都跑在独立 worker chunk 里 ——
+      #   · 自定义源：`platform/userApi/web.js:19` 的 `new Worker(new URL('./worker.js', import.meta.url))`
+      #     ⇒ webpack 拆出的 chunk（本机实测：`112.*.js`，也是全部产物里唯一带 `use lx.request` 的）；
+      #   · 下载 / 数据 / 歌词走的主渲染 worker：`platform/workers/web.ts`，产物里是
+      #     `new Worker(new URL(n.p+n.u(835), n.b))`（本机实测：`835.*.js`，外面是 Comlink 包装）。
+      # 两者都在运行期按 chunk id 拼 URL，所以"chunk 到底有没有被产出来"**只有产物层面看得见**：
       # 拆包一旦失效（那行 URL 被改、或 webpack 配置被动），本机 lint / tsc / 单测**全都不会红**，
-      # 真机上的表现却是"导入自定义源之后没有任何反应"。
-      # 标志串取 `worker-runtime.js` 里那句 `use lx.request`（实测全部产物**只有 worker chunk** 有它）。
-      - name: Guard the web bundle against a missing custom-source worker
+      # 真机上的表现是"导入自定义源没反应" / "下载不动"。
+      #
+      # 两道检查：① 自定义源 worker 的运行时必须在（用 `use lx.request` 这个唯一标志串）；
+      # ② bundle 里每一处 `new Worker(...)` 引用的 chunk id 都必须真的落成文件。
+      - name: Guard the web bundle against a missing or unloadable worker
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
           if (-not (Test-Path -Path dist-web)) {
-            Write-Host "::error title=custom-source worker::dist-web is missing - build:web did not run"
+            Write-Host "::error title=web bundle::dist-web is missing - build:web did not run"
             exit 1
           }
-          $hits = @(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
+
+          $marker = @(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
             Select-String -Pattern 'use lx.request' -List)
-          if ($hits.Count -eq 0) {
+          if ($marker.Count -eq 0) {
             Write-Host "::error title=custom-source worker::no chunk carries the worker-runtime marker 'use lx.request' - the custom-source worker was not emitted, so importing a source would silently do nothing on device"
             exit 1
           }
-          foreach ($hit in $hits) { Write-Host "custom-source worker chunk: $(Split-Path -Leaf $hit.Path)" }
+          foreach ($hit in $marker) { Write-Host "custom-source worker chunk: $(Split-Path -Leaf $hit.Path)" }
+
+          $missing = @()
+          $referenced = 0
+          foreach ($file in @(Get-ChildItem -Path dist-web -Recurse -Filter *.js)) {
+            $text = Get-Content -LiteralPath $file.FullName -Raw
+            foreach ($m in [regex]::Matches($text, 'new Worker\(')) {
+              $window = $text.Substring($m.Index, [Math]::Min(240, $text.Length - $m.Index))
+              $id = [regex]::Match($window, '\.u\((\d+)\)')
+              if (-not $id.Success) { $missing += "$($file.Name): unparsable worker reference"; continue }
+              $referenced++
+              $chunk = $id.Groups[1].Value
+              if (@(Get-ChildItem -Path dist-web -Filter "$chunk.*.js").Count -eq 0) {
+                $missing += "$($file.Name) -> chunk $chunk"
+              }
+            }
+          }
+          Write-Host "worker constructions found in the bundle: $referenced"
+          if ($missing.Count -gt 0) {
+            Write-Host "::error title=worker chunk::$($missing -join ' | ') - the bundle constructs a Worker whose chunk was not emitted, so that feature cannot start on device"
+            exit 1
+          }
+          Write-Host 'every referenced worker chunk exists'
 
       # 生成 android/app/capacitor.build.gradle、android/capacitor.settings.gradle
       # 并把 dist-web 复制到 android/app/src/main/assets/public。
@@ -104,10 +131,12 @@ jobs:
       - name: Sync Capacitor android project
         run: npx cap sync android
 
-      # 承接上一步：**本次构建产出的那个 chunk 文件名**必须出现在同步后的 Android assets 里。
-      # 不能写成"目录里有没有带标志串的文件" —— `cap sync` **不清理** assets/public
-      # （本机实测：一次同步后 23 个 js，而 dist-web 只有 21，且逐个都不是本轮的），
-      # 旧残留会让"存在性检查"**假绿**，那比没有守卫更糟。
+      # 承接上一步：**本轮 dist-web 的每一个文件**都必须出现在同步后的 Android assets 里。
+      #
+      # 为什么不是"只查那个 worker chunk"：`cap sync` **不清理**目标目录（本机实测：同步目录里
+      # 23 个 js，而 dist-web 只有 21 个，且**逐个文件名都不是本轮的**）—— 旧残留会让任何
+      # "存在性检查"**假绿**。改用**本轮的文件清单**逐个比对：既覆盖两个 worker chunk，
+      # 也覆盖以后可能新增的运行期资源（音频 worklet、`media/`、`static/`），而且天然不吃残留。
       - name: Guard the synced Android assets against a stale web bundle
         shell: pwsh
         run: |
@@ -117,20 +146,21 @@ jobs:
             Write-Host "::error title=synced assets::$assets is missing - cap sync did not copy the web bundle"
             exit 1
           }
-          # 注意外层还要再套一层 @()：`@(...) | ForEach-Object { ... }` 在**只命中一个**时会退化成
-          # 一个裸字符串（PowerShell 的经典坑），后面的 .Count / 索引就会按字符算 —— 本机实测过。
-          $worker = @(@(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
-            Select-String -Pattern 'use lx.request' -List) | ForEach-Object { Split-Path -Leaf $_.Path })
-          if ($worker.Count -eq 0) {
-            Write-Host "::error title=custom-source worker::dist-web lost the worker chunk between the two guards"
-            exit 1
+          $root = (Resolve-Path dist-web).Path
+          $missing = @()
+          $total = 0
+          foreach ($file in @(Get-ChildItem -Path dist-web -Recurse -File)) {
+            $total++
+            $relative = $file.FullName.Substring($root.Length + 1)
+            if (-not (Test-Path -LiteralPath (Join-Path $assets $relative))) { $missing += $relative }
           }
-          $missing = @($worker | Where-Object { -not (Test-Path -LiteralPath (Join-Path $assets $_)) })
+          Write-Host "dist-web files checked: $total"
           if ($missing.Count -gt 0) {
-            Write-Host "::error title=synced assets are stale::$($missing -join ', ') missing from $assets - cap sync did not copy the current web bundle"
+            $shown = @($missing | Select-Object -First 10)
+            Write-Host "::error title=synced assets are stale::$($missing.Count) of $total file(s) missing from $assets, e.g. $($shown -join ', ') - cap sync did not copy the current web bundle"
             exit 1
           }
-          Write-Host "synced assets carry the current custom-source worker chunk: $($worker -join ', ')"
+          Write-Host "all $total dist-web files are present in the synced assets"
 
       # Capacitor 8 的 Android 工具链：android/build.gradle 锁 AGP 8.13.0，
       # gradle-wrapper.properties 锁 Gradle 8.14.3，variables.gradle 是 compileSdk/targetSdk 36。
