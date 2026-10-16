@@ -246,6 +246,28 @@ module.exports = {
         resource.request = '@common/platform/electron/web'
       },
     ),
+    // 关键差异 4.11（2026-10-16）：`electron-log/node` 的**构建期**替换。
+    //
+    // `src/common/utils/index.ts:1` 写的是 `import log from 'electron-log/node'`。桌面**主进程**
+    // 要那份（File 传输 + `APPDATA` 推目录），但**渲染层**在 web/Android 产物里拿到的是
+    // **同一个 Node 构建**：带 File 传输（`fs` 在 web 产物里是空模块）、`os`、`child_process`，
+    // 还会用 `AppData/Roaming` / `Library/Logs` / `xdg-open` 去算日志目录。
+    // ⇒ 真机上**日志静默消失**（写盘抛错被 electron-log 自己的 errorHandler 吞掉），
+    // 而真机验收正要靠 logcat 看应用自己的日志（`docs/android/acceptance.md`）。
+    // 实测证据（替换前，`dist-web` 的 `renderer.*.js` 与主 Worker chunk 都有这三个字面量）：
+    // `AppData/Roaming`、`Library/Logs`、`xdg-open`。
+    //
+    // 换成 `@common/platform/log/web`（`electron-log/renderer` + 关掉"没有主进程"的 ipc 传输）：
+    // 那是同一个包的浏览器构建，**不 require `electron`**、API 与桌面一致，所以**零调用点改动** ——
+    // 与 4.7 / 4.9 同一个套路（改请求，不改 import）。
+    // ⚠️ 只替换 `electron-log/node` 这一个入口，别顺手把 `electron-log` 本身也换掉：
+    // 主进程侧（`src/main/utils/logInit.ts`）用的就是它，而这里只作用于 **web 构建**，不碰桌面。
+    new webpack.NormalModuleReplacementPlugin(
+      /^electron-log\/node$/,
+      resource => {
+        resource.request = '@common/platform/log/web'
+      },
+    ),
     // 关键差异 4.10（阶段 3 / 线 E-2）：渲染层"挂载期必需通道"降级层的**构建期**替换。
     // `src/renderer/platform/ipcFallback/index.js` 默认是桌面的**逐字透传**实现
     // （`invokeWithFallback(invoke, channel) === invoke(channel)`，第三个 `fallback` 参数

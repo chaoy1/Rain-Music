@@ -37,6 +37,44 @@ jobs:
       - name: Build web renderer bundle
         run: npm run build:web
 
+      # 产物级守卫（2026-10-16）：web 产物里**不能**出现 electron-log 的 Node 构建。
+      #
+      # 渲染层写的是 `import log from 'electron-log/node'`（桌面主进程要那份：File 传输 +
+      # `APPDATA` 推目录）；web 构建用 `webpack.config.web.js` 的「关键差异 4.11」把它换成
+      # `@common/platform/log/web`。替换一旦失效，`electron-log/src/node/NodeExternalApi.js`
+      # 会带着 `AppData/Roaming` / `Library/Logs` / `xdg-open` 进产物 ⇒ 真机上**日志静默消失**
+      # （写盘抛错被 electron-log 自己的 errorHandler 吞掉）—— 而真机验收正要靠 logcat 看
+      # 应用自己的日志（`docs/android/acceptance.md`）。
+      #
+      # "Node 专有模块混进 web 产物"在本项目已出现过两次（整个 `electron` 包、以及这次的
+      # `electron-log`），两次都**本机测不到、只有产物层面才看得见**。所以守卫就放在
+      # **产出这个包的地方**：它失败 = 这个 APK 不该发。
+      # 这三个字面量来自 NodeExternalApi，**只在 Node 构建里存在**（renderer 构建没有它们）。
+      - name: Guard the web bundle against the Node logger build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $markers = @('AppData/Roaming', 'Library/Logs', 'xdg-open')
+          if (-not (Test-Path -Path dist-web)) {
+            Write-Host "::error title=web bundle::dist-web is missing - build:web did not produce the expected directory"
+            exit 1
+          }
+          # -List：每个文件只报第一条命中，避免同一份 chunk 刷屏。
+          $hits = @(Get-ChildItem -Path dist-web -Recurse -Filter *.js |
+            Select-String -Pattern $markers -List)
+
+          if ($hits.Count -gt 0) {
+            $i = 0
+            foreach ($hit in $hits) {
+              if ($i -ge 10) { break }   # GitHub 每个 step 只展示 10 条 error annotation
+              Write-Host "::error title=web bundle has the Node logger build::$($hit.Path) matched '$($hit.Pattern)'"
+              $i++
+            }
+            Write-Host "dist-web file count: $(@(Get-ChildItem -Path dist-web -Recurse -Filter *.js).Count)"
+            exit 1
+          }
+          Write-Host "dist-web has none of: $($markers -join ', ')"
+
       # 生成 android/app/capacitor.build.gradle、android/capacitor.settings.gradle
       # 并把 dist-web 复制到 android/app/src/main/assets/public。
       # 缺少这一步时 gradlew 会在配置阶段直接失败（settings.gradle 会 apply 一个不存在的文件）。

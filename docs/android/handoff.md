@@ -41,7 +41,9 @@
     **W4**（medium，本地音乐把会话级 `blob:` URL 当身份持久化）、**W5–W9**（low）、
     以及 **W10**（**本轮更正**：`formData` 不是"静默发空请求"，
     `host.js:117` 会明确抛"Unsupported capability"，属于**已登记的显式不支持**，降为 low）。
-    见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3**。
+    **W8 本轮已复核并修复**（web 产物里确实有 `electron-log` 的 Node 构建 ⇒ 真机上日志静默消失；
+    接入点 + webpack 4.11 + **CI 产物级守卫**，见 §6.4.4）。
+    见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3 / §6.4.4**。
 11. **阶段 6 的执行单已单独成文：[`acceptance.md`](acceptance.md)**（2026-10-15 新增）。
     它把"首版是否可用"拆成逐项**可观察证据** + adb 取证命令 + **已知不支持清单**（免得把设计如此当 bug），
     并规定失败时要回报哪五样东西。**它没有被真机执行过** —— 本机没有 SDK/adb/设备，
@@ -572,7 +574,7 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 | W5 | low | `userApi/worker-runtime.js:25` 的能力黑名单 | — | 漏了 `navigator.sendBeacon`（Beacon 是 `[Exposed=(Window,Worker)]`）⇒ 脚本仍可绕过父侧那条被校验的 HTTP 通道直接外联 | 未复核（需真机 WebView） |
 | W6 | low | `filePicker/web.js:7` + `views/Setting/components/SettingDownload.vue:31-38` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应** | 未复核 |
 | W7 | low | `filePicker/web.js:34` | — | 取消判定靠 `focus` + 300 ms 定时器读 `input.files`；WebView 若"先 focus、后填 FileList"，会把**真选择当成取消**静默丢掉 | 未复核（需真机） |
-| W8 | low（**旧问题**，不是本次引入） | `build-config/renderer/webpack.config.web.js:46-96` + `src/common/utils/index.ts:1` | — | web 产物里**仍然有 `electron-log` 的 Node 构建**（`src/node/*`、File transport、`fs` 被替成空模块）⇒ 配置里"没有任何 Node-only 模块能进 web 产物"这句话对**日志**这条不成立（只在真写日志时才炸，而且被 electron-log 自己吞掉） | 未复核 |
+| W8 | **升为 medium 并已修**（原判 low，本轮复核后确认后果比"低"严重） | `build-config/renderer/webpack.config.web.js` + `src/common/utils/index.ts:1`（`import log from 'electron-log/node'`） | — | web 产物里**确实有** `electron-log` 的 Node 构建。**实测证据（替换前，`dist-web` 的 `renderer.*.js` 与主 Worker chunk 都有）**：`AppData/Roaming`、`Library/Logs`、`xdg-open` —— 三个字面量都来自 `electron-log/src/node/NodeExternalApi.js`。后果**不是崩溃而是日志静默消失**：File 传输写盘时 `fs` 是空模块、抛错被 electron-log 自己的 `processInternalErrorFn` 吞掉 ⇒ **真机上应用自己的日志一条都不留**，而真机验收正要靠 logcat 看它 | **已复核（产物层 grep）+ 本轮已修** —— 见 §6.4.4 |
 | W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | 未复核 |
 | **W10** | low（**本节 2026-10-15 更正**：原来的描述是错的） | `userApi/web.js` 的 `userApiHttpRequest` | `preload.js:180-185`（桌面把 `formData` 交给 needle 发 multipart） | 适配器**忽略 `formData`** —— 但**不是静默**：`host.js:117` 的 `startHttp()` **会先明确抛** `Unsupported capability: multipart formData`，脚本的 `lx.request` 回调拿到的是这条错误（`android-user-api-host.test.cjs` 里就有一条断言它）。所以这是**已登记的"显式不支持"**，不是"静默发空请求" | **已复核**：~~原来写的"等于发一个没有 body 的请求 / 静默发出空请求"**是错的**~~ —— 我上一轮只看了 `userApi/web.js`，没看上游 `host.js` 的守卫。**本轮修正**。功能上仍与桌面有差距（桌面能发 multipart），要补齐需要 `platform/http/web.js` 支持原样 body（`FormData`/`Blob`/`URLSearchParams` 直传 + 不自动写 Content-Type，让 fetch 自己产生 boundary）—— 那是另一件事，**低优先** |
 
@@ -689,6 +691,55 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
   **判据很朴素：失败数量和失败原因要能对上。对不上就先怀疑工装，别急着写结论。**
 
 
+
+#### 6.4.4 本轮已修：W8（web 产物里的 Node 日志构建）
+
+**缺陷**：`src/common/utils/index.ts:1` 是 `import log from 'electron-log/node'`。桌面**主进程**要那份
+（`src/main/utils/logInit.ts`：File 传输 + 从 `process.env.APPDATA` 推日志目录），但**渲染层**在
+web/Android 产物里拿到的是**同一个 Node 构建** ⇒ 带 File 传输（`fs` 在 web 产物里是空模块）、
+`os`、`child_process`，还要用 `AppData/Roaming` / `Library/Logs` / `xdg-open` 去算目录。
+
+**后果不是崩溃，是日志静默消失**：写盘抛错被 electron-log 自己的 `processInternalErrorFn` 吞掉
+（这也是为什么它一直没被人发现 —— 它连报错都不报）。而真机验收正要靠 logcat 看应用自己的日志
+（[`acceptance.md`](acceptance.md) 的第 ① ④ ⑤ 条取证命令都依赖它）。
+
+**产物级证据**（替换前，`dist-web` 里 **`renderer.*.js` 与主 Worker chunk 都有**）：
+`AppData/Roaming`、`Library/Logs`、`xdg-open` 三个字面量都能搜到；替换后**三个全部 ABSENT**。
+
+**改法**（零调用点改动，沿用 4.7 / 4.9 的"改请求不改 import"套路）：
+
+1. 新增接入点 `src/common/platform/log/web.js`：`import log from 'electron-log/renderer'` ——
+   同一个包的**浏览器构建**（`package.json` 的 `exports["./renderer"]`），只带 `console` 与 `ipc`
+   两个传输，**完全不 require `electron`**（唯一 require 它的 `electron-log-preload.js` 不在这条链上，
+   已逐文件核过 `src/renderer/**`）。级别/格式化/作用域与桌面一致。
+2. 它**顺手关掉 `ipc` 传输**：那个传输负责把日志转给主进程，而 Android 没有主进程 ——
+   它每次都会退回打一条 `electron-log: logger isn't initialized in the main process`
+   （`src/renderer/lib/transports/ipc.js` 的 `if (!window.__electronLog)` 分支）⇒ **每条日志多一行噪声**。
+   `Logger.js:167` 对 `level === false` 的传输直接跳过。留下的 `console` 传输会进 WebView 的 console，
+   而 **WebView 的 console 会进 logcat** —— 那才是真机取证要看的地方。
+3. `webpack.config.web.js` 新增**关键差异 4.11**：`/^electron-log\/node$/` → `@common/platform/log/web`。
+   只替换这一个入口，**不**动 `electron-log` 本身（主进程侧还在用），而且这个替换只存在于 **web 构建**。
+
+**CI 产物级守卫（这一条同样重要）**：`build-android.yml` 在 `npm run build:web` **之后、`cap sync` 之前**
+新增一步 `Guard the web bundle against the Node logger build`：在 `dist-web` 里搜那三个字面量，
+命中就发 `::error title=web bundle has the Node logger build::…` 并让 job 失败。
+理由：**"Node 专有模块混进 web 产物"在本项目已出现两次**（整个 `electron` 包、以及这次的 `electron-log`），
+两次都**本机测不到、只有产物层面才看得见**，所以守卫就放在**产出这个包的地方** —— 它失败 = 这个 APK 不该发。
+
+**证据**：
+
+- 本机重跑 `npm run build:web`（exit 0、构建无新增告警）后 grep：三个标记 **ABSENT**；
+  并且产物里能搜到接入点写下的 `transports.*.level` 赋值（说明关 ipc 那一步真的进了包）。
+- 单测（`android-platform-integration.test.cjs`）：新增一条用例断言接入点**没有 File 传输**、
+  **ipc 被关掉**、`console` 传输与 `info`/`error` 都在；并把它加进既有的"构建期替换必须真的接上"列表。
+- **2 个变异，各自被自己的断言抓住**（仓库外副本 `%TEMP%\rain-mut\`）：
+  去掉 `transports.ipc.level = false` ⇒ 新用例 fail；把替换目标改成不存在的路径 ⇒ 替换用例 fail。
+- ⚠️ **工装第四次骗我**：第一次跑出 `fail 2`，第二条失败是"cleartext 策略"那条 —— 原因是副本里
+  少了 `AndroidManifest.xml` 与 `res/`（那条用例要读它们）。把这两样补进副本后才是干净的
+  "只红该红的那条"。**判据依旧是：失败数量与失败原因对不上就先怀疑工装。**
+- **CI 的那段 pwsh 本身也验过**：把 `run` 脚本从 workflow 里**解析出来**（js-yaml），
+  在三个临时工作目录里跑**同一份文本** —— 干净目录 exit 0、有 `AppData/Roaming` 的目录 exit 1
+  并且发出正确的 annotation、缺 `dist-web` 时 exit 1。**改 CI 不能只靠读。**
 
 **对 6.4 这一轮审查确认"没问题"的部分**（省下一次重查）：
 
@@ -827,7 +878,7 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 
 | # | 缺陷 | 不拦截的后果 |
 |---|---|---|
-| 1 | 产物互斥（桌面/Android 实现混入对方产物）| 桌面运行时走 Android 分支 ⇒ "莫名超时" |
+| 1 | 产物互斥（桌面/Android 实现混入对方产物）| 桌面运行时走 Android 分支 ⇒ "莫名超时"；**同类第二次是 Node 专有模块混进 web 产物**（整包 `electron`、以及 `electron-log` 的 Node 构建 ⇒ 真机日志静默消失），见 §6.4.4 —— 现在 web 产物由 CI 在 `build:web` 之后**产物级守卫**拦着 |
 | 2 | **去重键 Java/JS 不等价**（JS `trim()` 吃所有 Unicode 空白、`toLowerCase()` 与区域无关；Java 的 `trim()` 只吃 ≤U+0020、`toLowerCase()` 依赖默认 Locale）| 合并集合与渲染层不一致 ⇒ **能播的歌变成播不了** |
 | 3 | **库文件名被插件改写**（`@capacitor-community/sqlite` 的 `getDatabaseName()` 砍掉 `.db` 再拼 `SQLite.db` ⇒ `rain.data.db` 实为 **`rain.dataSQLite.db`**）| 两侧各开一份库 ⇒ **"歌单丢了"** |
 | 4 | **删除保留 id**（`default`/`temp` 有子表行但 `my_list` 里没有父行）| `my_list` 删 0 行（看似成功）+ 子表真删 ⇒ **静默清空试听列表** |
@@ -889,15 +940,15 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **累计修掉 11 处、拍板 1 处、更正 1 处**：§6.2 的下载执行层 7 处（含那处 high，
-   本轮补上有界重试）+ §6.4 的 W1、W2 + §6.3 的 L6、L1。
-   每一处都配了断言与**变异验证**（下载 8 个、W1 两个、W2 两个、L6 一个、L1 一个，逐个被**为它写的**断言捕获）。
+5. **累计修掉 12 处、拍板 1 处、更正 3 处**：§6.2 的下载执行层 7 处（含那处 high，本轮补上有界重试）
+   + §6.4 的 W1、W2、W8（W8 是"真机上应用自己的日志一条都不留"）+ §6.3 的 L6、L1。
+   每一处都配了断言与**变异验证**（下载 8 个、W1 两个、W2 两个、L6 一个、L1 一个、W8 两个，
+   逐个被**为它写的**断言捕获）。**W8 还额外加了 CI 的产物级守卫**（web 产物出现 Node 日志构建即失败）。
    **本机门禁：lint 0 errors、四个 tsc exit 0、单测全过；每个代码提交的 CI 都是 success。**
    **下一轮的第一优先**是：
-   - **§6.2 第 4 处**（部分文件何时回收）与 **§6.3 L2**（保留 id 的拒绝）—— **都需要先拍板**，
-     不适合在没有决定的情况下动代码；
+   - **§6.2 第 4 处**（部分文件何时回收）与 **§6.3 L2**（保留 id 的拒绝）—— **都需要先拍板**；
    - **§6.4 的 W4**（本地音乐把会话级 `blob:` URL 当身份持久化 ⇒ 重载后不可播）——
-     这是首版范围内唯一还没动过的 medium；
+     首版范围内唯一还没动过的 medium；
    - 之后是 §6.1 的**主题 7 条通道**（唯一"未处理 rejection + 功能静默为空"的一块，
      也是用户点过名的方向；属于首版范围之外，但要做就得成体系地做）；
    - **W3 不是 Android 侧缺陷**（两侧共有），不要按"Android 偏差"去改。

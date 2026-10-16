@@ -5,6 +5,22 @@ const { test } = require('node:test')
 const load = require('./load-ts.cjs')
 const root = path.resolve(__dirname, '../..')
 const read = file => fs.readFileSync(path.join(root, file), 'utf8')
+test('Android renderer logs through the browser build, never through the Node build that needs a filesystem', () => {
+  // `src/common/utils/index.ts:1` 顶层是 `import log from 'electron-log/node'`；web 构建按
+  // `webpack.config.web.js` 的「关键差异 4.11」把它换成这个接入点。三条断言各对应一个
+  // **真机上具体的坏结果**，而不是风格检查：
+  const log = load('src/common/platform/log/web.js').default
+  // 1) Node 构建带 File 传输（`fs` + `AppData/Roaming` 目录推算）。在 web 产物里 `fs` 是空模块，
+  //    写盘抛错会被 electron-log 自己的 errorHandler 吞掉 ⇒ **日志静默消失**。
+  assert.equal(log.transports.file, undefined, '渲染层不能有 File 传输')
+  // 2) 渲染层构建的 ipc 传输要把日志转给主进程；Android 没有主进程，它每次都退回打一条
+  //    "logger isn't initialized in the main process" ⇒ 每条日志多一行噪声。
+  assert.equal(log.transports.ipc.level, false, 'ipc 传输必须关掉（没有主进程可转发）')
+  // 3) 留下的 console 传输才是真机取证看的：WebView 的 console 会进 logcat。
+  assert.equal(typeof log.transports.console, 'function', 'console 传输必须在')
+  for (const level of ['info', 'error']) assert.equal(typeof log[level], 'function', level)
+})
+
 test('Android file URLs use Capacitor mapping; desktop paths keep Node URL escaping', () => {
   const calls = []
   const android = load('src/common/platform/fileUrl/web.js', { '@capacitor/core': { Capacitor: { convertFileSrc: value => { calls.push(value); return `mapped:${value}` } } } })
@@ -19,7 +35,7 @@ test('Android file URLs use Capacitor mapping; desktop paths keep Node URL escap
 })
 test('Android web build replaces actual worker/file URL imports, and native plugin registers each new family', () => {
   const config = require('../../build-config/renderer/webpack.config.web')
-  for (const [specifier, expected] of [['@renderer/worker', '@renderer/platform/workers/web'], ['@renderer/worker/utils', '@renderer/platform/workers/utils'], ['@common/platform/fileUrl', '@common/platform/fileUrl/web']]) {
+  for (const [specifier, expected] of [['@renderer/worker', '@renderer/platform/workers/web'], ['@renderer/worker/utils', '@renderer/platform/workers/utils'], ['@common/platform/fileUrl', '@common/platform/fileUrl/web'], ['electron-log/node', '@common/platform/log/web']]) {
     const replacement = config.plugins.find(p => p.resourceRegExp?.test(specifier))
     assert.ok(replacement, specifier)
     const resource = { request: specifier }; replacement.newResource(resource)
