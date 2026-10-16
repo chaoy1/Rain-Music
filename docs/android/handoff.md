@@ -43,7 +43,9 @@
     `host.js:117` 会明确抛"Unsupported capability"，属于**已登记的显式不支持**，降为 low）。
     **W8 本轮已复核并修复**（web 产物里确实有 `electron-log` 的 Node 构建 ⇒ 真机上日志静默消失；
     接入点 + webpack 4.11 + **CI 产物级守卫**，见 §6.4.4）。
-    见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3 / §6.4.4**。
+    **W7 本轮已修**（选择器把"真选择"当取消 ⇒ "选完没反应"，见 §6.4.5）；**W9 本轮已修**（文档改正，
+    代码本来就对）。
+    见 **§6.4 / §6.4.1 / §6.4.2 / §6.4.3 / §6.4.4 / §6.4.5**。
 11. **阶段 6 的执行单已单独成文：[`acceptance.md`](acceptance.md)**（2026-10-15 新增）。
     它把"首版是否可用"拆成逐项**可观察证据** + adb 取证命令 + **已知不支持清单**（免得把设计如此当 bug），
     并规定失败时要回报哪五样东西。**它没有被真机执行过** —— 本机没有 SDK/adb/设备，
@@ -558,7 +560,7 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
   主失败正是新用例；第二条是上面那条广播测试（`error` 不为 undefined）—— 属于**合理的连带**，
   不是独立发现，记在这里以免下一个人误读。
 
-### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1、W2 本轮已修**；2026-10-15）
+### 6.4 渲染层 / Web 侧：独立审查确认的问题（**W1、W2、W7、W8 本轮已修；W9 更正文档**；2026-10-15）
 
 审查对象：提交 `2a3e4a7c` 的渲染层新代码（`userApi/{host,worker-runtime,web,contract}.js`、
 `platform/download/{android,pure}.ts`、`filePicker/web.js`、`fs/web.js`、`fileUrl/web.js`、
@@ -573,9 +575,9 @@ JSON 解出来的整数在 org.json 里常常是 `Integer`/`Long`，但**可能�
 | W4 | medium | `filePicker/web.js:27` + `selectedFiles.js:2` + `renderer/utils/music.ts:83,90-91` | — | 选择器返回的是**会话级 `blob:` URL**，全仓只有 `UserApiModal.vue:95` 会释放；本地音乐那条路把 blob URL **当成歌曲身份持久化** ⇒ 重载后是一堆**永远播不了的歌**，且 File 句柄泄漏整场 | 未复核 |
 | W5 | low | `userApi/worker-runtime.js:25` 的能力黑名单 | — | 漏了 `navigator.sendBeacon`（Beacon 是 `[Exposed=(Window,Worker)]`）⇒ 脚本仍可绕过父侧那条被校验的 HTTP 通道直接外联 | 未复核（需真机 WebView） |
 | W6 | low | `filePicker/web.js:7` + `views/Setting/components/SettingDownload.vue:31-38` | — | `openDirectory` 明确 reject，但那个调用点**没有 `.catch`** ⇒ Android 上点"选择保存目录"**静默无反应** | 未复核 |
-| W7 | low | `filePicker/web.js:34` | — | 取消判定靠 `focus` + 300 ms 定时器读 `input.files`；WebView 若"先 focus、后填 FileList"，会把**真选择当成取消**静默丢掉 | 未复核（需真机） |
+| W7 | low（**但对用户是"选完没反应"，本轮已修**） | `filePicker/web.js` 的 `returned` | — | 取消判定原来靠 `focus` + **一个固定 300 ms 定时器**去读 `input.files`。真机上 `focus` **早于** WebView 把文件填进 `input.files` 是常态，而结算只看那一刻的 `files` ⇒ **真选择被判成取消、文件静默丢掉**。这条路径是**首版范围内**的（自定义源导入、主题图导入、备份导入都走它） | **已复核（代码）+ 本轮已修** —— 见 §6.4.5 |
 | W8 | **升为 medium 并已修**（原判 low，本轮复核后确认后果比"低"严重） | `build-config/renderer/webpack.config.web.js` + `src/common/utils/index.ts:1`（`import log from 'electron-log/node'`） | — | web 产物里**确实有** `electron-log` 的 Node 构建。**实测证据（替换前，`dist-web` 的 `renderer.*.js` 与主 Worker chunk 都有）**：`AppData/Roaming`、`Library/Logs`、`xdg-open` —— 三个字面量都来自 `electron-log/src/node/NodeExternalApi.js`。后果**不是崩溃而是日志静默消失**：File 传输写盘时 `fs` 是空模块、抛错被 electron-log 自己的 `processInternalErrorFn` 吞掉 ⇒ **真机上应用自己的日志一条都不留**，而真机验收正要靠 logcat 看它 | **已复核（产物层 grep）+ 本轮已修** —— 见 §6.4.4 |
-| W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | 未复核 |
+| W9 | low（文档 vs 代码） | `docs/android/user-api-host.md:23` vs `userApi/host.js:192` | — | 文档说 `user_api_status` 事件能观察到 `initing`，而 host **刻意不发布**这个状态（发了会让渲染层就绪闸门按终态失败结算）；另外"移除活动源"的失败事件不带 `apiInfo`，渲染层会静默忽略 | **已复核 + 本轮已修（文档改正）**：`docs/android/user-api-host.md` 的那一行已改成"不含 `initing`，要看中间态请用 `get_user_api_status`"，并写明"移除活动源不带 `apiInfo` 是有意的"。代码**一个字没改**（它本来就是对的） |
 | **W10** | low（**本节 2026-10-15 更正**：原来的描述是错的） | `userApi/web.js` 的 `userApiHttpRequest` | `preload.js:180-185`（桌面把 `formData` 交给 needle 发 multipart） | 适配器**忽略 `formData`** —— 但**不是静默**：`host.js:117` 的 `startHttp()` **会先明确抛** `Unsupported capability: multipart formData`，脚本的 `lx.request` 回调拿到的是这条错误（`android-user-api-host.test.cjs` 里就有一条断言它）。所以这是**已登记的"显式不支持"**，不是"静默发空请求" | **已复核**：~~原来写的"等于发一个没有 body 的请求 / 静默发出空请求"**是错的**~~ —— 我上一轮只看了 `userApi/web.js`，没看上游 `host.js` 的守卫。**本轮修正**。功能上仍与桌面有差距（桌面能发 multipart），要补齐需要 `platform/http/web.js` 支持原样 body（`FormData`/`Blob`/`URLSearchParams` 直传 + 不自动写 Content-Type，让 fetch 自己产生 boundary）—— 那是另一件事，**低优先** |
 
 #### 6.4.1 本轮已修：W1（自定义源的请求体编码）
@@ -740,6 +742,37 @@ web/Android 产物里拿到的是**同一个 Node 构建** ⇒ 带 File 传输�
 - **CI 的那段 pwsh 本身也验过**：把 `run` 脚本从 workflow 里**解析出来**（js-yaml），
   在三个临时工作目录里跑**同一份文本** —— 干净目录 exit 0、有 `AppData/Roaming` 的目录 exit 1
   并且发出正确的 annotation、缺 `dist-web` 时 exit 1。**改 CI 不能只靠读。**
+
+#### 6.4.5 本轮已修：W7（选择器把"真选择"当成取消）
+
+**缺陷**：`filePicker/web.js` 的 `focus` 回退路径原来是 `timer = setTimeout(finish, 300)` ——
+**一个固定延时之后查一次** `input.files`。老 WebView 不发 `cancel` 事件，靠这条路径判取消；
+但真机上 `focus` **早于** WebView 把文件填进 `input.files` 是常态，于是那一次查询看到空
+⇒ `finish()` 结算成 `{canceled: true, filePaths: []}` ⇒ **用户选的文件被静默丢掉**，
+表现就是"选完了没反应"。
+
+**为什么这不是"只有真机才有的怪事、可以先放着"**：这条路径在**首版范围内**被用到 ——
+自定义源导入（`UserApiModal`）、主题图导入、备份导入都走 `showSelectDialog`。
+
+**改法**：把"固定延时后查一次"换成**轮询**（`RETURNED_INTERVAL_MS = 150` × `RETURNED_ATTEMPTS = 8`
+≈ 1.2 s）：只要 `input.files` 出现就**立刻**按成功结算；只有整段窗口内都没有文件才判取消。
+`change` / `cancel` 两条快路径**完全不变**（它们仍然立刻结算，所以正常设备上感知不到差别）。
+另加 `polling` 标志，避免 `focus` 触发多次时起两条轮询链互相抢结算。
+
+**证据**：
+
+- `tests/unit/android-file-picker.test.cjs` 新增两条用例，用**假计时器**把轮询变成确定性步骤
+  （也避免用例真等 1.2 秒）：
+  1. `focus` 先到、文件后到 ⇒ 必须**继续等**，文件到了按"选到了"结算（这条就是缺陷本身）；
+  2. 文件一直不到 ⇒ 走完窗口后仍然判取消（**保证没有为了让 (1) 通过而把取消检测弄坏**）。
+- **变异**（仓库外副本）：把轮询换回 `timer = setTimeout(finish, 300)` ⇒ **fail 1**，
+  失败的正是 (1)，错误信息就是那句"文件还没到 ⇒ 必须继续等"。
+- ⚠️ 写这两条用例时踩了两个**本机专用**的坑，记下来省下一次：
+  1. `assert.deepEqual` 在 `node:assert/strict` 下是 `deepStrictEqual`，而返回值来自 **vm 里另一个 realm**
+     ⇒ 原型不同、报 "same structure but are not reference-equal"。本文件既有用例用的是
+     `JSON.stringify` 比较，**跟着它写**；
+  2. 变异工装**第五次**因为少拷文件报了 `fail 2`（这次缺的是 `load-capacitor.cjs`）。
+     已把工装改成"**把 `tests/unit` 下所有非 `*.test.cjs` 的辅助文件都拷过去**"，不再逐个列举。
 
 **对 6.4 这一轮审查确认"没问题"的部分**（省下一次重查）：
 
@@ -940,17 +973,20 @@ npx.cmd cap sync android                                               # Capacit
 4. **剩余验收仍然是设备侧**：设备端搜索/播放/下载/重启恢复、系统文件选择（SAF）、
    HTTP/CORS/请求头/明文流量、`convertFileSrc()` 映射、后台保活。
    ~~SQLite 路径与版本一致性~~ **已关闭**（§8，被 3 组守卫用例钉住）。
-5. **累计修掉 12 处、拍板 1 处、更正 3 处**：§6.2 的下载执行层 7 处（含那处 high，本轮补上有界重试）
-   + §6.4 的 W1、W2、W8（W8 是"真机上应用自己的日志一条都不留"）+ §6.3 的 L6、L1。
-   每一处都配了断言与**变异验证**（下载 8 个、W1 两个、W2 两个、L6 一个、L1 一个、W8 两个，
-   逐个被**为它写的**断言捕获）。**W8 还额外加了 CI 的产物级守卫**（web 产物出现 Node 日志构建即失败）。
+5. **累计修掉 14 处、拍板 1 处、更正 3 处**：§6.2 的下载执行层 7 处（含那处 high）
+   + §6.4 的 W1、W2、W7、W8、W9（W8 是"真机上应用自己的日志一条都不留"、W7 是"选完没反应"）
+   + §6.3 的 L6、L1。每一处都配了断言与**变异验证**；**W8 还额外加了 CI 的产物级守卫**。
    **本机门禁：lint 0 errors、四个 tsc exit 0、单测全过；每个代码提交的 CI 都是 success。**
    **下一轮的第一优先**是：
-   - **§6.2 第 4 处**（部分文件何时回收）与 **§6.3 L2**（保留 id 的拒绝）—— **都需要先拍板**；
-   - **§6.4 的 W4**（本地音乐把会话级 `blob:` URL 当身份持久化 ⇒ 重载后不可播）——
-     首版范围内唯一还没动过的 medium；
+   - **W4**（本地音乐把会话级 `blob:` URL 当身份持久化 ⇒ 重载后那些歌永远播不了）——
+     首版范围内**最后一个**没动过的 medium。⚠️ 但它**需要一个范围决定**：
+     正确的修法是"把选中的文件拷进应用私有存储"，而本地音乐**不在首版范围内**
+     （`continuation-2026-10-15.md` 已写明"本地音乐文件的跨重启授权尚未实现"）。
+     所以要么按"修缺陷"做（要我实现持久化副本，工作量按功能算），要么**明确接受"本地音乐仅本会话"**
+     并把它写进 `acceptance.md` 的已知不支持（那一行**已经**在了）。
+   - **§6.2 第 4 处**（部分文件何时回收）与 **§6.3 L2**（保留 id 的拒绝）—— 同样**需要先拍板**；
    - 之后是 §6.1 的**主题 7 条通道**（唯一"未处理 rejection + 功能静默为空"的一块，
-     也是用户点过名的方向；属于首版范围之外，但要做就得成体系地做）；
+     也是用户点过名的方向；属首版范围之外，但要做就得成体系地做）；
    - **W3 不是 Android 侧缺陷**（两侧共有），不要按"Android 偏差"去改。
 
 **APK 能编出来与首版功能可用是两项不同的验收，当前不能把后者标为完成。**

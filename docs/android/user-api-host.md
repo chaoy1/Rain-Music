@@ -20,7 +20,7 @@
 | `request_user_api` | 接收 `{requestKey,data:{source,action,info}}`，按脚本声明能力验证并返回桌面结果信封 |
 | `request_user_api_cancel` | send 与 invoke 都有效，拒绝对应请求；晚到结果不能使其重新完成 |
 | `user_api_set_allow_update_alert` | `{id,enable}`；写入成功后才改变运行中权限 |
-| `user_api_status`（事件） | `initing`、成功、脚本错误、Worker 错误、初始化超时、移除活动源均可观察 |
+| `user_api_status`（事件） | 成功、脚本错误、Worker 错误、初始化超时、移除活动源都会广播。**⚠️ 不含 `initing`** —— `setApi()` 只把 `initing` 写进本地 `status`（`host.js:220`）而**刻意不 `publish()`**：渲染层的状态处理把 `false` 当**终态失败**并永久结算播放就绪闸门，广播它会让一个正在初始化的源被提前判死。要看这个中间态请用 **`get_user_api_status`**（它返回本地 `status`）。另：移除活动源那条**不带 `apiInfo`**（源已经没了），所以渲染层那个要求 `apiInfo.id` 匹配的处理器会忽略它 —— 这是有意的 |
 | `user_api_show_update_alert`（事件） | 仅活动源被允许时广播；HTTP(S) 之外的更新链接被剔除 |
 
 事件仍以 `{event,params}` 传递；on / once / off / offAll 沿用桥的监听表。本地事件订阅不依赖原生插件已就绪。

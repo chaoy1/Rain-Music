@@ -27,6 +27,46 @@ test('Android file chooser cancellation and open failure settle without a native
   assert.equal(JSON.stringify(await result), JSON.stringify({ canceled: true, filePaths: [] }))
   await assert.rejects(a.mod.showSelectDialog({ properties: ['openDirectory'] }), /directory/i)
 })
+// `focus` 回退路径要能**手工推进**：真机上"focus 早于 WebView 填 input.files"是常态，
+// 所以这里注入假计时器，把轮询变成确定性的步骤（也避免用例真等 1.2 秒）。
+function setupWithFocus() {
+  const handlers = new Map()
+  const timers = []
+  let input
+  const document = { body: { append: element => { input = element } }, createElement: () => ({ style: {}, files: [], addEventListener: (name, cb) => handlers.set(name, cb), remove() { this.removed = true }, click() { this.clicked = true } }) }
+  const window = { addEventListener: (name, cb) => handlers.set(`window:${name}`, cb), removeEventListener: () => {} }
+  const mod = load('src/common/platform/filePicker/web.js', { '../selectedFiles.js': { rememberSelectedFile: file => `blob:${file.name}` } }, {
+    document,
+    window,
+    setTimeout: callback => { timers.push(callback); return timers.length },
+    clearTimeout: () => {},
+  })
+  return { mod, handlers, timers, get input() { return input } }
+}
+test('Android picker: focus arriving before the WebView fills input.files must not be reported as a cancellation', async() => {
+  const a = setupWithFocus()
+  const result = a.mod.showSelectDialog({})
+  // 选择器关掉了（focus 回来了），但**文件还没被填进 input.files** —— 真机上 focus 早于 change。
+  a.handlers.get('window:focus')()
+  assert.equal(a.timers.length, 1, '没有文件时应该安排下一次轮询，而不是立刻结算')
+  a.timers.shift()()
+  assert.equal(a.timers.length, 1, '文件还没到 ⇒ 必须继续等（"固定延时查一次"的老实现会在这里判取消、把用户选的文件静默丢掉）')
+  // WebView 补齐文件之后，下一次轮询必须按"选到了"结算。
+  a.input.files = [{ name: 'a.js' }]
+  a.timers.shift()()
+  // 断言用 JSON 比较：返回值来自 vm 里另一个 realm，`deepStrictEqual` 会因为原型不同而失败
+  // （本文件其它用例也是这个写法）。
+  assert.equal(JSON.stringify(await result), JSON.stringify({ canceled: false, filePaths: ['blob:a.js'] }))
+})
+test('Android picker: the focus fallback still reports cancellation once the polling window is exhausted', async() => {
+  const a = setupWithFocus()
+  const result = a.mod.showSelectDialog({})
+  a.handlers.get('window:focus')()
+  // 文件一直不出现 ⇒ 走完整个窗口后判取消。老 WebView 不发 cancel 事件，靠的就是这条路径。
+  let guard = 0
+  while (a.timers.length && guard++ < 20) a.timers.shift()()
+  assert.equal(JSON.stringify(await result), JSON.stringify({ canceled: true, filePaths: [] }))
+})
 test('Android picked file byte reads bypass patched HTTP fetch and preserve source text', async() => {
   const released = []
   const registry = load('src/common/platform/selectedFiles.js', {}, { URL: { createObjectURL: () => 'blob:source', revokeObjectURL: path => released.push(path) } })
