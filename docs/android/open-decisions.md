@@ -1,4 +1,4 @@
-# Rain Music Android · **需要拍板的 5 件事**（2026-10-16）
+# Rain Music Android · **需要拍板的 6 件事**（2026-10-16）
 
 ## 这份文档为什么存在
 
@@ -12,7 +12,7 @@
 | 9 个 UI 套件矩阵 | 全 success |
 | 真机 APK（`debug-apk`） | success，产物 `rain-music-android-debug` |
 
-下面 5 条**不是"还没做"，而是"需要你选一条路"**。每条都给出：现状与证据（`file:line`）、
+下面 6 条**不是"还没做"，而是"需要你选一条路"**。每条都给出：现状与证据（`file:line`）、
 可选方案与代价、我的建议、以及"怎么算做完了"。**在你拍板之前，我不会动其中任何一条** ——
 它们要么改变用户可见行为，要么只能在真机验证。
 
@@ -141,6 +141,40 @@ deleting/recreating the record can safely resume."（**刻意**保留；只有**
 保留/重复 id 的拒绝点与"不写一行"的保证、`default` 会按 `id` + `key()` **去重**后才落库、
 `tempList` 缺省时保留库里现有 `temp` 歌曲、整个覆盖是一个事务）。
 **代码行为一个字没改** —— 剩下的只是你确认"维持拒绝"。
+
+---
+
+## 6. 主题：7 条通道未注册 ⇒ 打开主题设置会留**未处理 rejection** + 主题列表为空
+
+> ⚠️ 这一条是 2026-10-16 补记的：写前 5 条时**漏掉了它**，而 handoff §6.1 恰恰称它是
+> **唯一一处**"未处理 rejection + 功能静默为空"。补在这里，让这份清单真的是完整的一份。
+
+**现状与证据**（本轮逐条自己核过，不是照抄）：
+
+- 原生侧完全没有注册这 7 条：`winMain_get_themes`、`winMain_save_theme`、`winMain_remove_theme`、
+  `winMain_theme_file_import` / `_copy` / `_move` / `_remove`；
+- 调用链：`SettingBasic.vue:86`、`ThemeSelectorModal.vue:65`、`ThemeEditModal/index.vue:357`
+  都会走到 `store/utils.ts:33` 的 `getThemes()` → `utils/ipc.ts:469-471` 的
+  `rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.get_themes)` ⇒ 通道 **`winMain_get_themes`**；
+- `store/utils.ts:38` 是 `void getTheme().then(info => {…})`，**没有 `.catch`** ⇒
+  未注册通道 reject 变成**未处理 rejection**，而 `themeInfo.themes` 一直是空的
+  ⇒ **主题列表为空、切换主题无效**；
+- 主题**图片**的导入/复制/移动/删除会拿到 `IPC_CHANNEL_UNSUPPORTED`。
+
+**方案**
+
+| 方案 | 代价 |
+|---|---|
+| **(a) 补这 7 条原生通道** | 主题是**用户点过名**的方向；工作量按**功能**算（图片导入要落到应用私有目录，`imageUrlBase` 那套已经在 `main/utils/themeImages.ts` 就位） |
+| (b) 渲染层按既有 `ipcFallback` 体例**显式降级** | 小改动；但 Android 上主题功能**仍然不可用**，只是不再留未处理 rejection —— 需要在 `acceptance.md` 的"已知不支持"里写明 |
+
+**我的建议**：先 (b) **止血**（它是目前唯一一处"未处理 rejection + 功能静默为空"，
+而"静默"正是本项目一直在清的那类问题），把 (a) 作为一条独立功能线排期。
+⚠️ (b) 也**会动共享渲染层**（`store/utils.ts` 桌面是同一份）—— 必须走 `ipcFallback` 那套
+"**只在 web 侧生效**"的适配器，桌面行为一个字都不能变（§6.4 W3 的教训）。
+
+**怎么算做完**：选 (b) ⇒ 打开主题设置页**不产生未处理 rejection**，并且界面上明确说明
+"Android 暂不支持主题"；选 (a) ⇒ 主题列表、切换、图片导入在真机上真的可用。
 
 ---
 
